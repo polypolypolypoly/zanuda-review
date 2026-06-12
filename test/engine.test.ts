@@ -13,16 +13,18 @@ const baseConfig: Config = {
 };
 
 test("parseReviewResult: plain JSON", () => {
-  const r = parseReviewResult('{"summary":"ok","comments":[]}');
+  const r = parseReviewResult('{"summary":"ok","filesSummary":[],"comments":[]}');
   assert.equal(r.summary, "ok");
   assert.equal(r.comments.length, 0);
+  assert.equal(r.filesSummary.length, 0);
 });
 
 test("parseReviewResult: fenced JSON with prose", () => {
-  const text = 'Here you go:\n```json\n{"summary":"s","comments":[{"path":"a.ts","line":3,"severity":"warning","body":"x"}]}\n```';
+  const text = 'Here you go:\n```json\n{"summary":"s","filesSummary":[{"path":"a.ts","description":"updated logic"}],"comments":[{"path":"a.ts","line":3,"severity":"warning","body":"x"}]}\n```';
   const r = parseReviewResult(text);
   assert.equal(r.comments[0]?.path, "a.ts");
   assert.equal(r.comments[0]?.severity, "warning");
+  assert.equal(r.filesSummary[0]?.description, "updated logic");
 });
 
 test("parseReviewResult: throws on garbage", () => {

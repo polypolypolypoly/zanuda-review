@@ -21,7 +21,7 @@ export async function postReview(
   result: ReviewResult,
   config: Config,
 ): Promise<void> {
-  const header = `### 🤖 review-helper\n\n${result.summary}`;
+  const header = buildHeader(result);
 
   if (!config.review.inlineComments || result.comments.length === 0) {
     await octokit.pulls.createReview({
@@ -63,11 +63,31 @@ export async function postReview(
   }
 }
 
+function buildHeader(result: ReviewResult): string {
+  const parts: string[] = [
+    `## Pull request overview`,
+    ``,
+    result.summary,
+  ];
+
+  if (result.filesSummary.length > 0) {
+    parts.push(
+      ``,
+      `### Changed files`,
+      `| File | Description |`,
+      `| --- | --- |`,
+      ...result.filesSummary.map((f) => `| ${f.path} | ${f.description} |`),
+    );
+  }
+
+  return parts.join("\n");
+}
+
 function renderSummaryBody(header: string, result: ReviewResult): string {
   if (result.comments.length === 0) return header;
   const lines = result.comments.map(
     (c) =>
       `- ${SEVERITY_EMOJI[c.severity] ?? ""} \`${c.path}:${c.line}\` — ${c.body}`,
   );
-  return `${header}\n\n${lines.join("\n")}`;
+  return `${header}\n\n### Comments\n\n${lines.join("\n")}`;
 }

@@ -15,10 +15,18 @@ export const ReviewCommentSchema = z.object({
   body: z.string().describe("The comment text, in markdown."),
 });
 
+export const FileSummarySchema = z.object({
+  path: z.string().describe("Repo-relative file path."),
+  description: z.string().describe("One-line description of what changed in this file."),
+});
+
 export const ReviewResultSchema = z.object({
   summary: z.string().describe("Overall assessment, 1-4 sentences."),
+  filesSummary: z.array(FileSummarySchema).describe("One entry per changed file."),
   comments: z.array(ReviewCommentSchema),
 });
+
+export type FileSummary = z.infer<typeof FileSummarySchema>;
 
 export type ReviewComment = z.infer<typeof ReviewCommentSchema>;
 export type ReviewResult = z.infer<typeof ReviewResultSchema>;

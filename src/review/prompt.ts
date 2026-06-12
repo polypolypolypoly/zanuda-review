@@ -7,6 +7,12 @@ const OUTPUT_INSTRUCTIONS = `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
   "summary": "string — overall assessment, 1-4 sentences",
+  "filesSummary": [
+    {
+      "path": "repo-relative file path",
+      "description": "one-line description of what changed in this file"
+    }
+  ],
   "comments": [
     {
       "path": "repo-relative file path",
@@ -16,6 +22,7 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
     }
   ]
 }
+Include one entry in filesSummary for every changed file.
 Only comment on lines that appear in the diff. If there is nothing to flag,
 return an empty "comments" array and say so in the summary.`;
 

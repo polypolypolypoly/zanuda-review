@@ -1,22 +1,19 @@
 import "dotenv/config";
 import { loadConfig } from "./config.js";
+import { createOctokit } from "./github/client.js";
 import { logger } from "./logger.js";
-import { startServer } from "./server.js";
+import { startPoller } from "./poller.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-
-  const secret = requireEnv("GITHUB_WEBHOOK_SECRET");
   const botLogin = requireEnv("GITHUB_BOT_LOGIN");
   requireEnv("GITHUB_TOKEN");
 
-  await startServer({
-    config,
-    secret,
-    botLogin,
-    port: Number(process.env.PORT ?? 3000),
-    host: process.env.HOST ?? "0.0.0.0",
-  });
+  const intervalMs = process.env.POLL_INTERVAL_SECS
+    ? Number(process.env.POLL_INTERVAL_SECS) * 1000
+    : undefined; // falls back to 60s default in poller
+
+  await startPoller({ config, botLogin, octokit: createOctokit(), intervalMs });
 }
 
 function requireEnv(name: string): string {
