@@ -22,7 +22,7 @@ models:
 # Generation parameters passed to every provider.
 generation:
   temperature: 0.2
-  maxTokens: 4096
+  maxTokens: 8192
 
 # ─── Preprompt ───────────────────────────────────────────────────────
 # The system instruction prepended to every review. Repos can append to

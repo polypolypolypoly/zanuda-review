@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mergeRepoConfig, type Config } from "../src/config.ts";
-import { parseReviewResult } from "../src/review/engine.ts";
+import { parseReviewResult, extractJson } from "../src/review/engine.ts";
 
 const baseConfig: Config = {
   provider: "anthropic",
@@ -25,6 +25,31 @@ test("parseReviewResult: fenced JSON with prose", () => {
   assert.equal(r.comments[0]?.path, "a.ts");
   assert.equal(r.comments[0]?.severity, "warning");
   assert.equal(r.filesSummary[0]?.description, "updated logic");
+});
+
+test("parseReviewResult: code block inside comment body does not confuse extractor", () => {
+  // The model embedded a ```python fence inside a JSON string value (escaped
+  // as \n in the JSON, as Claude actually outputs it). The old regex matched
+  // the *inner* fence and returned raw code; the brace heuristic is immune.
+  const json = '{"summary":"ok","filesSummary":[],"comments":[{"path":"a.py","line":1,"severity":"nitpick","body":"Consider:\\n```python\\nif x:\\n    pass\\n```"}]}';
+  const r = parseReviewResult(json);
+  assert.equal(r.comments[0]?.path, "a.py");
+});
+
+test("parseReviewResult: JSON wrapped in code fence with nested snippet", () => {
+  const body = "Use `sorted()` instead.";
+  const json = `{"summary":"fine","filesSummary":[{"path":"f.py","description":"d"}],"comments":[{"path":"f.py","line":5,"severity":"warning","body":"${body}"}]}`;
+  const text = `Here is my review:\n\`\`\`json\n${json}\n\`\`\``;
+  const r = parseReviewResult(text);
+  assert.equal(r.comments[0]?.severity, "warning");
+});
+
+test("extractJson: returns first { to last } regardless of surrounding text", () => {
+  assert.equal(extractJson("prefix {\"a\":1} suffix"), '{"a":1}');
+});
+
+test("extractJson: throws when no braces present", () => {
+  assert.throws(() => extractJson("no braces here"));
 });
 
 test("parseReviewResult: throws on garbage", () => {

@@ -65,9 +65,17 @@ export function parseReviewResult(text: string): ReviewResult {
   return ReviewResultSchema.parse(JSON.parse(json));
 }
 
-function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fenced?.[1]) return fenced[1].trim();
+/**
+ * Extract the JSON object from the model's response.
+ *
+ * We use a first-brace / last-brace heuristic rather than a code-fence regex
+ * because the regex approach is fragile: a non-greedy ``` match fires on the
+ * *first* closing fence, which may be inside a JSON string value when the
+ * model embeds a code snippet in a comment body (e.g. ```python\n...\n```).
+ * The brace heuristic is immune to that and handles both bare JSON and
+ * JSON wrapped in a ``` block.
+ */
+export function extractJson(text: string): string {
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start !== -1 && end > start) return text.slice(start, end + 1);
