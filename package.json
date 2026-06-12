@@ -1,0 +1,38 @@
+{
+  "name": "review-helper",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Model-agnostic AI code review bot for GitHub. Request a review from the bot account on a PR and it posts review comments.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "review-helper": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "review": "tsx src/cli.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx ./test/*.test.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@octokit/rest": "^22.0.0",
+    "@octokit/webhooks": "^14.0.0",
+    "dotenv": "^17.0.0",
+    "fastify": "^5.2.0",
+    "openai": "^6.0.0",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0",
+    "yaml": "^2.7.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

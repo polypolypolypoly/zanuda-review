@@ -1,0 +1,76 @@
+# ─────────────────────────────────────────────────────────────────────
+# review-helper default configuration.
+#
+# This is the GLOBAL config. Any repository can override most of these
+# values by committing a `.review-helper.yml` file to its default branch
+# (see `repoConfig` in src/context/repoConfig.ts). Per-repo values are
+# shallow-merged over these defaults.
+# ─────────────────────────────────────────────────────────────────────
+
+# Which model-agnostic provider to use. Overridable via LLM_PROVIDER env.
+#   anthropic | openai | openrouter | ollama
+provider: anthropic
+
+# Per-provider model id. The active provider's entry is used unless the
+# LLM_MODEL env var is set.
+models:
+  anthropic: claude-opus-4-8
+  openai: gpt-4o
+  openrouter: anthropic/claude-opus-4-8
+  ollama: qwen2.5:3b
+
+# Generation parameters passed to every provider.
+generation:
+  temperature: 0.2
+  maxTokens: 4096
+
+# ─── Preprompt ───────────────────────────────────────────────────────
+# The system instruction prepended to every review. Repos can append to
+# or replace this via `.review-helper.yml`.
+preprompt: |
+  You are a meticulous senior software engineer performing a code review on
+  a GitHub pull request. Review for correctness, security, reliability,
+  readability, and adherence to the project's conventions.
+
+  Guidelines:
+  - Prioritise real bugs, security issues, and data-loss risks over style.
+  - Be specific: reference the exact file and line, and suggest a concrete fix.
+  - Do not invent issues. If the diff looks good, say so plainly.
+  - Respect the project context and conventions provided below.
+  - Keep each comment focused on a single issue.
+
+# ─── Context building ────────────────────────────────────────────────
+# Controls what repository context is gathered and fed to the model
+# alongside the diff. Applied to every project the bot is added to.
+context:
+  # Files to always pull (if present) to ground the review in project
+  # conventions. Globs are resolved against the repo root.
+  includeFiles:
+    - README.md
+    - CONTRIBUTING.md
+    - CONVENTIONS.md
+    - CLAUDE.md
+    - .editorconfig
+    - package.json
+    - pyproject.toml
+    - go.mod
+    - Cargo.toml
+  # Max characters of context to include from the files above (truncated).
+  maxFileChars: 20000
+  # Include the repository file tree (paths only) for structural awareness.
+  includeFileTree: true
+  maxTreeEntries: 400
+
+# ─── Review behaviour ────────────────────────────────────────────────
+review:
+  # Largest diff (in characters) to send to the model. Larger PRs are
+  # truncated with a notice.
+  maxDiffChars: 60000
+  # Post inline comments anchored to specific lines (true) or a single
+  # summary comment (false).
+  inlineComments: true
+  # Overall review event posted with the comments:
+  #   COMMENT  -> non-blocking comments
+  #   REQUEST_CHANGES / APPROVE are intentionally NOT auto-used; the bot
+  #   always posts COMMENT so a human stays in the loop.
+  event: COMMENT
