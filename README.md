@@ -81,6 +81,58 @@ Set `LLM_PROVIDER` and the matching key in `.env`, or per-repo in
 | `openrouter` | `OPENROUTER_API_KEY` | Any model routed via OpenRouter        |
 | `ollama`     | (none)               | Local models; `OLLAMA_BASE_URL`        |
 
+## Deployment (homeserver)
+
+The bot is a long-running webhook server. Two ways to run it; pick one.
+
+### Option A — systemd (recommended on `homeserver`)
+
+```bash
+npm ci && npm run build
+sudo cp deploy/review-helper.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now review-helper
+journalctl -u review-helper -f          # logs
+```
+
+The unit runs `node dist/index.js` from the project dir; secrets are read
+from `.env` (via dotenv). Listens on `PORT` (default 3000).
+
+### Option B — Docker
+
+```bash
+docker build -t review-helper .
+docker run -d --name review-helper --env-file .env -p 3000:3000 review-helper
+```
+
+### Exposing the webhook to GitHub
+
+GitHub delivers webhooks from the public internet, but `homeserver` is behind
+Tailscale. Expose just the webhook port publicly with **Tailscale Funnel**:
+
+```bash
+sudo tailscale funnel 3000
+```
+
+This gives a public `https://homeserver.<tailnet>.ts.net/` URL. Use
+`https://homeserver.<tailnet>.ts.net/webhook` as the Payload URL when
+configuring each repo's webhook (see Setup, step 5).
+
+### Per-repo wiring
+
+For every repo the bot reviews:
+
+1. Add `ZlayaZanuda` as a collaborator (Read is enough — it can post
+   `COMMENT` reviews without write access).
+2. Add a webhook → Payload URL `…/webhook`, content type `application/json`,
+   secret = `GITHUB_WEBHOOK_SECRET`, event **Pull requests**.
+3. On a PR, **request a review from the bot**.
+
+> Note: for repos owned by a *different personal account*, the bot's
+> `GITHUB_TOKEN` must be a **classic** PAT (`ghp_…`) with `repo` scope —
+> fine-grained tokens can't reach another account's repos even as a
+> collaborator.
+
 ## Project layout
 
 ```

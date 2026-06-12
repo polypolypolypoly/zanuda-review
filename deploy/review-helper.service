@@ -1,0 +1,20 @@
+[Unit]
+Description=review-helper — AI code review bot webhook server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=amogus
+WorkingDirectory=/mnt/data/projects/review-helper
+# Secrets + config live in .env (loaded by dotenv via WorkingDirectory).
+ExecStart=/usr/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+# Pino logs to stdout; journald captures them.
+StandardOutput=journal
+StandardError=journal
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target
