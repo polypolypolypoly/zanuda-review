@@ -53,9 +53,23 @@ export async function reviewPullRequest(
   let startingCommentId: number | null = opts.progressCommentId ?? null;
   if (!opts.dryRun) {
     if (startingCommentId !== null) {
-      await connector
+      // Try to update the round-1 comment. If it was deleted, fall back to posting
+      // a new one so the verdict isn't lost.
+      const edited = await connector
         .editComment(ref, startingCommentId, "_Starting round 2 review\u2026_")
-        .catch((err) => log.warn({ err }, "Failed to update progress comment"));
+        .then(() => true)
+        .catch((err) => {
+          log.warn({ err }, "Failed to update progress comment, will post new");
+          return false;
+        });
+      if (!edited) {
+        startingCommentId = await connector
+          .postComment(ref, number, "_Starting round 2 review\u2026_")
+          .catch((err) => {
+            log.warn({ err }, "Failed to post fallback progress comment");
+            return null;
+          });
+      }
     } else {
       startingCommentId = await connector
         .postComment(ref, number, "_Starting review\u2026_")

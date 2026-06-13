@@ -164,12 +164,8 @@ export class LocalConnector implements SCMConnector {
     // No-op — no discussion in local mode.
   }
 
-  async resolveReviewThreads(
-    _ref: RepoRef,
-    _number: number,
-    _botLogin: string,
-  ): Promise<void> {
-    // No-op — no remote threads in local mode.
+  async resolveReviewThreads(): Promise<void> {
+    // No-op — local mode has no remote threads.
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────

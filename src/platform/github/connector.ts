@@ -152,6 +152,9 @@ export class GitHubConnector implements SCMConnector {
     botLogin: string,
   ): Promise<void> {
     // Fetch all unresolved threads where the bot authored the first comment.
+    // Note: first:100 is not paginated — PRs with >100 threads won't fully resolve.
+    // This is acceptable for now; such PRs are rare and partial resolution is
+    // better than none.
     const result = await this.octokit.graphql<{
       repository: {
         pullRequest: {

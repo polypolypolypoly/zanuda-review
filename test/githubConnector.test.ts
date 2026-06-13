@@ -64,3 +64,91 @@ describe("GitHubConnector.pollPendingReviews", () => {
     ]);
   });
 });
+
+describe("GitHubConnector.resolveReviewThreads", () => {
+  it("resolves only unresolved bot-authored threads", async () => {
+    const mutationCalls: string[] = [];
+    const octokit = {
+      graphql: async (query: string, vars: Record<string, unknown>) => {
+        if (query.includes("mutation")) {
+          mutationCalls.push(vars.id as string);
+          return { thread: { isResolved: true } };
+        }
+        // Query response
+        return {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [
+                  {
+                    id: "thread-1",
+                    isResolved: false,
+                    comments: { nodes: [{ author: { login: "zanuda-bot" } }] },
+                  },
+                  {
+                    id: "thread-2",
+                    isResolved: true, // already resolved
+                    comments: { nodes: [{ author: { login: "zanuda-bot" } }] },
+                  },
+                  {
+                    id: "thread-3",
+                    isResolved: false,
+                    comments: { nodes: [{ author: { login: "human" } }] }, // not bot
+                  },
+                  {
+                    id: "thread-4",
+                    isResolved: false,
+                    comments: { nodes: [{ author: { login: "Zanuda-Bot" } }] }, // case varies
+                  },
+                ],
+              },
+            },
+          },
+        };
+      },
+    } as unknown as Octokit;
+
+    await new GitHubConnector(octokit).resolveReviewThreads(
+      { owner: "polypolypolypoly", repo: "zanuda-review" },
+      13,
+      "zanuda-bot",
+    );
+
+    // Should resolve thread-1 and thread-4 (case-insensitive match)
+    assert.deepEqual(mutationCalls.sort(), ["thread-1", "thread-4"]);
+  });
+
+  it("does not throw if mutation fails", async () => {
+    const octokit = {
+      graphql: async (query: string) => {
+        if (query.includes("mutation")) {
+          throw new Error("GraphQL mutation failed");
+        }
+        return {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [
+                  {
+                    id: "thread-1",
+                    isResolved: false,
+                    comments: { nodes: [{ author: { login: "zanuda-bot" } }] },
+                  },
+                ],
+              },
+            },
+          },
+        };
+      },
+    } as unknown as Octokit;
+
+    // Should not throw
+    await assert.doesNotReject(
+      new GitHubConnector(octokit).resolveReviewThreads(
+        { owner: "polypolypolypoly", repo: "zanuda-review" },
+        13,
+        "zanuda-bot",
+      ),
+    );
+  });
+});
