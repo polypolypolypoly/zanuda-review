@@ -50,10 +50,12 @@ export function buildReviewCommentBody(
   totalFiles: number,
   opts: { diffTruncated?: boolean } = {},
 ): string {
-  const ACTION_ICON: Record<string, string> = {
-    APPROVE: "✅",
-    REQUEST_CHANGES: "🛑",
-    COMMENT: "💬",
+  // Verdicts are recommendations to humans — not GitHub review actions.
+  // Language reflects that Zanuda is advising, not deciding.
+  const VERDICT_DISPLAY: Record<string, { icon: string; label: string }> = {
+    APPROVE: { icon: "✅", label: "recommend merging" },
+    REQUEST_CHANGES: { icon: "🛑", label: "address issues" },
+    COMMENT: { icon: "💬", label: "observations" },
   };
 
   const reviewed = result.filesSummary.length;
@@ -62,8 +64,10 @@ export function buildReviewCommentBody(
       ? `Checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
       : `Checked ${reviewed} of ${totalFiles} files`;
   const inlineCount = result.comments.length;
-  const icon = ACTION_ICON[result.action] ?? "💬";
-  const label = result.action.replace("_", " ").toLowerCase();
+  const { icon, label } = VERDICT_DISPLAY[result.action] ?? {
+    icon: "💬",
+    label: "observations",
+  };
 
   const truncationNote = opts.diffTruncated
     ? " · ⚠️ diff truncated (PR too large — review may be incomplete)"

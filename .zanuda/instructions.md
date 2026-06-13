@@ -45,10 +45,12 @@ context files.
   On restart, in-flight reviews are retried from scratch — that is correct
   behaviour, not a bug.
 
-- **Round 2 must never post `REQUEST_CHANGES`.** The engine coerces
-  `REQUEST_CHANGES → COMMENT` on round 2 because Zanuda won't do a round 3,
-  and `REQUEST_CHANGES` would block the PR permanently. Any change that removes
-  or bypasses this coercion is a blocker.
+- **The GitHub review event is always `COMMENT`.** Zanuda never posts an
+  APPROVE or REQUEST_CHANGES review event to GitHub — she never blocks or
+  unblocks merges. Her verdict (APPROVE / REQUEST_CHANGES / COMMENT in the
+  JSON output) is a recommendation expressed in the summary comment only.
+  Any change that makes `postReview` use `result.action` as the GitHub event
+  is a blocker.
 
 - **`MAX_REVIEW_ROUNDS = 2` and `MAX_MENTION_REPLIES = 5` are intentional.**
   Do not flag them as magic numbers that need extracting — they are deliberate

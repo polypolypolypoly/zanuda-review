@@ -15,7 +15,7 @@ function outputInstructions(forAllFiles: boolean): string {
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
   "summary": "string — overall assessment, 1-4 sentences",
-  "action": "APPROVE|REQUEST_CHANGES|COMMENT",
+  "action": "APPROVE|REQUEST_CHANGES|COMMENT",   // your recommendation to human reviewers
   "filesSummary": [
     {
       "path": "repo-relative file path",
@@ -32,10 +32,10 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
   ]
 }
 
-action rules:
-  APPROVE          — no blockers, no warnings; the code is solid and safe to merge.
-  REQUEST_CHANGES  — one or more blocker-severity issues; must not merge as-is.
-  COMMENT          — warnings or observations only; author can decide whether to act.
+action rules (your recommendation to human reviewers — you do not block or approve merges):
+  APPROVE          — no issues found; you recommend merging.
+  REQUEST_CHANGES  — blocker-severity issues found; you recommend addressing them first.
+  COMMENT          — warnings or observations only; author decides.
 
 ${filesSummaryInstruction}
 Only comment on lines that appear in the diff. If there is nothing to flag,
@@ -230,12 +230,11 @@ function finalTaskInstructions(
     `Examine the current diff and the discussion above. Assess whether the issues ` +
     `from round 1 have been adequately addressed. This is your last word on this PR.\n\n` +
     `Valid actions for round 2:\n` +
-    `  APPROVE — issues resolved; PR is safe to merge.\n` +
-    `  COMMENT — issues remain that were NOT adequately addressed. When using COMMENT,\n` +
-    `            your summary MUST explicitly state the PR is not ready to merge and\n` +
-    `            list what still needs fixing. Be specific and direct.\n\n` +
-    `Do NOT use REQUEST_CHANGES — this is the final round and you cannot follow up,\n` +
-    `so blocking the PR would leave it stuck permanently.\n` +
+    `  APPROVE          — issues resolved; you recommend merging.\n` +
+    `  REQUEST_CHANGES  — unresolved blockers remain; you recommend not merging yet.\n` +
+    `  COMMENT          — observations only or minor issues; author decides.\n\n` +
+    `When using REQUEST_CHANGES or COMMENT, your summary must clearly state what\n` +
+    `still needs fixing and why. Be specific and direct.\n` +
     (structured ? "" : outputInstructions(forAllFiles))
   );
 }

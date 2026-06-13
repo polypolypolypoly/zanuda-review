@@ -1,6 +1,6 @@
 # Zanuda the Reviewer
 
-An AI code reviewer that runs as its own GitHub account. Add her to a PR and she posts inline comments, approves, or requests changes — with a consistent voice, codebase memory, and security-first judgment.
+An AI code reviewer that runs as its own GitHub account. Add her to a PR and she posts inline comments and a clear recommendation — with a consistent voice, codebase memory, and security-first judgment. She never blocks or approves merges; that’s the humans’ call.
 
 ## How it works
 

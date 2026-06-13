@@ -13,7 +13,7 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
   → build prompt (preprompt + memory + context + diff)
   → LLM provider (Anthropic | OpenAI | OpenRouter | Ollama)
   → parse structured JSON result
-  → post review via SCMConnector (inline comments + event; progress comment updated)
+  → post review via SCMConnector (inline comments + COMMENT event; progress comment updated with recommendation)
   → (async) maybe update repo memory based on what the PR revealed
 ```
 

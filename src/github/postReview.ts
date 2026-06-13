@@ -39,7 +39,10 @@ export async function postReview(
     visibleFilePaths?: Set<string>;
   } = {},
 ): Promise<void> {
-  const event = config.review.event ?? result.action;
+  // Zanuda never blocks or approves via GitHub — the review event is always
+  // COMMENT so the PR pipeline is never affected. The verdict (APPROVE /
+  // REQUEST_CHANGES / COMMENT) is expressed verbally in the summary comment.
+  const event = "COMMENT" as const;
   const body = opts.summaryPostedElsewhere
     ? ""
     : buildReviewCommentBody(result, pr.changedFiles.length);
