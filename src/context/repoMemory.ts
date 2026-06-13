@@ -1,12 +1,19 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import {
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  existsSync,
+} from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
 import type { Config } from "../config.js";
-import type { SCMConnector, RepoRef } from "../platform/types.js";
+import type { RepoRef } from "../platform/types.js";
 import type { LLMProvider } from "../llm/types.js";
 import { logger } from "../logger.js";
-import { buildContext } from "./builder.js";
+import type { ProjectContext } from "./builder.js";
+import { completeWithRetry } from "../llm/retry.js";
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
@@ -43,7 +50,12 @@ export function saveRepoMemory(
   const dir = memoryDir(config);
   mkdirSync(dir, { recursive: true });
   const path = memoryPath(config, ref);
-  writeFileSync(path, content, "utf8");
+  // Atomic write: write to a sibling .tmp file then rename into place.
+  // renameSync is atomic on POSIX — a crash mid-write cannot corrupt the
+  // existing memory file (same pattern as PRStateStore).
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, content, "utf8");
+  renameSync(tmp, path);
   logger.info({ path }, "Repo memory saved");
 }
 
@@ -87,10 +99,14 @@ Rules:
  * Generate a fresh repo memory document from the repo's context files + file
  * tree. This is a one-time LLM call on first encounter of a repo.
  */
+/**
+ * Generate a fresh repo memory document from the already-built project context.
+ * Accepts the context directly so the caller (engine.ts) does not need to
+ * fetch it a second time — buildContext is called once per review, not twice.
+ */
 export async function generateRepoMemory(
-  connector: SCMConnector,
   ref: RepoRef,
-  gitRef: string,
+  context: ProjectContext,
   config: Config,
   provider: LLMProvider,
 ): Promise<string> {
@@ -112,15 +128,13 @@ export async function generateRepoMemory(
   log.info("Generating repo memory (first encounter)");
 
   const generation = (async () => {
-    const context = await buildContext(connector, ref, gitRef, config);
-
     const user = [
       `Repository: ${ref.owner}/${ref.repo}`,
       "",
       context.text,
     ].join("\n");
 
-    const completion = await provider.complete({
+    const completion = await completeWithRetry(provider, {
       system: GENERATE_SYSTEM,
       user,
       model: config.models[config.provider],
@@ -151,6 +165,13 @@ export async function generateRepoMemory(
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────
+
+/** Zod schema for the LLM's memory-update response. Module-level so it is
+ *  only constructed once rather than on every call to maybeUpdateRepoMemory. */
+const MemoryUpdateResponseSchema = z.object({
+  update: z.boolean(),
+  content: z.string().optional(),
+});
 
 const UPDATE_SYSTEM = `\
 You are maintaining a knowledge document for an AI code reviewer.
@@ -207,7 +228,7 @@ export async function maybeUpdateRepoMemory(
     diff.slice(0, 4000),
   ].join("\n");
 
-  const completion = await provider.complete({
+  const completion = await completeWithRetry(provider, {
     system: UPDATE_SYSTEM,
     user,
     model: config.models[config.provider],
@@ -215,19 +236,14 @@ export async function maybeUpdateRepoMemory(
     maxTokens: 2048,
   });
 
-  const UpdateResponseSchema = z.object({
-    update: z.boolean(),
-    content: z.string().optional(),
-  });
-
-  let parsed: z.infer<typeof UpdateResponseSchema>;
+  let parsed: z.infer<typeof MemoryUpdateResponseSchema>;
   try {
     // Strip optional code fence before parsing.
     const raw = completion.text
       .replace(/^```(?:json)?\n?/m, "")
       .replace(/\n?```$/m, "")
       .trim();
-    parsed = UpdateResponseSchema.parse(JSON.parse(raw));
+    parsed = MemoryUpdateResponseSchema.parse(JSON.parse(raw));
   } catch {
     log.warn(
       { text: completion.text.slice(0, 200) },

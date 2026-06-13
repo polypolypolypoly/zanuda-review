@@ -18,6 +18,7 @@ import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { ReviewResultSchema, type ReviewResult } from "./types.js";
+import { completeWithRetry } from "../llm/retry.js";
 
 export interface ReviewDeps {
   connector: SCMConnector;
@@ -157,13 +158,7 @@ export async function reviewPullRequest(
       repoMemory = loadRepoMemory(config, ref);
       if (!repoMemory) {
         try {
-          repoMemory = await generateRepoMemory(
-            connector,
-            ref,
-            pr.baseSha,
-            config,
-            provider,
-          );
+          repoMemory = await generateRepoMemory(ref, context, config, provider);
           saveRepoMemory(config, ref, repoMemory);
           log.info("Repo memory generated and saved");
         } catch (err) {
@@ -187,7 +182,7 @@ export async function reviewPullRequest(
       );
     }
 
-    const completion = await provider.complete({
+    const completion = await completeWithRetry(provider, {
       system: buildSystemPrompt(config),
       user: buildUserPrompt(pr, context, config, {
         round,

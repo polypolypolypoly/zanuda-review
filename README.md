@@ -77,7 +77,7 @@ docker build -t zanuda .
 docker run -d --restart unless-stopped --env-file .env \
   -e ZANUDA_CONFIG=/config.yaml \
   -v /path/to/your/config.yaml:/config.yaml:ro \
-  -v zanuda-data:/root/.zanuda \
+  -v zanuda-data:/home/zanuda/.zanuda \
   zanuda
 ```
 

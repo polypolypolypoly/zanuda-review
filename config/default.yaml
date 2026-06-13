@@ -111,14 +111,20 @@ persistence:
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
-# Empty list = accept all (open to everyone — use only in trusted setups).
+#
+# WARNING: an empty list means Zanuda will review PRs from ANY repo that
+# adds her as a collaborator. Always set this in your local config overlay
+# before exposing Zanuda to the internet.
+#
 # Entries:
 #   "octocat"         — any repo owned by octocat
 #   "octocat/hello"   — that specific repo only
 access:
-  # Empty = accept reviews from any repo (open to all).
-  # Add owner slugs or owner/repo to restrict access.
-  allowlist: []
+  allowlist:
+    # Add owner slugs or owner/repo slugs here.
+    # An empty list grants access to everyone — only safe in fully private setups.
+    # - your-org
+    # - your-org/specific-repo
 
 # ─── Rate limits ─────────────────────────────────────────────────────
 # Guards against abuse and accidental runaway LLM costs.
