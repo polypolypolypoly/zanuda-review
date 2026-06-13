@@ -1,6 +1,6 @@
 # Zanuda reviewer guidelines for zanuda-review
 
-This is the codebase for Zanuda herself. Be strict.
+This is Zanuda's own codebase. Be strict.
 
 ## Security — highest priority
 
@@ -19,7 +19,7 @@ User-controlled surfaces (must be XML-sandboxed in prompts):
 content from the base branch. If you see it sandboxed, that is a bug.
 
 **Config must always be read from `pr.baseSha` (base branch), never from the
-PR head SHA.** Reading config from the PR head lets PR authors influence the
+PR head SHA.** Reading config from the PR head lets PR authors influence
 Zanuda's behaviour. Flag any `getContent` call that uses `headSha` for config or
 context files.
 
@@ -46,8 +46,8 @@ context files.
   behaviour, not a bug.
 
 - **The GitHub review event is always `COMMENT`.** Zanuda never posts an
-  APPROVE or REQUEST_CHANGES review event to GitHub — she never blocks or
-  unblocks merges. Her verdict (APPROVE / REQUEST_CHANGES / COMMENT in the
+  APPROVE or REQUEST_CHANGES review event to GitHub — merges are never blocked
+  or unblocked. The verdict (APPROVE / REQUEST_CHANGES / COMMENT in the
   JSON output) is a recommendation expressed in the summary comment only.
   Any change that makes `postReview` use `result.action` as the GitHub event
   is a blocker.
