@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
+import { z } from "zod";
 import type { Config } from "../config.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import type { LLMProvider } from "../llm/types.js";
@@ -15,7 +16,10 @@ function memoryDir(config: Config): string {
 }
 
 function memoryPath(config: Config, ref: RepoRef): string {
-  return join(memoryDir(config), `${ref.owner}_${ref.repo}.md`);
+  // basename() strips any path separators from owner/repo, preventing a
+  // connector that returns untrusted values from escaping the memory directory.
+  const safe = `${basename(ref.owner)}_${basename(ref.repo)}.md`;
+  return join(memoryDir(config), safe);
 }
 
 export function loadRepoMemory(config: Config, ref: RepoRef): string | null {
@@ -45,9 +49,9 @@ export function saveRepoMemory(
 
 // ─── In-process generation lock ─────────────────────────────────────────────
 // Prevents two concurrent reviews of the same repo from both seeing no memory
-// file and both firing off a generation LLM call. The second one waits until
-// the first has written the file, then loads it instead of re-generating.
-const _generatingFor = new Set<string>();
+// file and both firing off a generation LLM call. Stores the in-flight Promise
+// so the second caller can await it directly rather than polling.
+const _generatingFor = new Map<string, Promise<string>>();
 
 // ─── Generation ───────────────────────────────────────────────────────────────
 
@@ -94,19 +98,20 @@ export async function generateRepoMemory(
   const log = logger.child({ repo: repoKey });
 
   // If another concurrent review of the same repo is already generating memory,
-  // wait for it to finish then return the file it wrote instead of re-generating.
-  if (_generatingFor.has(repoKey)) {
+  // await the in-flight Promise directly instead of polling a flag.
+  const inflight = _generatingFor.get(repoKey);
+  if (inflight) {
     log.info("Repo memory generation already in progress — waiting");
-    await waitUntil(() => !_generatingFor.has(repoKey));
-    const existing = loadRepoMemory(config, ref);
-    if (existing) return existing;
-    // If it still doesn't exist (the other call failed), fall through and try ourselves.
+    try {
+      return await inflight;
+    } catch {
+      // The first caller failed; fall through and try ourselves.
+    }
   }
 
-  _generatingFor.add(repoKey);
   log.info("Generating repo memory (first encounter)");
 
-  try {
+  const generation = (async () => {
     const context = await buildContext(connector, ref, gitRef, config);
 
     const user = [
@@ -131,9 +136,17 @@ export async function generateRepoMemory(
       "",
       completion.text.trim(),
     ].join("\n");
+  })();
+
+  // Register before awaiting so any concurrent caller picks it up immediately.
+  _generatingFor.set(repoKey, generation);
+  try {
+    return await generation;
   } finally {
-    // Always release the lock so waiting callers can proceed.
-    _generatingFor.delete(repoKey);
+    // Remove only if it's still our promise — a retry might have replaced it.
+    if (_generatingFor.get(repoKey) === generation) {
+      _generatingFor.delete(repoKey);
+    }
   }
 }
 
@@ -155,10 +168,11 @@ Do NOT update for:
   - Bugfixes that don't change how the project is structured
   - Anything already captured in the current memory
 
-Response format (choose exactly one):
-  - If an update is needed: respond with the complete updated memory document
-    in the same format (keep all sections, update the "Updated:" date line).
-  - If no update is needed: respond with exactly the word: NO_UPDATE`;
+Respond with a JSON object — nothing else, no markdown fences:
+  { "update": false }
+    — if no update is needed.
+  { "update": true, "content": "<complete updated memory document>" }
+    — if an update is needed. Keep all sections; update the "Updated:" date line.`;
 
 /**
  * After a review, ask the model whether the PR revealed anything worth
@@ -201,27 +215,39 @@ export async function maybeUpdateRepoMemory(
     maxTokens: 2048,
   });
 
-  const text = completion.text.trim();
-  if (text === "NO_UPDATE") {
+  const UpdateResponseSchema = z.object({
+    update: z.boolean(),
+    content: z.string().optional(),
+  });
+
+  let parsed: z.infer<typeof UpdateResponseSchema>;
+  try {
+    // Strip optional code fence before parsing.
+    const raw = completion.text
+      .replace(/^```(?:json)?\n?/m, "")
+      .replace(/\n?```$/m, "")
+      .trim();
+    parsed = UpdateResponseSchema.parse(JSON.parse(raw));
+  } catch {
+    log.warn(
+      { text: completion.text.slice(0, 200) },
+      "Repo memory update response was not valid JSON — skipping update",
+    );
+    return null;
+  }
+
+  if (!parsed.update || !parsed.content) {
     log.info("Repo memory: no update needed after review");
     return null;
   }
 
   log.info("Repo memory: updating after review");
   // Ensure the Updated date reflects today even if the model forgot to change it.
-  return text.replace(/^Updated: .+$/m, `Updated: ${today()}`);
+  return parsed.content.replace(/^Updated: .+$/m, `Updated: ${today()}`);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
-}
-
-/** Poll until predicate is true, used to wait for concurrent memory generation. */
-function waitUntil(pred: () => boolean, intervalMs = 500): Promise<void> {
-  return new Promise((resolve) => {
-    const check = () => (pred() ? resolve() : setTimeout(check, intervalMs));
-    check();
-  });
 }

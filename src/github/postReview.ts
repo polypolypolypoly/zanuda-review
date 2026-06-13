@@ -3,6 +3,11 @@ import type { Config } from "../config.js";
 import type { PullRequest } from "../platform/types.js";
 import type { ReviewResult } from "../review/types.js";
 
+// buildReviewCommentBody lives in review/format.ts (platform-agnostic);
+// re-exported here so existing imports from github/postReview continue to work.
+export { buildReviewCommentBody } from "../review/format.js";
+import { buildReviewCommentBody } from "../review/format.js";
+
 const SEVERITY_EMOJI: Record<string, string> = {
   blocker: "🛑",
   warning: "⚠️",
@@ -80,53 +85,4 @@ export async function postReview(
       body: fallbackBody,
     });
   }
-}
-
-/**
- * Build the full review content for the progress comment.
- * This replaces "Starting review…" with the complete verdict, summary,
- * and file overview — everything the author needs in one place.
- */
-export function buildReviewCommentBody(
-  result: ReviewResult,
-  totalFiles: number,
-): string {
-  const ACTION_ICON: Record<string, string> = {
-    APPROVE: "✅",
-    REQUEST_CHANGES: "🛑",
-    COMMENT: "💬",
-  };
-
-  const reviewed = result.filesSummary.length;
-  const scope =
-    reviewed === totalFiles
-      ? `Checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
-      : `Checked ${reviewed} of ${totalFiles} files`;
-  const inlineCount = result.comments.length;
-  const icon = ACTION_ICON[result.action] ?? "💬";
-  const label = result.action.replace("_", " ").toLowerCase();
-
-  const parts: string[] = [
-    `${icon} **Review complete** · ${label}`,
-    ``,
-    result.summary,
-    ``,
-    `<sub>${scope}${inlineCount > 0 ? ` · ${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}` : ""}</sub>`,
-  ];
-
-  if (result.filesSummary.length > 0) {
-    parts.push(
-      ``,
-      `<details>`,
-      `<summary>Changed files (${reviewed})</summary>`,
-      ``,
-      `| File | Description |`,
-      `| --- | --- |`,
-      ...result.filesSummary.map((f) => `| ${f.path} | ${f.description} |`),
-      ``,
-      `</details>`,
-    );
-  }
-
-  return parts.join("\n");
 }

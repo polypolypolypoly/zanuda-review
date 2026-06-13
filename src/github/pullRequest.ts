@@ -34,5 +34,6 @@ export async function fetchPullRequest(
     headSha: pr.head.sha,
     diff: diffRes.data as unknown as string,
     changedFiles: files.map((f) => f.filename),
+    state: pr.merged_at ? "merged" : pr.state === "closed" ? "closed" : "open",
   };
 }

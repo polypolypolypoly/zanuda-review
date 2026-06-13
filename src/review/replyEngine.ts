@@ -1,12 +1,14 @@
 import type { Config } from "../config.js";
 import type { SCMComment, SCMConnector, RepoRef } from "../platform/types.js";
-import { createProvider } from "../llm/index.js";
+import type { LLMProvider } from "../llm/types.js";
 import { logger } from "../logger.js";
 
 export interface ReplyDeps {
   connector: SCMConnector;
   config: Config;
   botLogin: string;
+  /** Provider instance to use for generating replies. Created once at startup. */
+  provider: LLMProvider;
 }
 
 /**
@@ -21,9 +23,8 @@ export async function replyToMention(
   prTitle: string,
   discussion: string,
 ): Promise<void> {
-  const { connector, config, botLogin } = deps;
+  const { connector, config, botLogin, provider } = deps;
 
-  const provider = createProvider(config.provider);
   const completion = await provider.complete({
     system: buildReplySystem(botLogin),
     user: buildReplyUserPrompt(prTitle, comment, discussion),

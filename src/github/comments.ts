@@ -4,6 +4,10 @@ import type { RepoRef, SCMComment } from "../platform/types.js";
 // PRComment is an alias kept for internal use within the github/ layer.
 export type PRComment = SCMComment;
 
+// formatDiscussion lives in review/format.ts (platform-agnostic); re-exported
+// here so existing imports inside github/ continue to resolve without changes.
+export { formatDiscussion } from "../review/format.js";
+
 /**
  * Fetch all comments on a PR: inline review comments + general discussion,
  * sorted chronologically.
@@ -48,34 +52,6 @@ export async function fetchPRDiscussion(
   ];
 
   return comments.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-}
-
-/**
- * Format comments as a readable block for the model.
- * Takes the most recent `maxComments` entries so we stay within token budget.
- */
-export function formatDiscussion(
-  comments: SCMComment[],
-  maxComments = 30,
-): string {
-  if (comments.length === 0) return "(No discussion found.)";
-
-  const omitted = Math.max(0, comments.length - maxComments);
-  const slice = comments.slice(-maxComments);
-  const lines: string[] = [];
-
-  if (omitted > 0) {
-    lines.push(`_(${omitted} earlier comment(s) omitted)_\n`);
-  }
-
-  for (const c of slice) {
-    const location = c.path
-      ? ` [\`${c.path}${c.line !== null && c.line !== undefined ? `:${c.line}` : ""}\`]`
-      : "";
-    lines.push(`**${c.author}**${location}:\n${c.body.trim()}`);
-  }
-
-  return lines.join("\n\n---\n\n");
 }
 
 /**

@@ -9,7 +9,7 @@
  *   npm run review -- --local --output out.md  # write review to a file
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import type { Config } from "../../config.js";
@@ -62,7 +62,7 @@ export class LocalConnector implements SCMConnector {
   }
 
   async getBotLogin(): Promise<string> {
-    return git(this.repoPath, "config user.name").trim() || "zanuda-local";
+    return git(this.repoPath, ["config", "user.name"]).trim() || "zanuda-local";
   }
 
   // Not used — local reviews are triggered directly from the CLI, not polled.
@@ -86,6 +86,7 @@ export class LocalConnector implements SCMConnector {
       headSha: "WORKING_TREE",
       diff,
       changedFiles,
+      state: "open", // local reviews are always treated as open
     };
   }
 
@@ -98,7 +99,7 @@ export class LocalConnector implements SCMConnector {
     // Fall back to filesystem if the file isn't tracked.
     if (gitRef !== "WORKING_TREE") {
       try {
-        return git(this.repoPath, `show ${gitRef}:${filePath}`, true);
+        return git(this.repoPath, ["show", `${gitRef}:${filePath}`], true);
       } catch {
         // File not in git at this ref — fall through to filesystem.
       }
@@ -114,7 +115,7 @@ export class LocalConnector implements SCMConnector {
     _gitRef: string,
     maxEntries: number,
   ): Promise<FileTree> {
-    const all = git(this.repoPath, "ls-files").split("\n").filter(Boolean);
+    const all = git(this.repoPath, ["ls-files"]).split("\n").filter(Boolean);
     return {
       paths: all.slice(0, maxEntries),
       truncated: all.length > maxEntries,
@@ -172,26 +173,26 @@ export class LocalConnector implements SCMConnector {
 
   private getDiff(): string {
     if (this.diffRef === "staged") {
-      const staged = git(this.repoPath, "diff --cached --unified=5");
+      const staged = git(this.repoPath, ["diff", "--cached", "--unified=5"]);
       if (staged.trim()) return staged;
       // Nothing staged — fall back to unstaged changes.
       process.stderr.write(
         "Nothing staged. Reviewing unstaged changes instead.\n",
       );
-      return git(this.repoPath, "diff HEAD --unified=5");
+      return git(this.repoPath, ["diff", "HEAD", "--unified=5"]);
     }
-    return git(this.repoPath, `diff ${this.diffRef}..HEAD --unified=5`);
+    return git(this.repoPath, ["diff", `${this.diffRef}..HEAD`, "--unified=5"]);
   }
 
   private getChangedFiles(): string[] {
     if (this.diffRef === "staged") {
-      const out = git(this.repoPath, "diff --cached --name-only");
+      const out = git(this.repoPath, ["diff", "--cached", "--name-only"]);
       if (out.trim()) return out.split("\n").filter(Boolean);
-      return git(this.repoPath, "diff HEAD --name-only")
+      return git(this.repoPath, ["diff", "HEAD", "--name-only"])
         .split("\n")
         .filter(Boolean);
     }
-    return git(this.repoPath, `diff ${this.diffRef}..HEAD --name-only`)
+    return git(this.repoPath, ["diff", `${this.diffRef}..HEAD`, "--name-only"])
       .split("\n")
       .filter(Boolean);
   }
@@ -204,10 +205,11 @@ export class LocalConnector implements SCMConnector {
       };
     }
     try {
-      const log = git(
-        this.repoPath,
-        `log ${this.diffRef}..HEAD --format=%s%n%b`,
-      );
+      const log = git(this.repoPath, [
+        "log",
+        `${this.diffRef}..HEAD`,
+        "--format=%s%n%b",
+      ]);
       const [title, ...rest] = log.trim().split("\n");
       return {
         title: title ?? `Changes since ${this.diffRef}`,
@@ -256,8 +258,8 @@ function renderReview(result: ReviewResult): string {
 
 // ── Git helper ────────────────────────────────────────────────────────────────
 
-function git(cwd: string, args: string, silent = false): string {
-  return execSync(`git ${args}`, {
+function git(cwd: string, args: string[], silent = false): string {
+  return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
     stdio: silent ? ["pipe", "pipe", "pipe"] : ["pipe", "pipe", "inherit"],
