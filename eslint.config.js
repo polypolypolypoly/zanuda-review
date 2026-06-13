@@ -31,6 +31,7 @@ export default tseslint.config(
         },
       ],
       // Enforce `import type` for type-only imports (already the convention)
+      // Note: consistent-type-imports with fixStyle: 'separate-type-imports' rewrites type imports, which may alter staged diffs unexpectedly.
       "@typescript-eslint/consistent-type-imports": [
         "error",
         { prefer: "type-imports", fixStyle: "separate-type-imports" },
