@@ -172,12 +172,39 @@ npm run review -- owner/repo#123 --round=2  # run as round 2
 npm test
 ```
 
+## Adding a new platform (GitLab, Bitbucket, …)
+
+Zanuda's GitHub integration is one connector behind a clean interface. The review engine, LLM layer, config system, and state store are all platform-agnostic and require zero changes to support a new platform.
+
+**Five steps:**
+
+1. **Copy the stub** — `src/platform/stub/connector.ts` is a fully annotated skeleton with JSDoc explaining what each method needs to do, plus GitLab/Bitbucket API equivalents for every call.
+
+   ```bash
+   cp src/platform/stub/connector.ts src/platform/<name>/connector.ts
+   ```
+
+2. **Implement the interface** — 8 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
+
+3. **Register in the factory** — add one `case` to `src/platform/index.ts`:
+
+   ```typescript
+   case "gitlab":
+     return new GitLabConnector({ token: requireEnv("GITLAB_TOKEN") });
+   ```
+
+4. **Wire up config** — add the new token/URL env vars to `.env.example` under the platform section.
+
+5. **Test** — run `npm test` and add connector-specific tests in `test/`. See `test/githubConnector.test.ts` for the pattern.
+
+Set `PLATFORM=<name>` in `.env` to activate your connector. Everything else — reviews, memory, config merging, rate limits — works unchanged.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
+
 ## Contributing
 
-Bug reports and pull requests are welcome. A few things to know before you start:
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, including how to add a new platform connector.
 
-- **Open an issue first** for anything beyond a small fix. It avoids wasted effort if the direction isn't a fit.
-- **Tests are required.** New behaviour needs tests; bug fixes should include a regression test. Run `npm test` and `npm run typecheck` before submitting.
-- **Security issues** — please don't open a public issue. Email the maintainers directly instead.
+Short version: open an issue first for anything beyond a small fix, tests are required, all CI checks must pass. Security issues go to the maintainers directly, not a public issue.
 
-This project is MIT licensed. By contributing you agree your work will be distributed under the same terms.
+MIT licensed. By contributing you agree your work will be distributed under the same terms.
