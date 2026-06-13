@@ -49,13 +49,14 @@ async function collectFiles(
   gitRef: string,
   config: Config,
 ): Promise<Array<{ path: string; content: string }>> {
-  const results = await Promise.all(
-    config.context.includeFiles.map(async (path) => {
-      const content = await tryReadFile(octokit, ref, path, gitRef).catch(() => null);
-      return content ? { path, content } : null;
-    }),
-  );
-  return results.filter((r): r is { path: string; content: string } => r !== null);
+  // Sequential fetching avoids triggering GitHub's secondary (concurrency)
+  // rate limits when many context files are configured.
+  const results: Array<{ path: string; content: string }> = [];
+  for (const path of config.context.includeFiles) {
+    const content = await tryReadFile(octokit, ref, path, gitRef).catch(() => null);
+    if (content !== null) results.push({ path, content });
+  }
+  return results;
 }
 
 async function buildFileTree(

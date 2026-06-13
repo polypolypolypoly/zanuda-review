@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import type { Config } from "./config.js";
+import { createOctokit } from "./github/client.js";
 import { createWebhooks } from "./github/webhook.js";
 import { logger } from "./logger.js";
 
@@ -18,6 +19,7 @@ export async function startServer(opts: ServerOptions): Promise<void> {
     secret: opts.secret,
     botLogin: opts.botLogin,
     baseConfig: opts.config,
+    octokit: createOctokit(),
   });
 
   app.get("/health", async () => ({ status: "ok" }));

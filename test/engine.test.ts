@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mergeRepoConfig, type Config } from "../src/config.ts";
 import { parseReviewResult, extractJson } from "../src/review/engine.ts";
+import { truncate } from "../src/review/prompt.ts";
 
 const baseConfig: Config = {
   provider: "anthropic",
@@ -11,6 +12,8 @@ const baseConfig: Config = {
   context: { includeFiles: ["README.md"], maxFileChars: 1000, includeFileTree: true, maxTreeEntries: 100 },
   review: { maxDiffChars: 1000, inlineComments: true, event: "COMMENT" },
 };
+
+// ── parseReviewResult ────────────────────────────────────────────────────────
 
 test("parseReviewResult: plain JSON", () => {
   const r = parseReviewResult('{"summary":"ok","filesSummary":[],"comments":[]}');
@@ -44,17 +47,74 @@ test("parseReviewResult: JSON wrapped in code fence with nested snippet", () => 
   assert.equal(r.comments[0]?.severity, "warning");
 });
 
-test("extractJson: returns first { to last } regardless of surrounding text", () => {
-  assert.equal(extractJson("prefix {\"a\":1} suffix"), '{"a":1}');
-});
-
-test("extractJson: throws when no braces present", () => {
-  assert.throws(() => extractJson("no braces here"));
-});
-
 test("parseReviewResult: throws on garbage", () => {
   assert.throws(() => parseReviewResult("no json here"));
 });
+
+// ── extractJson ──────────────────────────────────────────────────────────────
+
+test("extractJson: returns first { to matching } regardless of surrounding text", () => {
+  assert.equal(extractJson('prefix {"a":1} suffix'), '{"a":1}');
+});
+
+test("extractJson: stops at matching brace, ignores later } in prose", () => {
+  // Old lastIndexOf approach would grab up to the last } in the sentence.
+  // New brace-depth scanner stops at the correct closing brace.
+  assert.equal(extractJson('{"a":1} and then some } stray brace'), '{"a":1}');
+});
+
+test("extractJson: handles nested objects correctly", () => {
+  assert.equal(extractJson('{"a":{"b":2}}'), '{"a":{"b":2}}');
+});
+
+test("extractJson: } inside a string value is not counted as closing brace", () => {
+  const json = '{"key":"value with } brace"}';
+  assert.equal(extractJson(json), json);
+});
+
+test("extractJson: throws when no opening brace present", () => {
+  assert.throws(() => extractJson("no braces here"));
+});
+
+test("extractJson: throws on unterminated object", () => {
+  assert.throws(() => extractJson('{"a": 1'));
+});
+
+// ── truncate ─────────────────────────────────────────────────────────────────
+
+test("truncate: returns full string when under limit", () => {
+  const r = truncate("hello\nworld", 100);
+  assert.equal(r.text, "hello\nworld");
+  assert.equal(r.truncated, false);
+});
+
+test("truncate: cuts at last newline before limit", () => {
+  // "line1\n" = 6 chars, "line2\n" = 6 chars → at max=15 the last \n before
+  // index 15 is at index 11 (end of "line2"), so result is "line1\nline2".
+  const s = "line1\nline2\nline3\nline4";
+  const r = truncate(s, 15);
+  assert.equal(r.truncated, true);
+  assert.ok(!r.text.includes("line3"), "should not contain text past the cut");
+  assert.ok(r.text.endsWith("line2"), "should end on a complete line");
+  assert.ok(r.text.length <= 15);
+});
+
+test("truncate: falls back to hard char cut when no newline before limit", () => {
+  const s = "averylonglinewithoutnewlines";
+  const r = truncate(s, 10);
+  assert.equal(r.truncated, true);
+  assert.equal(r.text.length, 10);
+});
+
+test("truncate: exact limit is not truncated", () => {
+  const s = "exactly10!";
+  assert.equal(s.length, 10);
+  const r = truncate(s, 10);
+  assert.equal(r.truncated, false);
+  assert.equal(r.text, s);
+});
+
+// ── mergeRepoConfig ──────────────────────────────────────────────────────────
 
 test("mergeRepoConfig: null repo config is a no-op", () => {
   assert.deepEqual(mergeRepoConfig(baseConfig, null), baseConfig);
@@ -73,4 +133,15 @@ test("mergeRepoConfig: per-section override merges shallowly", () => {
   assert.equal(merged.provider, "ollama");
   assert.equal(merged.review.inlineComments, false);
   assert.equal(merged.review.event, "COMMENT"); // untouched
+});
+
+test("mergeRepoConfig: does not mutate the base config", () => {
+  const original = structuredClone(baseConfig);
+  mergeRepoConfig(baseConfig, { provider: "openai", prepromptAppend: "extra" });
+  assert.deepEqual(baseConfig, original);
+});
+
+test("mergeRepoConfig: explicit preprompt fully replaces base preprompt", () => {
+  const merged = mergeRepoConfig(baseConfig, { preprompt: "Brand new." });
+  assert.equal(merged.preprompt, "Brand new.");
 });

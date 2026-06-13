@@ -1,13 +1,16 @@
 import { Webhooks } from "@octokit/webhooks";
+import type { Octokit } from "@octokit/rest";
 import type { Config } from "../config.js";
 import { logger } from "../logger.js";
 import { reviewPullRequest } from "../review/engine.js";
-import { createOctokit } from "./client.js";
 
 export interface WebhookDeps {
   secret: string;
   botLogin: string;
   baseConfig: Config;
+  /** Pre-created Octokit instance — injected so the handler doesn't
+   *  allocate a new HTTP client on every webhook delivery. */
+  octokit: Octokit;
 }
 
 /**
@@ -31,7 +34,7 @@ export function createWebhooks(deps: WebhookDeps): Webhooks {
 
     // Run the review in the background so the webhook returns 200 promptly;
     // GitHub times out delivery after ~10s.
-    void reviewPullRequest({ octokit: createOctokit(), baseConfig: deps.baseConfig }, ref, number).catch(
+    void reviewPullRequest({ octokit: deps.octokit, baseConfig: deps.baseConfig }, ref, number).catch(
       (err) => logger.error({ err, repo: ref, pr: number }, "Review failed"),
     );
   });

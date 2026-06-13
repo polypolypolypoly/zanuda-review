@@ -40,9 +40,13 @@ export function buildUserPrompt(
     "## Project context",
     context.text,
     "",
+    // PR title/body are user-controlled — wrapped in XML tags so the model
+    // can clearly distinguish them from trusted instructions.
     "## Pull request",
-    `Title: ${pr.title}`,
-    pr.body ? `Description:\n${pr.body}` : "Description: (none)",
+    `<pr_title>${pr.title}</pr_title>`,
+    pr.body
+      ? `<pr_description>\n${pr.body}\n</pr_description>`
+      : "<pr_description>(none)</pr_description>",
     `Changed files (${pr.changedFiles.length}):`,
     pr.changedFiles.map((f) => `- ${f}`).join("\n"),
     "",
@@ -58,7 +62,15 @@ export function buildUserPrompt(
   ].join("\n");
 }
 
-function truncate(s: string, max: number): { text: string; truncated: boolean } {
+/**
+ * Truncate `s` to at most `max` characters, cutting at the last newline
+ * before the limit so the model never receives a half-line of diff.
+ */
+export function truncate(s: string, max: number): { text: string; truncated: boolean } {
   if (s.length <= max) return { text: s, truncated: false };
-  return { text: s.slice(0, max), truncated: true };
+  const cut = s.lastIndexOf("\n", max - 1);
+  // Fall back to a hard character cut if there's no newline before the limit
+  // (e.g. a single huge line).
+  const end = cut > 0 ? cut : max;
+  return { text: s.slice(0, end), truncated: true };
 }

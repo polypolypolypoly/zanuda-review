@@ -63,12 +63,22 @@ export function loadConfig(path?: string): Config {
 
 /** Env vars take precedence over the YAML file for a few hot settings. */
 function applyEnvOverrides(config: Config): Config {
-  const provider = process.env.LLM_PROVIDER as Config["provider"] | undefined;
-  if (provider) config.provider = ConfigSchema.shape.provider.parse(provider);
-  if (process.env.LLM_MODEL) {
-    config.models[config.provider] = process.env.LLM_MODEL;
+  // Return a fresh copy — never mutate the parsed config in place.
+  const result = { ...config, models: { ...config.models } };
+  const rawProvider = process.env.LLM_PROVIDER;
+  if (rawProvider) {
+    const parsed = ConfigSchema.shape.provider.safeParse(rawProvider);
+    if (!parsed.success) {
+      throw new Error(
+        `Invalid LLM_PROVIDER="${rawProvider}". Valid values: anthropic, openai, openrouter, ollama`,
+      );
+    }
+    result.provider = parsed.data;
   }
-  return config;
+  if (process.env.LLM_MODEL) {
+    result.models[result.provider] = process.env.LLM_MODEL;
+  }
+  return result;
 }
 
 /**

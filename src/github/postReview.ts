@@ -50,15 +50,15 @@ export async function postReview(
       comments,
     });
   } catch (err) {
-    // Most failures here are line-anchoring errors. Fall back to a single
-    // summary review that embeds the comments as text so nothing is lost.
+    // Only fall back for line-anchoring errors (HTTP 422). Every other failure
+    // (network, auth, rate-limit, …) should propagate so the caller can log
+    // and retry rather than silently swallowing it.
+    if ((err as { status?: number }).status !== 422) throw err;
     await octokit.pulls.createReview({
       ...pr.ref,
       pull_number: pr.number,
       event: config.review.event,
-      body: `${renderSummaryBody(header, result)}\n\n<sub>Inline anchoring failed (${
-        (err as Error).message
-      }); comments shown above.</sub>`,
+      body: `${renderSummaryBody(header, result)}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`,
     });
   }
 }
