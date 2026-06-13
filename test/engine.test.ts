@@ -387,3 +387,40 @@ describe("formatDiscussion", () => {
     assert.ok(formatDiscussion(comments, 3).includes("7 earlier comment(s) omitted"));
   });
 });
+
+// ─── buildUserPrompt: instructions injection ──────────────────────────────────
+
+describe("buildUserPrompt: .zanuda/instructions.md injection", () => {
+  it("injects instructions as a dedicated section", () => {
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
+      instructions: "Always flag missing error handling.",
+    });
+    assert.ok(prompt.includes("## Repo-specific reviewer guidelines"));
+    assert.ok(prompt.includes("Always flag missing error handling."));
+  });
+
+  it("instructions are NOT XML-sandboxed — model should follow them", () => {
+    const instructions = "Focus on SQL injection vectors.";
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, { instructions });
+    // Should appear raw, not inside <...> tags
+    const idx = prompt.indexOf(instructions);
+    assert.ok(idx !== -1, "instructions not found in prompt");
+    assert.ok(!prompt.slice(Math.max(0, idx - 10), idx).includes("<"), "instructions should not be XML-sandboxed");
+  });
+
+  it("omitted when no instructions provided", () => {
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig);
+    assert.ok(!prompt.includes("## Repo-specific reviewer guidelines"));
+  });
+
+  it("appears before project context and task sections", () => {
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
+      instructions: "My guideline.",
+    });
+    const instrIdx   = prompt.indexOf("## Repo-specific reviewer guidelines");
+    const contextIdx = prompt.indexOf("## Project context");
+    const taskIdx    = prompt.indexOf("## Your task");
+    assert.ok(instrIdx < contextIdx, "instructions should appear before project context");
+    assert.ok(instrIdx < taskIdx,    "instructions should appear before task");
+  });
+});

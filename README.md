@@ -103,16 +103,25 @@ To give a user or org access: add their slug to `access.allowlist` in your local
 
 ## Configuration
 
+All Zanuda files live under `.zanuda/` in the repo root (or in the org's `.github` repo for org-wide settings):
+
+```
+.zanuda/
+  config.yml          # settings (provider, model, preprompt rules, etc.)
+  instructions.md     # free-form reviewer guidelines
+```
+
 Settings merge in order — each layer overrides only what it sets:
 
 ```
-config/default.yaml  →  {owner}/.github/.zanuda.yml  →  repo-root/.zanuda.yml
+global defaults  →  {owner}/.github/.zanuda/config.yml  →  repo/.zanuda/config.yml
 ```
 
-The org config (`.github` repo) is good for shared provider/model/rules across all repos in an org. Per-repo config overrides just what it needs to.
+Instructions concatenate in the same order (org first, repo second).
+
+### `.zanuda/config.yml`
 
 ```yaml
-# .zanuda.yml example
 provider: openrouter
 models:
   openrouter: anthropic/claude-opus-4-8
@@ -125,6 +134,20 @@ memory:
 ```
 
 Full list of options: see `config/default.yaml`.
+
+### `.zanuda/instructions.md`
+
+Free-form markdown instructions injected directly into every review as reviewer guidelines. Use this to tell Zanuda what matters for your specific codebase:
+
+```markdown
+## Our standards
+- Every public function must have a docstring. Flag any that don't.
+- We use structured logging only — flag any raw print/console.log.
+- SQL queries must use parameterised statements. Treat any string interpolation as a blocker.
+- We're mid-migration from v1 to v2 API. Ignore deprecated v1 usage in files not touched by the PR.
+```
+
+Commit this to the base branch. It is read from the base branch (not the PR head), so PR authors cannot influence it.
 
 ---
 

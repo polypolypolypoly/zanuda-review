@@ -4,11 +4,14 @@ import { RepoConfigSchema, type RepoConfig } from "../config.js";
 import type { RepoRef } from "../github/client.js";
 import { logger } from "../logger.js";
 
-const REPO_CONFIG_PATHS = [".zanuda.yml", ".zanuda.yaml", ".github/zanuda.yml"];
-const ORG_CONFIG_PATHS  = [".zanuda.yml", ".zanuda.yaml"];
+// All Zanuda-related files now live under .zanuda/ in the repo root.
+// Kept in priority order — first match wins.
+const REPO_CONFIG_PATHS   = [".zanuda/config.yml", ".zanuda/config.yaml"];
+const ORG_CONFIG_PATHS    = [".zanuda/config.yml", ".zanuda/config.yaml"];
+const INSTRUCTIONS_PATH   = ".zanuda/instructions.md";
 
 /**
- * Look for a per-repo `.zanuda.yml` on the PR's base ref.
+ * Look for a per-repo `.zanuda/config.yml` on the PR's base ref.
  * Returns null if not found or malformed (logged and ignored).
  */
 export async function fetchRepoConfig(
@@ -20,12 +23,9 @@ export async function fetchRepoConfig(
 }
 
 /**
- * Look for an org-wide `.zanuda.yml` in the `{owner}/.github` repo
- * (GitHub's conventional location for org-level defaults).
+ * Look for an org-wide `.zanuda/config.yml` in the `{owner}/.github` repo.
  * Returns null if the .github repo doesn't exist, the file isn't there,
  * or the file is malformed.
- *
- * Merge order: global defaults → org config → per-repo config.
  */
 export async function fetchOrgConfig(
   octokit: Octokit,
@@ -51,7 +51,7 @@ async function fetchConfig(
     if (!parsed.success) {
       logger.warn(
         { repo: `${ref.owner}/${ref.repo}`, path, errors: parsed.error.issues },
-        `Ignoring invalid ${label} .zanuda.yml`,
+        `Ignoring invalid ${label} .zanuda/config.yml`,
       );
       return null;
     }
@@ -59,6 +59,38 @@ async function fetchConfig(
     return parsed.data;
   }
   return null;
+}
+
+/**
+ * Fetch `.zanuda/instructions.md` from a repo at the given ref.
+ * Returns null if the file doesn't exist.
+ *
+ * Instructions are written by maintainers on the base branch — they are
+ * intentionally injected without XML sandboxing so the model follows them.
+ * Contrast with PR-author content (title, body, diff, comments) which IS
+ * sandboxed because it is untrusted.
+ */
+export async function fetchInstructions(
+  octokit: Octokit,
+  ref: RepoRef,
+  gitRef: string,
+): Promise<string | null> {
+  const content = await tryReadFile(octokit, ref, INSTRUCTIONS_PATH, gitRef);
+  if (content !== null) {
+    logger.debug({ repo: `${ref.owner}/${ref.repo}` }, "Loaded .zanuda/instructions.md");
+  }
+  return content;
+}
+
+/**
+ * Fetch org-wide `.zanuda/instructions.md` from `{owner}/.github`.
+ * Returns null if not present.
+ */
+export async function fetchOrgInstructions(
+  octokit: Octokit,
+  owner: string,
+): Promise<string | null> {
+  return fetchInstructions(octokit, { owner, repo: ".github" }, "HEAD");
 }
 
 export async function tryReadFile(

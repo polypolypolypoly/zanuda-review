@@ -1,7 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 import { mergeRepoConfig, type Config } from "../config.js";
 import { buildContext } from "../context/builder.js";
-import { fetchOrgConfig, fetchRepoConfig } from "../context/repoConfig.js";
+import { fetchInstructions, fetchOrgConfig, fetchOrgInstructions, fetchRepoConfig } from "../context/repoConfig.js";
 import {
   generateRepoMemory,
   loadRepoMemory,
@@ -48,13 +48,24 @@ export async function reviewPullRequest(
   // Three-level config merge: global defaults → org config → per-repo config.
   // Both config files are read from the base branch (not the PR head) so a PR
   // author cannot influence the bot's behaviour by editing them in their branch.
-  const [orgConfig, repoConfig] = await Promise.all([
+  const [orgConfig, repoConfig, orgInstructions, repoInstructions] = await Promise.all([
     fetchOrgConfig(octokit, ref.owner),
     fetchRepoConfig(octokit, ref, pr.baseSha),
+    fetchOrgInstructions(octokit, ref.owner),
+    fetchInstructions(octokit, ref, pr.baseSha),
   ]);
   const config = mergeRepoConfig(mergeRepoConfig(deps.baseConfig, orgConfig), repoConfig);
+  // Merge instructions: org sets the baseline, repo extends or overrides.
+  const instructions = [orgInstructions, repoInstructions].filter(Boolean).join("\n\n") || undefined;
   log.info(
-    { provider: config.provider, model: config.models[config.provider], hasOrgConfig: orgConfig !== null, hasRepoConfig: repoConfig !== null },
+    {
+      provider: config.provider,
+      model: config.models[config.provider],
+      hasOrgConfig: orgConfig !== null,
+      hasRepoConfig: repoConfig !== null,
+      hasOrgInstructions: orgInstructions !== null,
+      hasRepoInstructions: repoInstructions !== null,
+    },
     "Config resolved",
   );
 
@@ -90,7 +101,7 @@ export async function reviewPullRequest(
 
   const completion = await provider.complete({
     system: buildSystemPrompt(config),
-    user: buildUserPrompt(pr, context, config, { round, discussion, repoMemory: repoMemory ?? undefined }),
+    user: buildUserPrompt(pr, context, config, { round, discussion, repoMemory: repoMemory ?? undefined, instructions }),
     model: config.models[config.provider],
     temperature: config.generation.temperature,
     maxTokens: config.generation.maxTokens,

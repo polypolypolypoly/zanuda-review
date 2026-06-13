@@ -93,23 +93,30 @@ npm test              # node --test
 | `OLLAMA_BASE_URL`      | For local Ollama (default: http://localhost:11434) |
 | `POLL_INTERVAL_SECS`   | Polling interval in seconds (default: 60)    |
 
-## Config merge order
+## Per-repo and per-org files
+
+All Zanuda files live under `.zanuda/` in the repo root, or in the org's `.github` repo for org-wide settings:
+
+```
+.zanuda/
+  config.yml          # settings overrides
+  instructions.md     # free-form reviewer guidelines
+```
+
+### Config merge order
 
 ```
 global defaults (config/default.yaml)
-  → org config   ({owner}/.github repo → .zanuda.yml)
-  → repo config  (repo root → .zanuda.yml)
+  → org config   ({owner}/.github → .zanuda/config.yml)
+  → repo config  (repo root → .zanuda/config.yml)
 ```
 
-Each layer overrides only the keys it sets; everything else inherits from above.
-Both org and repo configs are fetched from the **base branch** of the PR, not
-the PR head, so a PR author cannot influence the bot by editing them in their
-branch.
+Instructions concatenate in the same order (org first, repo appended).
 
-## Per-org config (`{owner}/.github` → `.zanuda.yml`)
+All files are fetched from the **base branch** of the PR — a PR author cannot
+influence Zanuda's behaviour by editing them in their branch.
 
-Applies to all repos under that owner/org. Useful for setting a provider,
-model, or preprompt rules once instead of per-repo:
+### `.zanuda/config.yml` (org or repo)
 
 ```yaml
 prepromptAppend: |
@@ -117,22 +124,18 @@ prepromptAppend: |
 provider: openrouter
 models:
   openrouter: anthropic/claude-opus-4-8
+memory:
+  enabled: false
 ```
 
-## Per-repo config (`.zanuda.yml` committed to repo root)
+### `.zanuda/instructions.md` (org or repo)
 
-```yaml
-provider: ollama
-models:
-  ollama: qwen2.5:3b
-prepromptAppend: |
-  This is a Rust project — pay attention to ownership and unsafe blocks.
-review:
-  inlineComments: true
-context:
-  includeFiles: [README.md, ARCHITECTURE.md]
-memory:
-  enabled: false   # opt out of repo memory for this repo
+Free-form markdown injected into every review as reviewer guidelines. Not XML-sandboxed (intentional — we want the model to follow these). Fetched from the base branch so PR authors cannot tamper with them.
+
+```markdown
+- Every public function must have a docstring. Flag any that don't.
+- SQL queries must use parameterised statements — string interpolation is a blocker.
+- We're mid-migration from v1 to v2 API. Ignore deprecated v1 usage in files not touched by the PR.
 ```
 
 ## Onboarding a new user or org
