@@ -11,6 +11,16 @@ export interface CompletionRequest {
   model: string;
   temperature: number;
   maxTokens: number;
+  /**
+   * When provided, the provider uses its native structured-output API
+   * (Anthropic tool_use, OpenAI json_schema mode) to guarantee the response
+   * matches this JSON Schema object. The caller receives a pre-validated JSON
+   * string and can skip extractJson entirely.
+   *
+   * Providers that do not support structured output ignore this field and
+   * fall back to plain text completion.
+   */
+  jsonSchema?: Record<string, unknown>;
 }
 
 export interface CompletionResult {

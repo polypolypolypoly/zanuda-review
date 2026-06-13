@@ -68,6 +68,12 @@ export interface UserPromptOpts {
    * model complete per-file diffs rather than an arbitrary byte-truncated blob.
    */
   promptDiff?: PromptDiff;
+  /**
+   * When true the output JSON schema description is omitted from the prompt —
+   * the schema is enforced at the API level via jsonSchema / tool_use instead.
+   * Saves ~150 tokens per review.
+   */
+  structuredOutput?: boolean;
 }
 
 export function buildUserPrompt(
@@ -140,8 +146,8 @@ export function buildUserPrompt(
     ...diffSection.parts,
     "",
     isFinal
-      ? finalTaskInstructions(diffSection.forAllFiles)
-      : round1TaskInstructions(diffSection.forAllFiles),
+      ? finalTaskInstructions(diffSection.forAllFiles, opts.structuredOutput)
+      : round1TaskInstructions(diffSection.forAllFiles, opts.structuredOutput),
   );
 
   return parts.join("\n");
@@ -205,14 +211,20 @@ function buildFallbackDiffSection(
 
 // ── Task instructions ─────────────────────────────────────────────────────────
 
-function round1TaskInstructions(forAllFiles: boolean): string {
+function round1TaskInstructions(
+  forAllFiles: boolean,
+  structured = false,
+): string {
   return (
     `## Your task\nReview the diff above using the project context and your instructions.\n` +
-    outputInstructions(forAllFiles)
+    (structured ? "" : outputInstructions(forAllFiles))
   );
 }
 
-function finalTaskInstructions(forAllFiles: boolean): string {
+function finalTaskInstructions(
+  forAllFiles: boolean,
+  structured = false,
+): string {
   return (
     `## Your task (FINAL — round 2 of 2)\n` +
     `Examine the current diff and the discussion above. Assess whether the issues ` +
@@ -224,7 +236,7 @@ function finalTaskInstructions(forAllFiles: boolean): string {
     `            list what still needs fixing. Be specific and direct.\n\n` +
     `Do NOT use REQUEST_CHANGES — this is the final round and you cannot follow up,\n` +
     `so blocking the PR would leave it stuck permanently.\n` +
-    outputInstructions(forAllFiles)
+    (structured ? "" : outputInstructions(forAllFiles))
   );
 }
 
