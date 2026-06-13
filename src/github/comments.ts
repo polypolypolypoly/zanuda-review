@@ -1,17 +1,8 @@
 import type { Octokit } from "@octokit/rest";
-import type { RepoRef } from "./client.js";
+import type { RepoRef, SCMComment } from "../platform/types.js";
 
-export interface PRComment {
-  id: number;
-  /** "review" = inline diff comment; "issue" = general PR discussion comment. */
-  type: "review" | "issue";
-  author: string;
-  body: string;
-  /** Only set for review comments. */
-  path?: string;
-  line?: number;
-  createdAt: string;
-}
+// PRComment is an alias kept for internal use within the github/ layer.
+export type PRComment = SCMComment;
 
 /**
  * Fetch all comments on a PR: inline review comments + general discussion,
@@ -21,7 +12,7 @@ export async function fetchPRDiscussion(
   octokit: Octokit,
   ref: RepoRef,
   prNumber: number,
-): Promise<PRComment[]> {
+): Promise<SCMComment[]> {
   // Two concurrent fetches is fine; this is not the N-file fan-out that hits
   // secondary rate limits.
   const [reviewComments, issueComments] = await Promise.all([
@@ -37,10 +28,10 @@ export async function fetchPRDiscussion(
     }),
   ]);
 
-  const comments: PRComment[] = [
+  const comments: SCMComment[] = [
     ...reviewComments.map((c) => ({
       id: c.id,
-      type: "review" as const,
+      type: "inline" as const,
       author: c.user?.login ?? "unknown",
       body: c.body ?? "",
       path: c.path,
@@ -49,7 +40,7 @@ export async function fetchPRDiscussion(
     })),
     ...issueComments.map((c) => ({
       id: c.id,
-      type: "issue" as const,
+      type: "general" as const,
       author: c.user?.login ?? "unknown",
       body: c.body ?? "",
       createdAt: c.created_at,
@@ -64,7 +55,7 @@ export async function fetchPRDiscussion(
  * Takes the most recent `maxComments` entries so we stay within token budget.
  */
 export function formatDiscussion(
-  comments: PRComment[],
+  comments: SCMComment[],
   maxComments = 30,
 ): string {
   if (comments.length === 0) return "(No discussion found.)";
@@ -92,10 +83,10 @@ export function formatDiscussion(
  * excluding the bot's own comments.
  */
 export function findUnrepliedMentions(
-  comments: PRComment[],
+  comments: SCMComment[],
   botLogin: string,
   repliedIds: Set<number>,
-): PRComment[] {
+): SCMComment[] {
   const mention = new RegExp(`@${botLogin}`, "i");
   return comments.filter(
     (c) =>
@@ -107,17 +98,17 @@ export function findUnrepliedMentions(
 
 /**
  * Post a reply to a comment.
- * - Inline review comments: replies into the same thread.
- * - Issue comments: posts a new top-level PR comment.
+ * - Inline comments: replies into the same thread.
+ * - General comments: posts a new top-level PR comment.
  */
 export async function replyToComment(
   octokit: Octokit,
   ref: RepoRef,
   prNumber: number,
-  comment: PRComment,
+  comment: SCMComment,
   body: string,
 ): Promise<void> {
-  if (comment.type === "review") {
+  if (comment.type === "inline") {
     await octokit.pulls.createReplyForReviewComment({
       ...ref,
       pull_number: prNumber,

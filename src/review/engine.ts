@@ -1,4 +1,3 @@
-import type { Octokit } from "@octokit/rest";
 import { mergeRepoConfig, type Config } from "../config.js";
 import { buildContext } from "../context/builder.js";
 import {
@@ -13,17 +12,15 @@ import {
   maybeUpdateRepoMemory,
   saveRepoMemory,
 } from "../context/repoMemory.js";
-import { fetchPRDiscussion, formatDiscussion } from "../github/comments.js";
-import type { RepoRef } from "../github/client.js";
-import { postReview } from "../github/postReview.js";
-import { fetchPullRequest } from "../github/pullRequest.js";
+import { formatDiscussion } from "../github/comments.js";
+import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { ReviewResultSchema, type ReviewResult } from "./types.js";
 
 export interface ReviewDeps {
-  octokit: Octokit;
+  connector: SCMConnector;
   baseConfig: Config;
 }
 
@@ -39,7 +36,7 @@ export async function reviewPullRequest(
   number: number,
   opts: { dryRun?: boolean; round?: number } = {},
 ): Promise<ReviewResult> {
-  const { octokit } = deps;
+  const { connector } = deps;
   const round = opts.round ?? 1;
   const log = logger.child({
     repo: `${ref.owner}/${ref.repo}`,
@@ -47,28 +44,23 @@ export async function reviewPullRequest(
     round,
   });
 
-  const pr = await fetchPullRequest(octokit, ref, number);
+  const pr = await connector.fetchPR(ref, number);
   log.info({ files: pr.changedFiles.length }, "Fetched PR");
 
-  // Use the BASE branch SHA (not the PR head) for both the repo config and the
-  // project context files. The base branch is under the maintainer's control;
-  // using the head SHA would let a PR author influence the bot's behaviour by
-  // committing a crafted .review-helper.yml or editing README/CONTRIBUTING.
   // Three-level config merge: global defaults → org config → per-repo config.
-  // Both config files are read from the base branch (not the PR head) so a PR
-  // author cannot influence the bot's behaviour by editing them in their branch.
+  // All files are read from the base branch (not the PR head) — a PR author
+  // cannot influence the bot's behaviour by editing them in their branch.
   const [orgConfig, repoConfig, orgInstructions, repoInstructions] =
     await Promise.all([
-      fetchOrgConfig(octokit, ref.owner),
-      fetchRepoConfig(octokit, ref, pr.baseSha),
-      fetchOrgInstructions(octokit, ref.owner),
-      fetchInstructions(octokit, ref, pr.baseSha),
+      fetchOrgConfig(connector, ref.owner),
+      fetchRepoConfig(connector, ref, pr.baseSha),
+      fetchOrgInstructions(connector, ref.owner),
+      fetchInstructions(connector, ref, pr.baseSha),
     ]);
   const config = mergeRepoConfig(
     mergeRepoConfig(deps.baseConfig, orgConfig),
     repoConfig,
   );
-  // Merge instructions: org sets the baseline, repo extends or overrides.
   const instructions =
     [orgInstructions, repoInstructions].filter(Boolean).join("\n\n") ||
     undefined;
@@ -84,11 +76,9 @@ export async function reviewPullRequest(
     "Config resolved",
   );
 
-  const context = await buildContext(octokit, ref, pr.baseSha, config);
+  const context = await buildContext(connector, ref, pr.baseSha, config);
 
   // ── Provider + repo memory ──────────────────────────────────────────────────
-  // Provider is instantiated here (not later) so it can be reused for both
-  // the review completion and the post-review memory update.
   const provider: LLMProvider = createProvider(config.provider);
 
   let repoMemory: string | null = null;
@@ -97,7 +87,7 @@ export async function reviewPullRequest(
     if (!repoMemory) {
       try {
         repoMemory = await generateRepoMemory(
-          octokit,
+          connector,
           ref,
           pr.baseSha,
           config,
@@ -118,7 +108,7 @@ export async function reviewPullRequest(
   // issues from round 1 were addressed.
   let discussion: string | undefined;
   if (round >= 2) {
-    const comments = await fetchPRDiscussion(octokit, ref, number);
+    const comments = await connector.fetchDiscussion(ref, number);
     discussion = formatDiscussion(comments);
     log.info(
       { commentCount: comments.length },
@@ -144,27 +134,20 @@ export async function reviewPullRequest(
   );
 
   const result = parseReviewResult(completion.text);
-  // Enforce no-nitpick policy at the application level regardless of what
-  // the model returns. Belt-and-suspenders: the preprompt and output schema
-  // already tell it not to, but models can be stubborn.
   result.comments = result.comments.filter((c) => c.severity !== "nitpick");
 
-  // Round 2 is the final review. REQUEST_CHANGES must never be used here:
-  // Zanuda won't do a round 3, so the PR would get stuck waiting for her
-  // approval indefinitely. Coerce it to COMMENT so the PR stays unblocked
-  // while the summary still makes it clear issues remain.
+  // Round 2 is the final review — REQUEST_CHANGES must never be used here.
   if (round >= 2 && result.action === "REQUEST_CHANGES") {
     result.action = "COMMENT";
     log.info("Round 2: coerced REQUEST_CHANGES → COMMENT to avoid blocking PR");
   }
 
   if (!opts.dryRun) {
-    await postReview(octokit, pr, result, config);
+    await connector.postReview(pr, result, config);
     log.info({ comments: result.comments.length }, "Review posted");
   }
 
   // ── Repo memory update ────────────────────────────────────────────────────
-  // Run after posting so it never blocks the review. Fire-and-forget on error.
   if (config.memory.enabled && repoMemory) {
     try {
       const updated = await maybeUpdateRepoMemory(
@@ -194,13 +177,6 @@ export function parseReviewResult(text: string): ReviewResult {
 
 /**
  * Extract the outermost JSON object from the model's response.
- *
- * Walks character-by-character tracking brace depth and string state so it
- * stops at the *matching* closing brace rather than the last `}` in the text.
- * This is immune to:
- *  - Prose appended after the JSON block.
- *  - Code fences wrapping the JSON.
- *  - Nested `}` characters inside JSON string values (e.g. embedded snippets).
  */
 export function extractJson(text: string): string {
   const start = text.indexOf("{");

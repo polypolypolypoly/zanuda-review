@@ -1,7 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 import type { Config } from "../config.js";
+import type { PullRequest } from "../platform/types.js";
 import type { ReviewResult } from "../review/types.js";
-import type { PullRequestData } from "./pullRequest.js";
 
 const SEVERITY_EMOJI: Record<string, string> = {
   blocker: "🛑",
@@ -16,7 +16,7 @@ const SEVERITY_EMOJI: Record<string, string> = {
  */
 export async function postReview(
   octokit: Octokit,
-  pr: PullRequestData,
+  pr: PullRequest,
   result: ReviewResult,
   config: Config,
 ): Promise<void> {

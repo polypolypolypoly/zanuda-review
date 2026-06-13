@@ -1,24 +1,15 @@
 import type { Octokit } from "@octokit/rest";
-import type { RepoRef } from "./client.js";
+import type { PullRequest, RepoRef } from "../platform/types.js";
 
-export interface PullRequestData {
-  ref: RepoRef;
-  number: number;
-  title: string;
-  body: string;
-  baseSha: string;
-  headSha: string;
-  /** Unified diff of the whole PR. */
-  diff: string;
-  changedFiles: string[];
-}
+// PullRequestData is an alias kept for internal use within the github/ layer.
+export type PullRequestData = PullRequest;
 
 /** Fetch everything the reviewer needs about a PR in one place. */
 export async function fetchPullRequest(
   octokit: Octokit,
   ref: RepoRef,
   number: number,
-): Promise<PullRequestData> {
+): Promise<PullRequest> {
   const { data: pr } = await octokit.pulls.get({ ...ref, pull_number: number });
 
   // The diff media type returns a raw unified diff as the response body.

@@ -1,8 +1,6 @@
-import type { Octokit } from "@octokit/rest";
 import type { Config } from "../config.js";
-import type { RepoRef } from "../github/client.js";
+import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { logger } from "../logger.js";
-import { tryReadFile } from "./repoConfig.js";
 
 export interface ProjectContext {
   /** Rendered, ready-to-embed block describing the project. */
@@ -15,14 +13,14 @@ export interface ProjectContext {
  * project's own standards instead of generic best practices.
  */
 export async function buildContext(
-  octokit: Octokit,
+  connector: SCMConnector,
   ref: RepoRef,
   gitRef: string,
   config: Config,
 ): Promise<ProjectContext> {
   const sections: string[] = [];
 
-  const files = await collectFiles(octokit, ref, gitRef, config);
+  const files = await collectFiles(connector, ref, gitRef, config);
   let budget = config.context.maxFileChars;
   for (const { path, content } of files) {
     if (budget <= 0) break;
@@ -33,7 +31,7 @@ export async function buildContext(
 
   if (config.context.includeFileTree) {
     const tree = await buildFileTree(
-      octokit,
+      connector,
       ref,
       gitRef,
       config.context.maxTreeEntries,
@@ -49,41 +47,34 @@ export async function buildContext(
 }
 
 async function collectFiles(
-  octokit: Octokit,
+  connector: SCMConnector,
   ref: RepoRef,
   gitRef: string,
   config: Config,
 ): Promise<Array<{ path: string; content: string }>> {
-  // Sequential fetching avoids triggering GitHub's secondary (concurrency)
-  // rate limits when many context files are configured.
+  // Sequential fetching avoids triggering secondary rate limits.
   const results: Array<{ path: string; content: string }> = [];
   for (const path of config.context.includeFiles) {
-    const content = await tryReadFile(octokit, ref, path, gitRef).catch(
-      () => null,
-    );
+    const content = await connector
+      .readFile(ref, path, gitRef)
+      .catch(() => null);
     if (content !== null) results.push({ path, content });
   }
   return results;
 }
 
 async function buildFileTree(
-  octokit: Octokit,
+  connector: SCMConnector,
   ref: RepoRef,
   gitRef: string,
   maxEntries: number,
 ): Promise<string | null> {
   try {
-    const { data } = await octokit.git.getTree({
-      ...ref,
-      tree_sha: gitRef,
-      recursive: "true",
-    });
-    const paths = data.tree
-      .filter((t) => t.type === "blob" && t.path)
-      .map((t) => t.path as string)
-      .slice(0, maxEntries);
-    if (data.truncated || data.tree.length > maxEntries) {
-      paths.push(`… (${data.tree.length - paths.length} more)`);
+    const tree = await connector.getFileTree(ref, gitRef, maxEntries);
+    if (tree.paths.length === 0) return null;
+    const paths = [...tree.paths];
+    if (tree.truncated) {
+      paths.push(`… (${tree.total - paths.length} more)`);
     }
     return paths.join("\n");
   } catch (err) {

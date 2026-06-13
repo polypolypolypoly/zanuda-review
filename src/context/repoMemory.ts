@@ -1,9 +1,8 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { homedir } from "node:os";
-import type { Octokit } from "@octokit/rest";
 import type { Config } from "../config.js";
-import type { RepoRef } from "../github/client.js";
+import type { SCMConnector, RepoRef } from "../platform/types.js";
 import type { LLMProvider } from "../llm/types.js";
 import { logger } from "../logger.js";
 import { buildContext } from "./builder.js";
@@ -85,7 +84,7 @@ Rules:
  * tree. This is a one-time LLM call on first encounter of a repo.
  */
 export async function generateRepoMemory(
-  octokit: Octokit,
+  connector: SCMConnector,
   ref: RepoRef,
   gitRef: string,
   config: Config,
@@ -108,7 +107,7 @@ export async function generateRepoMemory(
   log.info("Generating repo memory (first encounter)");
 
   try {
-    const context = await buildContext(octokit, ref, gitRef, config);
+    const context = await buildContext(connector, ref, gitRef, config);
 
     const user = [
       `Repository: ${ref.owner}/${ref.repo}`,
