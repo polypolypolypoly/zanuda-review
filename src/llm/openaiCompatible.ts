@@ -20,15 +20,37 @@ class OpenAICompatibleProvider implements LLMProvider {
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
-    const res = await this.client.chat.completions.create({
+    const base = {
       model: req.model,
       temperature: req.temperature,
       max_tokens: req.maxTokens,
       messages: [
-        { role: "system", content: req.system },
-        { role: "user", content: req.user },
+        { role: "system" as const, content: req.system },
+        { role: "user" as const, content: req.user },
       ],
-    });
+    };
+
+    if (req.jsonSchema) {
+      // Use JSON schema mode to guarantee a valid, schema-conforming response.
+      // The model returns JSON directly — no extractJson needed.
+      const res = await this.client.chat.completions.create({
+        ...base,
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "structured_result",
+            strict: true,
+            schema: req.jsonSchema,
+          },
+        } as Parameters<
+          typeof this.client.chat.completions.create
+        >[0]["response_format"],
+      });
+      const text = res.choices[0]?.message?.content ?? "{}";
+      return { text, model: req.model, provider: this.name };
+    }
+
+    const res = await this.client.chat.completions.create(base);
     const text = res.choices[0]?.message?.content ?? "";
     return { text, model: req.model, provider: this.name };
   }

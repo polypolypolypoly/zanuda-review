@@ -18,7 +18,11 @@ import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { buildPromptDiff, includedPaths } from "./diff.js";
-import { ReviewResultSchema, type ReviewResult } from "./types.js";
+import {
+  ReviewResultSchema,
+  type ReviewResult,
+  REVIEW_RESULT_JSON_SCHEMA,
+} from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 
 export interface ReviewDeps {
@@ -201,17 +205,24 @@ export async function reviewPullRequest(
         repoMemory: repoMemory ?? undefined,
         instructions,
         promptDiff,
+        // Signal to the prompt builder that output instructions can be omitted
+        // — the schema is enforced at the API level instead.
+        structuredOutput: true,
       }),
       model: config.models[config.provider],
       temperature: config.generation.temperature,
-      maxTokens: config.generation.maxTokens,
+      maxTokens: adaptiveMaxTokens(
+        promptDiff.includedFiles.length,
+        config.generation.maxTokens,
+      ),
+      jsonSchema: REVIEW_RESULT_JSON_SCHEMA,
     });
     log.info(
       { provider: completion.provider, model: completion.model },
       "Model responded",
     );
 
-    const result = parseReviewResult(completion.text);
+    const result = parseReviewResult(completion.text, { structured: true });
     const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
@@ -290,8 +301,21 @@ export async function reviewPullRequest(
       );
     }
 
-    // ── Repo memory update ────────────────────────────────────────────────────
-    if (config.memory.enabled && repoMemory) {
+    // ── Repo memory update ────────────────────────────────────────────────────────────────
+    // Skip the update check for small PRs: a PR under this threshold almost
+    // never reveals new architecture, style patterns, or invariants worth
+    // persisting. Saves one full LLM round-trip (~1750 input + 2048 max output
+    // tokens) that almost always returns {update: false} anyway.
+    const totalChangedLines = pr.files.reduce(
+      (sum, f) => sum + f.additions + f.deletions,
+      0,
+    );
+    const MEMORY_UPDATE_MIN_LINES = 100;
+    if (
+      config.memory.enabled &&
+      repoMemory &&
+      totalChangedLines >= MEMORY_UPDATE_MIN_LINES
+    ) {
       try {
         const updated = await maybeUpdateRepoMemory(
           ref,
@@ -316,8 +340,40 @@ export async function reviewPullRequest(
   }
 }
 
-/** Parse the model's JSON, tolerating accidental code fences / prose wrapping. */
-export function parseReviewResult(text: string): ReviewResult {
+/**
+ * Scale the completion token budget to the actual PR size instead of always
+ * reserving the configured maximum.
+ *
+ * Output budget per file:
+ *   ~30 tokens for the filesSummary entry
+ *   ~80 tokens for an inline comment (typically 1–2 per file reviewed)
+ *   = ~120 tokens/file, doubled for headroom = ~240 tokens/file
+ *
+ * The configured maxTokens acts as a hard ceiling.
+ */
+export function adaptiveMaxTokens(
+  fileCount: number,
+  configuredMax: number,
+): number {
+  const estimated = fileCount * 240 + 400; // 400 fixed: summary + action + JSON structure
+  return Math.min(configuredMax, Math.max(1500, estimated));
+}
+
+/**
+ * Parse the model's response into a ReviewResult.
+ *
+ * When the provider used structured output (jsonSchema), `text` is already
+ * clean JSON and we skip extractJson. When it's a plain text response we run
+ * the full extraction pipeline as a fallback.
+ */
+export function parseReviewResult(
+  text: string,
+  opts: { structured?: boolean } = {},
+): ReviewResult {
+  if (opts.structured) {
+    // Response is guaranteed JSON from the provider — parse directly.
+    return ReviewResultSchema.parse(JSON.parse(text));
+  }
   const json = extractJson(text);
   return ReviewResultSchema.parse(JSON.parse(json));
 }

@@ -18,6 +18,32 @@ export class AnthropicProvider implements LLMProvider {
     // temperature is deprecated for Claude 4+ models — omit it entirely
     // and let the model use its default. Claude 3 and earlier still
     // accept it, but omitting is safe for all versions.
+
+    if (req.jsonSchema) {
+      // Use tool_use to guarantee the response matches the JSON schema.
+      // tool_choice: {type: "tool"} forces the model to always call the tool,
+      // returning structured JSON rather than free text.
+      const res = await this.client.messages.create({
+        model: req.model,
+        max_tokens: req.maxTokens,
+        system: req.system,
+        messages: [{ role: "user", content: req.user }],
+        tools: [
+          {
+            name: "structured_result",
+            description: "Return the structured result as specified.",
+            input_schema: req.jsonSchema as Anthropic.Tool["input_schema"],
+          },
+        ],
+        tool_choice: { type: "tool", name: "structured_result" },
+      });
+      const toolBlock = res.content.find(
+        (b): b is Anthropic.ToolUseBlock => b.type === "tool_use",
+      );
+      const text = toolBlock ? JSON.stringify(toolBlock.input) : "{}";
+      return { text, model: req.model, provider: this.name };
+    }
+
     const res = await this.client.messages.create({
       model: req.model,
       max_tokens: req.maxTokens,
