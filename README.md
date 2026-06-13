@@ -24,7 +24,7 @@ No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the o
 The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If you've been given access:
 
 1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
-2. Optionally commit `.zanuda.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
+2. Optionally commit `.zanuda/config.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
 3. Open a PR and request a review from Zanuda. That's it.
 
 **Want reviews requested automatically on every PR?** Pick one:
@@ -171,6 +171,26 @@ npm run review -- owner/repo#123 --round=2  # run as round 2
 ```bash
 npm test
 ```
+
+## Adding a new LLM provider
+
+Zanuda's LLM layer is a single-method interface. Adding Gemini, Mistral, Cohere, or any other provider follows the same pattern as the existing ones.
+
+**Four wiring points:**
+
+1. **Copy the stub** — `src/llm/stub.ts` is an annotated skeleton with JSDoc explaining every field.
+
+   ```bash
+   cp src/llm/stub.ts src/llm/<name>.ts
+   ```
+
+2. **Implement `complete()`** — one method: takes a system prompt + user message, returns a text string. See `src/llm/types.ts` for the full contract.
+
+3. **Register in the factory** — add one `case` to `src/llm/index.ts` and add the provider name to the enum in `src/config.ts`.
+
+4. **Wire up config** — add a default model ID to `config/default.yaml` and an API key entry to `.env.example`.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide including notes on temperature handling, streaming, and error propagation.
 
 ## Adding a new platform (GitLab, Bitbucket, …)
 

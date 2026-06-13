@@ -43,9 +43,25 @@ function _buildProvider(provider: Config["provider"]): LLMProvider {
       return openRouterProvider();
     case "ollama":
       return ollamaProvider();
+
+    // ── Add new providers here ────────────────────────────────────────────
+    // 1. Copy src/llm/stub.ts → src/llm/<name>.ts and implement complete().
+    // 2. Import your factory function above.
+    // 3. Add a case:
+    //      case "myprovider":
+    //        return myProvider();
+    // 4. Add "myprovider" to the provider enum in src/config.ts.
+    // 5. Add a default model under models: in config/default.yaml.
+    // 6. Add the API key to .env.example.
+    // See CONTRIBUTING.md for the full guide.
+    // ─────────────────────────────────────────────────────────────────────
+
     default: {
       const _exhaustive: never = provider;
-      throw new Error(`Unknown provider: ${_exhaustive}`);
+      throw new Error(
+        `Unknown LLM provider: "${_exhaustive}". ` +
+          `See src/llm/stub.ts to implement a new one.`,
+      );
     }
   }
 }
