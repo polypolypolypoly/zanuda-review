@@ -327,6 +327,7 @@ async function pollMentions(opts: {
           discussion,
         );
         // All state mutations go through store.set() — no direct field mutation.
+        // store.set automatically updates lastUpdatedAt to 'now'.
         store.set(id, {
           ...current,
           repliedCommentIds: new Set([

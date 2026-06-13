@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { homedir } from "node:os";
+import { z } from "zod";
 import type { Config } from "../config.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import type { LLMProvider } from "../llm/types.js";
@@ -214,14 +215,19 @@ export async function maybeUpdateRepoMemory(
     maxTokens: 2048,
   });
 
-  let parsed: { update: boolean; content?: string };
+  const UpdateResponseSchema = z.object({
+    update: z.boolean(),
+    content: z.string().optional(),
+  });
+
+  let parsed: z.infer<typeof UpdateResponseSchema>;
   try {
     // Strip optional code fence before parsing.
     const raw = completion.text
       .replace(/^```(?:json)?\n?/m, "")
       .replace(/\n?```$/m, "")
       .trim();
-    parsed = JSON.parse(raw) as typeof parsed;
+    parsed = UpdateResponseSchema.parse(JSON.parse(raw));
   } catch {
     log.warn(
       { text: completion.text.slice(0, 200) },

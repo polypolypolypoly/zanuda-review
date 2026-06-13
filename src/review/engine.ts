@@ -343,41 +343,69 @@ export function parseReviewResult(text: string): ReviewResult {
  * Extract a JSON object from the model's response.
  *
  * Strategy:
- * 1. Try a simple first-`{` to last-`}` slice on the raw text — works for
- *    plain JSON responses and prose-wrapped JSON.
- * 2. If that doesn't parse (e.g. trailing prose after the closing brace
- *    somehow trips things up), strip a wrapping ` ```json ``` ` code fence
- *    and try again.
+ * 1. Use brace-depth scanning from the first `{` to the matching `}` — this
+ *    correctly handles trailing prose that might contain stray `}` characters.
+ * 2. If no opening brace is found, try stripping a wrapping code fence and retry.
  *
  * Delegates actual JSON validation to `JSON.parse` rather than re-implementing
  * escape-sequence handling.
  */
 export function extractJson(text: string): string {
-  // Fast path: find the outermost { … } span.
-  const start = text.indexOf("{");
-  const end = text.lastIndexOf("}");
-  if (start !== -1 && end !== -1 && end >= start) {
-    const slice = text.slice(start, end + 1);
-    try {
-      JSON.parse(slice); // validate — throws if malformed
-      return slice;
-    } catch {
-      // fall through to fence-strip path
-    }
-  }
+  const json = tryExtractBalanced(text);
+  if (json) return json;
 
-  // Slow path: strip a wrapping code fence (model sometimes wraps in ```json).
+  // Fallback: strip a wrapping code fence (model sometimes wraps in ```json).
   const fenced = text.match(/^```(?:json)?[ \t]*\n([\s\S]*?)\n```[ \t]*$/);
   if (fenced) {
     const inner = fenced[1]!.trim();
-    const s = inner.indexOf("{");
-    const e = inner.lastIndexOf("}");
-    if (s !== -1 && e !== -1 && e >= s) {
-      return inner.slice(s, e + 1);
-    }
+    const json = tryExtractBalanced(inner);
+    if (json) return json;
   }
 
   throw new Error(
     `No JSON object found in model response: ${text.slice(0, 200)}`,
   );
+}
+
+function tryExtractBalanced(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i]!;
+
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+
+    if (ch === "{") depth++;
+    else if (ch === "}") {
+      depth--;
+      if (depth === 0) {
+        const slice = text.slice(start, i + 1);
+        try {
+          JSON.parse(slice); // validate
+          return slice;
+        } catch {
+          return null; // malformed JSON
+        }
+      }
+    }
+  }
+
+  return null; // unclosed brace
 }
