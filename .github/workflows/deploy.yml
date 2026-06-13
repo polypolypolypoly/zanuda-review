@@ -34,8 +34,18 @@ jobs:
       REPO_PATH: /mnt/data/projects/review-helper
       SERVICE_NAME: review-helper
     steps:
-      - name: Pull latest code
-        run: sudo -u $SERVICE_USER bash -c "git -C $REPO_PATH pull --ff-only origin main"
+      - name: Sync to origin/main
+        # fetch + checkout main + reset --hard guarantees the working tree is
+        # exactly origin/main regardless of:
+        #   - uncommitted local changes (reset --hard discards them)
+        #   - being on a different branch (checkout main switches back)
+        #   - detached HEAD state
+        # Never use pull --ff-only here: a dirty working tree will abort it,
+        # and that's exactly what happened on a previous deploy.
+        run: |
+          sudo -u $SERVICE_USER git -C $REPO_PATH fetch origin main
+          sudo -u $SERVICE_USER git -C $REPO_PATH checkout main
+          sudo -u $SERVICE_USER git -C $REPO_PATH reset --hard FETCH_HEAD
 
       - name: Install dependencies
         # --ignore-scripts: never run dependency lifecycle scripts on the host.
