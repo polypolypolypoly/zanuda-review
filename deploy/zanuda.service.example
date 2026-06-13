@@ -1,5 +1,5 @@
 [Unit]
-Description=review-helper — AI code review poller
+Description=Zanuda the Reviewer — AI code review poller
 After=network-online.target
 Wants=network-online.target
 
@@ -10,7 +10,7 @@ Group=<SERVICE_USER>
 WorkingDirectory=<REPO_PATH>
 # Point at a local config file with your overrides (allowlist, paths, etc).
 # The file is NOT committed — create it from config/default.yaml as a base.
-Environment=REVIEW_HELPER_CONFIG=<LOCAL_CONFIG_PATH>
+Environment=ZANUDA_CONFIG=<LOCAL_CONFIG_PATH>
 Environment=NODE_ENV=production
 # Secrets (GITHUB_TOKEN, API keys) live in .env, loaded by dotenv at startup.
 ExecStart=<NODE_PATH> dist/index.js

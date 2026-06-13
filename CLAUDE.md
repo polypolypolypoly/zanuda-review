@@ -1,4 +1,4 @@
-# review-helper (alias: Zanuda)
+# Zanuda the Reviewer
 
 AI-powered GitHub code review bot. Runs as a dedicated GitHub account (`ZlayaZanuda`). When a review is requested from the bot on a PR, it fetches context + diff, sends it to an LLM, and posts structured review comments back.
 
@@ -51,7 +51,7 @@ llm/
   anthropic.ts        Anthropic Claude implementation
   openaiCompatible.ts OpenAI / OpenRouter / Ollama implementation
 context/
-  repoConfig.ts       fetch & merge per-repo .review-helper.yml
+  repoConfig.ts       fetch & merge per-repo .zanuda.yml
   builder.ts          build project context string (README, CONTRIBUTING, etc.)
   repoMemory.ts       generate, load, and update persistent per-repo memory
 review/
@@ -67,7 +67,7 @@ state/
 
 - `config/default.yaml` — global defaults (preprompt, models, limits, context file list)
 - `.env` / `.env.example` — secrets (GITHUB_TOKEN, GITHUB_BOT_LOGIN, API keys)
-- `deploy/review-helper.service` — systemd unit for homeserver deployment
+- `deploy/zanuda.service` — systemd unit for homeserver deployment
 - `Dockerfile` — Docker deployment (note: needs env vars at runtime)
 - `test/` — Node built-in test runner tests
 
@@ -98,8 +98,8 @@ npm test              # node --test
 
 ```
 global defaults (config/default.yaml)
-  → org config   ({owner}/.github repo → .review-helper.yml)
-  → repo config  (repo root → .review-helper.yml)
+  → org config   ({owner}/.github repo → .zanuda.yml)
+  → repo config  (repo root → .zanuda.yml)
 ```
 
 Each layer overrides only the keys it sets; everything else inherits from above.
@@ -107,7 +107,7 @@ Both org and repo configs are fetched from the **base branch** of the PR, not
 the PR head, so a PR author cannot influence the bot by editing them in their
 branch.
 
-## Per-org config (`{owner}/.github` → `.review-helper.yml`)
+## Per-org config (`{owner}/.github` → `.zanuda.yml`)
 
 Applies to all repos under that owner/org. Useful for setting a provider,
 model, or preprompt rules once instead of per-repo:
@@ -120,7 +120,7 @@ models:
   openrouter: anthropic/claude-opus-4-8
 ```
 
-## Per-repo config (`.review-helper.yml` committed to repo root)
+## Per-repo config (`.zanuda.yml` committed to repo root)
 
 ```yaml
 provider: ollama
@@ -143,8 +143,8 @@ memory:
 
 **Their side (once per org/repo):**
 2. Add `ZlayaZanuda` as a collaborator on the repo (Read is enough; needed to be requestable as a reviewer). For orgs: adding the bot as an org member covers all repos at once.
-3. _(Optional)_ Commit `.review-helper.yml` to the org's `.github` repo for org-wide defaults.
-4. _(Optional)_ Commit `.review-helper.yml` to individual repos to override org defaults.
+3. _(Optional)_ Commit `.zanuda.yml` to the org's `.github` repo for org-wide defaults.
+4. _(Optional)_ Commit `.zanuda.yml` to individual repos to override org defaults.
 
 **Then forever, zero setup per PR:**
 5. Open a PR → request review from `ZlayaZanuda` → review appears within 60 s.
@@ -153,16 +153,16 @@ memory:
 
 - Runs as a **systemd service** under the dedicated `zanuda` service account.
 - **CI/CD via GitHub Actions self-hosted runner** on the homeserver.
-  - On push to `main`: pull → `npm ci` → `npm run build` → `systemctl restart review-helper`.
+  - On push to `main`: pull → `npm ci` → `npm run build` → `systemctl restart zanuda`.
   - Deploy job has `concurrency: group: deploy` to prevent parallel deploys.
 - Persistent data lives in `/mnt/data/apps/review-helper/` (state file + repo memory).
-- Homeserver-specific config (allowlist, paths) lives in `/mnt/data/apps/review-helper/config.yaml` — **not committed**. Loaded via `REVIEW_HELPER_CONFIG` env var in the systemd unit.
+- Homeserver-specific config (allowlist, paths) lives in `/mnt/data/apps/review-helper/config.yaml` — **not committed**. Loaded via `ZANUDA_CONFIG` env var in the systemd unit.
 - No public endpoint — the poller reaches out to GitHub, GitHub never needs to reach in.
 
 ## Self-hosting (for others)
 
-See `README.md → Self-hosting` and `deploy/review-helper.service.example`.
-The `config/default.yaml` in the repo contains generic defaults (empty allowlist, default paths). Create your own local config file with overrides and point `REVIEW_HELPER_CONFIG` at it.
+See `README.md → Self-hosting` and `deploy/zanuda.service.example`.
+The `config/default.yaml` in the repo contains generic defaults (empty allowlist, default paths). Create your own local config file with overrides and point `ZANUDA_CONFIG` at it.
 
 ## Access control & limits
 

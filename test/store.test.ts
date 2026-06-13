@@ -8,7 +8,7 @@ import { PRStateStore } from "../src/state/store.js";
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeTmpDir(): string {
-  return mkdtempSync(join(tmpdir(), "review-helper-store-test-"));
+  return mkdtempSync(join(tmpdir(), "zanuda-store-test-"));
 }
 
 function makeState(overrides: Partial<Parameters<PRStateStore["set"]>[1]> = {}) {

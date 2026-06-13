@@ -11,7 +11,7 @@ import { buildContext } from "./builder.js";
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
 function memoryDir(config: Config): string {
-  const dir = config.memory.dir || join(homedir(), ".review-helper", "memory");
+  const dir = config.memory.dir || join(homedir(), ".zanuda", "memory");
   return resolve(dir);
 }
 

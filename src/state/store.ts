@@ -58,7 +58,7 @@ export class PRStateStore {
   private readonly data: Map<number, PRState>;
 
   constructor(statePath?: string) {
-    this.path = resolve(statePath || join(homedir(), ".review-helper", "state.json"));
+    this.path = resolve(statePath || join(homedir(), ".zanuda", "state.json"));
     this.data = this.loadFromDisk();
   }
 

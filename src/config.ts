@@ -5,7 +5,7 @@ import { z } from "zod";
 
 /**
  * Global configuration schema. Loaded from config/default.yaml (or the path
- * in REVIEW_HELPER_CONFIG) and overridable per-repo via `.review-helper.yml`.
+ * in ZANUDA_CONFIG) and overridable per-repo via `.zanuda.yml`.
  */
 export const ConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai", "openrouter", "ollama"]),
@@ -29,7 +29,7 @@ export const ConfigSchema = z.object({
   persistence: z.object({
     /**
      * Path to the PR state file (rounds completed, mention counts, etc.).
-     * Empty string = ~/.review-helper/state.json
+     * Empty string = ~/.zanuda/state.json
      */
     stateFile: z.string(),
   }),
@@ -51,7 +51,7 @@ export const ConfigSchema = z.object({
   memory: z.object({
     /** Toggle the whole feature on/off. */
     enabled: z.boolean(),
-    /** Directory to store per-repo memory files. Empty string = ~/.review-helper/memory. */
+    /** Directory to store per-repo memory files. Empty string = ~/.zanuda/memory. */
     dir: z.string(),
     /** After every review, ask the model if the memory should be updated. */
     updateAfterReview: z.boolean(),
@@ -66,7 +66,7 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/** A repo-supplied `.review-helper.yml` may override a subset of the config. */
+/** A repo-supplied `.zanuda.yml` may override a subset of the config. */
 export const RepoConfigSchema = ConfigSchema.partial().extend({
   // Convenience: a repo can append extra instructions without replacing the
   // whole preprompt.
@@ -81,7 +81,7 @@ export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 
 export function loadConfig(path?: string): Config {
   const configPath = resolve(
-    path ?? process.env.REVIEW_HELPER_CONFIG ?? "config/default.yaml",
+    path ?? process.env.ZANUDA_CONFIG ?? "config/default.yaml",
   );
   const raw = parseYaml(readFileSync(configPath, "utf8"));
   const parsed = ConfigSchema.safeParse(raw);
@@ -114,7 +114,7 @@ function applyEnvOverrides(config: Config): Config {
 }
 
 /**
- * Merge a repo's `.review-helper.yml` over the global config.
+ * Merge a repo's `.zanuda.yml` over the global config.
  * Shallow per-section; `prepromptAppend` is concatenated onto the preprompt.
  */
 export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {

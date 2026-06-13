@@ -4,11 +4,11 @@ import { RepoConfigSchema, type RepoConfig } from "../config.js";
 import type { RepoRef } from "../github/client.js";
 import { logger } from "../logger.js";
 
-const REPO_CONFIG_PATHS = [".review-helper.yml", ".review-helper.yaml", ".github/review-helper.yml"];
-const ORG_CONFIG_PATHS  = [".review-helper.yml", ".review-helper.yaml"];
+const REPO_CONFIG_PATHS = [".zanuda.yml", ".zanuda.yaml", ".github/zanuda.yml"];
+const ORG_CONFIG_PATHS  = [".zanuda.yml", ".zanuda.yaml"];
 
 /**
- * Look for a per-repo `.review-helper.yml` on the PR's base ref.
+ * Look for a per-repo `.zanuda.yml` on the PR's base ref.
  * Returns null if not found or malformed (logged and ignored).
  */
 export async function fetchRepoConfig(
@@ -20,7 +20,7 @@ export async function fetchRepoConfig(
 }
 
 /**
- * Look for an org-wide `.review-helper.yml` in the `{owner}/.github` repo
+ * Look for an org-wide `.zanuda.yml` in the `{owner}/.github` repo
  * (GitHub's conventional location for org-level defaults).
  * Returns null if the .github repo doesn't exist, the file isn't there,
  * or the file is malformed.
@@ -51,7 +51,7 @@ async function fetchConfig(
     if (!parsed.success) {
       logger.warn(
         { repo: `${ref.owner}/${ref.repo}`, path, errors: parsed.error.issues },
-        `Ignoring invalid ${label} .review-helper.yml`,
+        `Ignoring invalid ${label} .zanuda.yml`,
       );
       return null;
     }

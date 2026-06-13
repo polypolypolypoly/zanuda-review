@@ -1,8 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────
-# review-helper default configuration.
+# Zanuda the Reviewer — default configuration.
 #
 # This is the GLOBAL config. Any repository can override most of these
-# values by committing a `.review-helper.yml` file to its default branch
+# values by committing a `.zanuda.yml` file to its default branch
 # (see `repoConfig` in src/context/repoConfig.ts). Per-repo values are
 # shallow-merged over these defaults.
 # ─────────────────────────────────────────────────────────────────────
@@ -26,7 +26,7 @@ generation:
 
 # ─── Preprompt ───────────────────────────────────────────────────────
 # The system instruction prepended to every review. Repos can append to
-# or replace this via `.review-helper.yml`.
+# or replace this via `.zanuda.yml`.
 preprompt: |
   You are a senior security engineer and blockchain auditor doing a code review.
   You are professionally paranoid. You have shipped exploits, found rug pulls,
@@ -105,7 +105,7 @@ preprompt: |
 # Path to the PR state file that survives restarts (round counts, mention
 # reply caps, etc). Empty = ~/.review-helper/state.json
 persistence:
-  stateFile: ""   # empty = ~/.review-helper/state.json
+  stateFile: ""   # empty = ~/.zanuda/state.json
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
@@ -133,7 +133,7 @@ limits:
 # subsequent review she checks whether the memory needs updating.
 memory:
   enabled: true
-  # Absolute path for memory storage. Empty = ~/.review-helper/memory
+  # Absolute path for memory storage. Empty = ~/.zanuda/memory
   dir: ""
   # After posting a review, ask the model if the memory should be updated.
   updateAfterReview: true

@@ -1,14 +1,14 @@
 {
-  "name": "review-helper",
+  "name": "zanuda-review",
   "version": "0.1.0",
   "private": true,
-  "description": "Model-agnostic AI code review bot for GitHub. Request a review from the bot account on a PR and it posts review comments.",
+  "description": "Zanuda the Reviewer — a model-agnostic AI code review bot for GitHub.",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "review-helper": "./dist/cli.js"
+    "zanuda": "./dist/cli.js"
   },
   "scripts": {
     "dev": "tsx watch src/index.ts",

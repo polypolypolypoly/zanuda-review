@@ -1,4 +1,4 @@
-# review-helper
+# Zanuda the Reviewer
 
 A model-agnostic AI code-review bot for GitHub. It runs under its own GitHub
 account; when you **request a review from the bot on a pull request**, it
@@ -41,16 +41,16 @@ never needs to reach in. There is no server to expose.
 
 ## Using a hosted instance
 
-If someone is already running review-helper as a service and has given you
+If someone is already running Zanuda the Reviewer as a service and has given you
 access, you only need to do the following — no server or API keys required
 on your end.
 
 **Once per repo:**
 1. Add the bot account as a collaborator on your repo (Read access is enough
    on public repos). For orgs, adding it as an org member covers all repos.
-2. _(Optional)_ Commit `.review-helper.yml` to your org's `.github` repo for
+2. _(Optional)_ Commit `.zanuda.yml` to your org's `.github` repo for
    org-wide defaults (provider, model, extra rules).
-3. _(Optional)_ Commit `.review-helper.yml` to individual repos to override
+3. _(Optional)_ Commit `.zanuda.yml` to individual repos to override
    org defaults.
 
 **Then forever, zero setup per PR:**
@@ -81,23 +81,23 @@ cp .env.example .env
 your deployment-specific values:
 
 ```yaml
-# e.g. /etc/review-helper/config.yaml  (or anywhere you like)
+# e.g. /etc/zanuda/config.yaml  (or anywhere you like)
 access:
   allowlist:
     - your-org     # owner slug — any repo under this org/account
     # - other-org/specific-repo   # or a single repo
 
 persistence:
-  stateFile: "/var/lib/review-helper/state.json"
+  stateFile: "/var/lib/zanuda/state.json"
 
 memory:
-  dir: "/var/lib/review-helper/memory"
+  dir: "/var/lib/zanuda/memory"
 ```
 
 Point the service at it:
 
 ```bash
-export REVIEW_HELPER_CONFIG=/etc/review-helper/config.yaml
+export ZANUDA_CONFIG=/etc/zanuda/config.yaml
 ```
 
 ### 4. Run
@@ -109,12 +109,12 @@ npm ci && npm run build && npm start
 ### 5. Systemd (recommended for production)
 
 ```bash
-cp deploy/review-helper.service.example /etc/systemd/system/review-helper.service
-$EDITOR /etc/systemd/system/review-helper.service   # fill in the <PLACEHOLDERS>
+cp deploy/zanuda.service.example /etc/systemd/system/zanuda.service
+$EDITOR /etc/systemd/system/zanuda.service   # fill in the <PLACEHOLDERS>
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now review-helper
-journalctl -u review-helper -f
+sudo systemctl enable --now zanuda
+journalctl -u zanuda -f
 ```
 
 ### 6. CI/CD (optional)
@@ -138,11 +138,11 @@ Settings are merged in order — each layer overrides only what it sets:
 
 ```
 global defaults (config/default.yaml)
-  → org config   ({owner}/.github repo → .review-helper.yml)
-  → repo config  (repo root → .review-helper.yml)
+  → org config   ({owner}/.github repo → .zanuda.yml)
+  → repo config  (repo root → .zanuda.yml)
 ```
 
-**Org config** — commit `.review-helper.yml` to the org's `.github` repository.
+**Org config** — commit `.zanuda.yml` to the org's `.github` repository.
 Applies to all repos under that org. Good for setting a shared provider, model,
 or preprompt rules once:
 
@@ -154,7 +154,7 @@ models:
   openrouter: anthropic/claude-opus-4-8
 ```
 
-**Per-repo config** — commit `.review-helper.yml` to the repo root:
+**Per-repo config** — commit `.zanuda.yml` to the repo root:
 
 ```yaml
 provider: ollama
@@ -183,7 +183,7 @@ npm run review -- owner/repo#123 --round=2   # simulate round 2
 ## Choosing a model
 
 Set `LLM_PROVIDER` and the matching key in `.env`, or per-repo in
-`.review-helper.yml`. Defaults live in `config/default.yaml` under `models:`.
+`.zanuda.yml`. Defaults live in `config/default.yaml` under `models:`.
 
 | Provider     | Env key              | Notes                               |
 | ------------ | -------------------- | ------------------------------------|
@@ -212,7 +212,7 @@ src/
     anthropic.ts        Anthropic Claude implementation
     openaiCompatible.ts OpenAI / OpenRouter / Ollama implementation
   context/
-    repoConfig.ts       fetch & merge per-repo .review-helper.yml
+    repoConfig.ts       fetch & merge per-repo .zanuda.yml
     builder.ts          build project context string
     repoMemory.ts       generate, load, update persistent repo memory
   review/
