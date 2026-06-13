@@ -142,6 +142,17 @@ describe("extractJson", () => {
     assert.equal(extractJson('prefix {"a":1} suffix'), '{"a":1}');
   });
 
+  it("stops at the balanced closing brace — trailing '}' in prose does not over-extend slice", () => {
+    assert.equal(extractJson('{"a":1} and then some } stray brace'), '{"a":1}');
+  });
+
+  it("handles code fence inside a comment body value", () => {
+    const json =
+      '{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[{"path":"a.py","line":1,"severity":"warning","body":"Consider:\\n```python\\nif x:\\n    pass\\n```"}]}';
+    const r = parseReviewResult(json);
+    assert.equal(r.comments[0]?.path, "a.py");
+  });
+
   it("handles nested objects", () => {
     assert.equal(extractJson('{"a":{"b":2}}'), '{"a":{"b":2}}');
   });
