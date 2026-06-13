@@ -8,7 +8,7 @@ export interface ProjectContext {
 }
 
 /**
- * Build project-level context for any repo the bot is added to: convention
+ * Build project-level context for any repo Zanuda is added to: convention
  * files plus an optional file-tree overview. This grounds the review in the
  * project's own standards instead of generic best practices.
  */

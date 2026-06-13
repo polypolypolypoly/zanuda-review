@@ -229,8 +229,6 @@ Zanuda's GitHub integration is one connector behind a clean interface. The revie
 
 Set `PLATFORM=<name>` in `.env` to activate your connector. Everything else — reviews, memory, config merging, rate limits — works unchanged.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contribution guide.
-
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, including how to add a new platform connector.

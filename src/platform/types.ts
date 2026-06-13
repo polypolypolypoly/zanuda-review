@@ -93,17 +93,17 @@ export interface SCMConnector {
   readonly name: string;
 
   /**
-   * Return the authenticated bot account's login/username.
+   * Return the authenticated reviewer account's login/username.
    * Called once at startup; the result is cached for the process lifetime.
    */
-  getBotLogin(): Promise<string>;
+  getReviewerLogin(): Promise<string>;
 
   /**
-   * Return all open PRs/MRs where the bot has been requested as a reviewer.
+   * Return all open PRs/MRs where the reviewer has been requested.
    * This is the poller heartbeat — called every POLL_INTERVAL_SECS.
    * Return [] when there is nothing to review.
    */
-  pollPendingReviews(botLogin: string): Promise<PendingReview[]>;
+  pollPendingReviews(reviewerLogin: string): Promise<PendingReview[]>;
 
   /**
    * Fetch full PR data: diff, changed files, title, body, base/head refs.
@@ -116,7 +116,7 @@ export interface SCMConnector {
    *
    * Always pass `pr.baseSha` for config/context files — never `pr.headSha`.
    * The base branch is maintainer-controlled; using the head ref lets PR
-   * authors influence the bot by editing files in their branch.
+   * authors influence Zanuda by editing files in their branch.
    */
   readFile(ref: RepoRef, path: string, gitRef: string): Promise<string | null>;
 
@@ -177,7 +177,7 @@ export interface SCMConnector {
   resolveReviewThreads(
     ref: RepoRef,
     number: number,
-    botLogin: string,
+    reviewerLogin: string,
   ): Promise<void>;
 
   /**

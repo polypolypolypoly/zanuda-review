@@ -120,7 +120,7 @@ export async function reviewPullRequest(
   try {
     // Three-level config merge: global defaults → org config → per-repo config.
     // All files are read from the base branch (not the PR head) — a PR author
-    // cannot influence the bot's behaviour by editing them in their branch.
+    // cannot influence Zanuda's behaviour by editing them in their branch.
     const [orgConfig, repoConfig, orgInstructions, repoInstructions] =
       await Promise.all([
         fetchOrgConfig(connector, ref.owner),
@@ -296,10 +296,12 @@ export async function reviewPullRequest(
       // On APPROVE: resolve all outstanding review threads Zanuda opened in
       // previous rounds so they don’t block the merge.
       if (result.action === "APPROVE") {
-        const botLogin = await connector.getBotLogin().catch(() => "");
-        if (botLogin) {
+        const reviewerLogin = await connector
+          .getReviewerLogin()
+          .catch(() => "");
+        if (reviewerLogin) {
           await connector
-            .resolveReviewThreads(ref, number, botLogin)
+            .resolveReviewThreads(ref, number, reviewerLogin)
             .catch((err) =>
               log.warn({ err }, "Failed to resolve threads after APPROVE"),
             );

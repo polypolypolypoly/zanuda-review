@@ -3,10 +3,10 @@
 # every non-draft pull request.
 #
 # Prerequisites:
-#   - Zanuda's bot account must be a collaborator on the repo (Read is enough).
+#   - Zanuda's reviewer account must be a collaborator on the repo (Read is enough).
 #   - The workflow needs `pull-requests: write` permission (granted below).
 #
-# Alternatively, add the bot account to your .github/CODEOWNERS file:
+# Alternatively, add the reviewer account to your .github/CODEOWNERS file:
 #   * @YourZanudaAccount
 # GitHub will then auto-request a review without needing this workflow.
 
@@ -31,6 +31,6 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
-              // Replace with your bot account's GitHub login:
+              // Replace with your reviewer account's GitHub login:
               reviewers: ['ZlayaZanuda'],
             });

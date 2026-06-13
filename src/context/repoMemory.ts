@@ -56,7 +56,7 @@ const _generatingFor = new Map<string, Promise<string>>();
 // ─── Generation ───────────────────────────────────────────────────────────────
 
 const GENERATE_SYSTEM = `\
-You are building a persistent knowledge document for an AI code reviewer bot.
+You are building a persistent knowledge document for an AI code reviewer.
 This document will be prepended to every future review of this repository so the
 reviewer always has deep project context without re-reading the whole codebase.
 
@@ -153,7 +153,7 @@ export async function generateRepoMemory(
 // ─── Update ───────────────────────────────────────────────────────────────────
 
 const UPDATE_SYSTEM = `\
-You are maintaining a knowledge document for an AI code reviewer bot.
+You are maintaining a knowledge document for an AI code reviewer.
 A PR was just reviewed. Decide whether the memory document needs updating.
 
 Update if — and only if — the PR reveals something genuinely NEW:
