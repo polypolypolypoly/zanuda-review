@@ -1,6 +1,6 @@
 # Zanuda the Reviewer
 
-AI-powered GitHub code review bot. Runs as a dedicated GitHub account (`ZlayaZanuda`). When a review is requested from the bot on a PR, it fetches context + diff, sends it to an LLM, and posts structured review comments back.
+AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested as a reviewer on a PR, she fetches context + diff, sends it to an LLM, and posts structured review comments back.
 
 ## Flow
 
@@ -85,7 +85,7 @@ npm test              # node --test
 
 | Var                    | Purpose                                      |
 |------------------------|----------------------------------------------|
-| `GITHUB_TOKEN`         | Bot PAT — login is resolved from it automatically |
+| `GITHUB_TOKEN`         | Zanuda's PAT — login is resolved from it automatically |
 | `LLM_PROVIDER`         | `anthropic` \| `openai` \| `openrouter` \| `ollama` |
 | `ANTHROPIC_API_KEY`    | For Anthropic provider                       |
 | `OPENAI_API_KEY`       | For OpenAI provider                          |
@@ -140,7 +140,7 @@ This repo ships its own `.zanuda/instructions.md` — it serves as both the live
 1. Add the owner slug (or `owner/repo` for a single repo) to `access.allowlist` in `config/default.yaml` and push → CI deploys automatically.
 
 **Their side (once per org/repo):**
-2. Add `ZlayaZanuda` as a collaborator on the repo (Read is enough; needed to be requestable as a reviewer). For orgs: adding the bot as an org member covers all repos at once.
+2. Add `ZlayaZanuda` as a collaborator on the repo (Read is enough; needed to be requestable as a reviewer). For orgs: adding her as an org member covers all repos at once.
 3. _(Optional)_ Commit `.zanuda.yml` to the org's `.github` repo for org-wide defaults.
 4. _(Optional)_ Commit `.zanuda.yml` to individual repos to override org defaults.
 
