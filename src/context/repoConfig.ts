@@ -3,9 +3,8 @@ import { RepoConfigSchema, type RepoConfig } from "../config.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { logger } from "../logger.js";
 
-// All Zanuda files live under .zanuda/ in the repo root.
-const REPO_CONFIG_PATHS = [".zanuda/config.yml", ".zanuda/config.yaml"];
-const ORG_CONFIG_PATHS = [".zanuda/config.yml", ".zanuda/config.yaml"];
+// All Zanuda files live under .zanuda/ in the repo root (or the org .github repo).
+const CONFIG_PATHS = [".zanuda/config.yml", ".zanuda/config.yaml"];
 const INSTRUCTIONS_PATH = ".zanuda/instructions.md";
 
 /**
@@ -17,7 +16,7 @@ export async function fetchRepoConfig(
   ref: RepoRef,
   gitRef: string,
 ): Promise<RepoConfig | null> {
-  return fetchConfig(connector, ref, gitRef, REPO_CONFIG_PATHS, "repo");
+  return fetchConfig(connector, ref, gitRef, CONFIG_PATHS, "repo");
 }
 
 /**
@@ -29,7 +28,7 @@ export async function fetchOrgConfig(
   owner: string,
 ): Promise<RepoConfig | null> {
   const ref: RepoRef = { owner, repo: ".github" };
-  return fetchConfig(connector, ref, "HEAD", ORG_CONFIG_PATHS, "org");
+  return fetchConfig(connector, ref, "HEAD", CONFIG_PATHS, "org");
 }
 
 /** Shared implementation used by both fetch functions. */

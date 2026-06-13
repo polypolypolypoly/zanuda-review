@@ -258,10 +258,18 @@ function renderReview(result: ReviewResult): string {
 
 // ── Git helper ────────────────────────────────────────────────────────────────
 
+// 256 MB — enough for any realistic diff or file tree without being unbounded.
+const GIT_MAX_BUFFER = 256 * 1024 * 1024;
+// 60 s hard timeout per git call; hangs (e.g. credential prompts) must not
+// block the review indefinitely.
+const GIT_TIMEOUT_MS = 60_000;
+
 function git(cwd: string, args: string[], silent = false): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",
+    maxBuffer: GIT_MAX_BUFFER,
+    timeout: GIT_TIMEOUT_MS,
     stdio: silent ? ["pipe", "pipe", "pipe"] : ["pipe", "pipe", "inherit"],
   });
 }

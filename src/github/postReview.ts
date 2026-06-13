@@ -3,10 +3,11 @@ import type { Config } from "../config.js";
 import type { PullRequest } from "../platform/types.js";
 import type { ReviewResult } from "../review/types.js";
 
-// buildReviewCommentBody lives in review/format.ts (platform-agnostic);
-// re-exported here so existing imports from github/postReview continue to work.
-export { buildReviewCommentBody } from "../review/format.js";
+// buildReviewCommentBody lives in review/format.ts (platform-agnostic).
+// Re-exported here so any code that still imports it from github/postReview
+// continues to work without changes.
 import { buildReviewCommentBody } from "../review/format.js";
+export { buildReviewCommentBody };
 
 const SEVERITY_EMOJI: Record<string, string> = {
   blocker: "🛑",

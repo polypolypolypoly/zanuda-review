@@ -1,6 +1,7 @@
 import type { Config } from "../config.js";
 import type { SCMComment, SCMConnector, RepoRef } from "../platform/types.js";
 import type { LLMProvider } from "../llm/types.js";
+import { completeWithRetry } from "../llm/retry.js";
 import { logger } from "../logger.js";
 
 export interface ReplyDeps {
@@ -25,8 +26,8 @@ export async function replyToMention(
 ): Promise<void> {
   const { connector, config, reviewerLogin, provider } = deps;
 
-  const completion = await provider.complete({
-    system: buildReplySystem(reviewerLogin),
+  const completion = await completeWithRetry(provider, {
+    system: buildReplySystem(reviewerLogin, config.preprompt),
     user: buildReplyUserPrompt(prTitle, comment, discussion),
     model: config.models[config.provider],
     temperature: config.generation.temperature,
@@ -43,15 +44,22 @@ export async function replyToMention(
   );
 }
 
-function buildReplySystem(reviewerLogin: string): string {
+/**
+ * Build the system prompt for @mention replies.
+ *
+ * Uses the configured preprompt (same persona as the review itself) so that
+ * self-hosters who customise the preprompt get consistent behaviour in both
+ * review comments and @mention replies. Appends reply-specific rules on top.
+ */
+function buildReplySystem(reviewerLogin: string, preprompt: string): string {
   return (
-    `You are ${reviewerLogin}, a senior security engineer and blockchain auditor. ` +
-    `You have already reviewed this PR and someone has mentioned you in a comment.\n\n` +
-    `Rules:\n` +
+    preprompt.trim() +
+    `\n\nYou are replying as ${reviewerLogin}. ` +
+    `Someone has mentioned you in a PR comment after you have already posted a review.\n\n` +
+    `Reply rules:\n` +
     `- Get straight to the point. No greetings, no filler.\n` +
     `- Answer questions directly in 2-4 sentences max.\n` +
     `- If reconsidering a point, either acknowledge it concisely or stand your ground with a reason.\n` +
-    `- Stay in character: paranoid, security-first, technically precise.\n` +
     `- Do not be sycophantic. Do not start with "Great question" or similar.`
   );
 }

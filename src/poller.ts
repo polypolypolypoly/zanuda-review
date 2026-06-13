@@ -138,7 +138,17 @@ async function pollReviewRequests(opts: {
 
     // ── Hard stop: max rounds reached ─────────────────────────────────────────
     if (completedRounds >= MAX_REVIEW_ROUNDS) {
-      if (!state?.maxRoundsNotified) {
+      // state must exist here: completedRounds >= 2 means rounds were written
+      // to the store by a previous cycle. Guard explicitly so TypeScript — and
+      // future readers — don't have to reason about the invariant.
+      if (!state) {
+        logger.warn(
+          { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
+          "Max rounds reached but no state found — skipping",
+        );
+        continue;
+      }
+      if (!state.maxRoundsNotified) {
         await connector
           .postComment(
             item.ref,
@@ -149,7 +159,7 @@ async function pollReviewRequests(opts: {
           .catch((err: unknown) =>
             logger.warn({ err }, "Failed to post max-rounds notification"),
           );
-        store.set(item.platformId, { ...state!, maxRoundsNotified: true });
+        store.set(item.platformId, { ...state, maxRoundsNotified: true });
       }
       continue;
     }
