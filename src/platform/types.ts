@@ -138,11 +138,16 @@ export interface SCMConnector {
    * Map the model's verdict and inline comments to the platform's review API.
    * If inline anchoring fails, fall back to a summary comment so no feedback
    * is silently lost.
+   *
+   * @param opts.summaryPostedElsewhere - If true, the review summary has already
+   *   been posted elsewhere (e.g., in a progress comment) and the review body can
+   *   be left empty. If false, the summary must be included in the review body.
    */
   postReview(
     pr: PullRequest,
     result: ReviewResult,
     config: Config,
+    opts?: { summaryPostedElsewhere?: boolean },
   ): Promise<void>;
 
   /**
