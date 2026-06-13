@@ -120,11 +120,12 @@ persistence:
 #   "octocat"         — any repo owned by octocat
 #   "octocat/hello"   — that specific repo only
 access:
-  allowlist:
-    # Add owner slugs or owner/repo slugs here.
-    # An empty list grants access to everyone — only safe in fully private setups.
-    # - your-org
-    # - your-org/specific-repo
+  # Add owner slugs or owner/repo slugs here.
+  # Example:
+  #   - your-org
+  #   - your-org/specific-repo
+  # An empty list grants access to everyone — only safe in fully private setups.
+  allowlist: []
 
 # ─── Rate limits ─────────────────────────────────────────────────────
 # Guards against abuse and accidental runaway LLM costs.
