@@ -57,7 +57,7 @@ function buildReplySystem(botLogin: string): string {
   );
 }
 
-function buildReplyUserPrompt(
+export function buildReplyUserPrompt(
   prTitle: string,
   comment: PRComment,
   discussion: string,

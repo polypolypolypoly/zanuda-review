@@ -7,7 +7,7 @@ import { z } from "zod";
  * Global configuration schema. Loaded from config/default.yaml (or the path
  * in ZANUDA_CONFIG) and overridable per-repo via `.zanuda.yml`.
  */
-export const ConfigSchema = z.object({
+const ConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai", "openrouter", "ollama"]),
   models: z.object({
     anthropic: z.string(),

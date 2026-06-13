@@ -4,7 +4,7 @@ import { z } from "zod";
  * The structured output we ask the model to return. Keeping it a strict schema
  * lets us post precise inline comments and fail loudly on malformed responses.
  */
-export const ReviewCommentSchema = z.object({
+const ReviewCommentSchema = z.object({
   path: z.string().describe("Repo-relative file path the comment applies to."),
   line: z
     .number()
@@ -15,7 +15,7 @@ export const ReviewCommentSchema = z.object({
   body: z.string().describe("The comment text, in markdown."),
 });
 
-export const FileSummarySchema = z.object({
+const FileSummarySchema = z.object({
   path: z.string().describe("Repo-relative file path."),
   description: z.string().describe("One-line description of what changed in this file."),
 });

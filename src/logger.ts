@@ -8,4 +8,4 @@ export const logger = pino({
       : { target: "pino-pretty", options: { colorize: true } },
 });
 
-export type Logger = typeof logger;
+

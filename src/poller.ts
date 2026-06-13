@@ -4,6 +4,7 @@ import { fetchPRDiscussion, findUnrepliedMentions, formatDiscussion } from "./gi
 import { logger } from "./logger.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
+import { isAllowed } from "./github/allowlist.js";
 import { PRStateStore } from "./state/store.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -257,21 +258,4 @@ function parseRepoRef(repositoryUrl: string): { owner: string; repo: string } | 
   return { owner: match[1]!, repo: match[2]! };
 }
 
-/**
- * Returns true if the repo is permitted by the allowlist.
- * An empty allowlist means "allow everyone".
- * Entries can be:
- *   "owner"        — matches any repo under that owner
- *   "owner/repo"   — matches only that specific repo
- */
-function isAllowed(
-  ref: { owner: string; repo: string },
-  allowlist: string[],
-): boolean {
-  if (allowlist.length === 0) return true;
-  const full = `${ref.owner}/${ref.repo}`.toLowerCase();
-  return allowlist.some((entry) => {
-    const e = entry.toLowerCase();
-    return e === ref.owner.toLowerCase() || e === full;
-  });
-}
+

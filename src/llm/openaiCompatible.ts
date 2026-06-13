@@ -6,7 +6,7 @@ import type { CompletionRequest, CompletionResult, LLMProvider } from "./types.j
  * OpenAI, OpenRouter and Ollama all speak this protocol — they differ only in
  * base URL and auth. The concrete providers below are thin presets.
  */
-export class OpenAICompatibleProvider implements LLMProvider {
+class OpenAICompatibleProvider implements LLMProvider {
   readonly name: string;
   private client: OpenAI;
 
