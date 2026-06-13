@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { mergeRepoConfig, type Config } from "../src/config.ts";
 import { isAllowed } from "../src/github/allowlist.ts";
-import { findUnrepliedMentions, formatDiscussion, type PRComment } from "../src/github/comments.ts";
+import {
+  findUnrepliedMentions,
+  formatDiscussion,
+  type PRComment,
+} from "../src/github/comments.ts";
 import { parseReviewResult, extractJson } from "../src/review/engine.ts";
 import { buildUserPrompt, truncate } from "../src/review/prompt.ts";
 import { buildReplyUserPrompt } from "../src/review/replyEngine.ts";
@@ -20,7 +24,12 @@ const baseConfig: Config = {
   access: { allowlist: [] },
   limits: { maxConcurrentReviews: 3, maxNewPrsPerCycle: 5 },
   memory: { enabled: true, dir: "", updateAfterReview: true },
-  context: { includeFiles: ["README.md"], maxFileChars: 1000, includeFileTree: true, maxTreeEntries: 100 },
+  context: {
+    includeFiles: ["README.md"],
+    maxFileChars: 1000,
+    includeFileTree: true,
+    maxTreeEntries: 100,
+  },
   review: { maxDiffChars: 10000, inlineComments: true, event: null },
 };
 
@@ -51,7 +60,9 @@ const makeComment = (overrides: Partial<PRComment>): PRComment => ({
 
 describe("parseReviewResult", () => {
   it("parses plain JSON", () => {
-    const r = parseReviewResult('{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[]}');
+    const r = parseReviewResult(
+      '{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[]}',
+    );
     assert.equal(r.summary, "ok");
     assert.equal(r.action, "COMMENT");
     assert.equal(r.comments.length, 0);
@@ -59,7 +70,8 @@ describe("parseReviewResult", () => {
   });
 
   it("parses fenced JSON with surrounding prose", () => {
-    const text = 'Here you go:\n```json\n{"summary":"s","action":"REQUEST_CHANGES","filesSummary":[{"path":"a.ts","description":"updated logic"}],"comments":[{"path":"a.ts","line":3,"severity":"warning","body":"x"}]}\n```';
+    const text =
+      'Here you go:\n```json\n{"summary":"s","action":"REQUEST_CHANGES","filesSummary":[{"path":"a.ts","description":"updated logic"}],"comments":[{"path":"a.ts","line":3,"severity":"warning","body":"x"}]}\n```';
     const r = parseReviewResult(text);
     assert.equal(r.action, "REQUEST_CHANGES");
     assert.equal(r.comments[0]?.path, "a.ts");
@@ -68,7 +80,8 @@ describe("parseReviewResult", () => {
   });
 
   it("handles code fence inside a comment body value", () => {
-    const json = '{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[{"path":"a.py","line":1,"severity":"warning","body":"Consider:\\n```python\\nif x:\\n    pass\\n```"}]}';
+    const json =
+      '{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[{"path":"a.py","line":1,"severity":"warning","body":"Consider:\\n```python\\nif x:\\n    pass\\n```"}]}';
     const r = parseReviewResult(json);
     assert.equal(r.comments[0]?.path, "a.py");
   });
@@ -85,27 +98,39 @@ describe("parseReviewResult", () => {
   });
 
   it("parses APPROVE action", () => {
-    const r = parseReviewResult('{"summary":"lgtm","action":"APPROVE","filesSummary":[],"comments":[]}');
+    const r = parseReviewResult(
+      '{"summary":"lgtm","action":"APPROVE","filesSummary":[],"comments":[]}',
+    );
     assert.equal(r.action, "APPROVE");
   });
 
   it("parses REQUEST_CHANGES action", () => {
-    const r = parseReviewResult('{"summary":"bad","action":"REQUEST_CHANGES","filesSummary":[],"comments":[{"path":"x.ts","line":1,"severity":"blocker","body":"vuln"}]}');
+    const r = parseReviewResult(
+      '{"summary":"bad","action":"REQUEST_CHANGES","filesSummary":[],"comments":[{"path":"x.ts","line":1,"severity":"blocker","body":"vuln"}]}',
+    );
     assert.equal(r.action, "REQUEST_CHANGES");
   });
 
   it("throws on invalid action value", () => {
-    assert.throws(() => parseReviewResult('{"summary":"x","action":"NITPICK","filesSummary":[],"comments":[]}'));
+    assert.throws(() =>
+      parseReviewResult(
+        '{"summary":"x","action":"NITPICK","filesSummary":[],"comments":[]}',
+      ),
+    );
   });
 
   it("nitpick comments are parsed but can be filtered by the engine", () => {
-    const result = parseReviewResult(JSON.stringify({
-      summary: "ok", action: "COMMENT", filesSummary: [],
-      comments: [
-        { path: "a.ts", line: 1, severity: "blocker", body: "real issue" },
-        { path: "b.ts", line: 2, severity: "nitpick", body: "trivial" },
-      ],
-    }));
+    const result = parseReviewResult(
+      JSON.stringify({
+        summary: "ok",
+        action: "COMMENT",
+        filesSummary: [],
+        comments: [
+          { path: "a.ts", line: 1, severity: "blocker", body: "real issue" },
+          { path: "b.ts", line: 2, severity: "nitpick", body: "trivial" },
+        ],
+      }),
+    );
     // Schema accepts nitpick; engine then filters them out
     assert.equal(result.comments.length, 2);
     const filtered = result.comments.filter((c) => c.severity !== "nitpick");
@@ -184,7 +209,9 @@ describe("mergeRepoConfig", () => {
   });
 
   it("prepromptAppend concatenates onto existing preprompt", () => {
-    const merged = mergeRepoConfig(baseConfig, { prepromptAppend: "Extra rule." });
+    const merged = mergeRepoConfig(baseConfig, {
+      prepromptAppend: "Extra rule.",
+    });
     assert.equal(merged.preprompt, "Base preprompt.\n\nExtra rule.");
   });
 
@@ -200,7 +227,10 @@ describe("mergeRepoConfig", () => {
 
   it("does not mutate the base config", () => {
     const original = structuredClone(baseConfig);
-    mergeRepoConfig(baseConfig, { provider: "openai", prepromptAppend: "extra" });
+    mergeRepoConfig(baseConfig, {
+      provider: "openai",
+      prepromptAppend: "extra",
+    });
     assert.deepEqual(baseConfig, original);
   });
 
@@ -210,10 +240,13 @@ describe("mergeRepoConfig", () => {
   });
 
   it("org config overrides global, repo config overrides org", () => {
-    const orgConfig = { provider: "openai" as const, prepromptAppend: " Org rule." };
+    const orgConfig = {
+      provider: "openai" as const,
+      prepromptAppend: " Org rule.",
+    };
     const repoConfig = { provider: "ollama" as const };
 
-    const afterOrg  = mergeRepoConfig(baseConfig, orgConfig);
+    const afterOrg = mergeRepoConfig(baseConfig, orgConfig);
     const afterRepo = mergeRepoConfig(afterOrg, repoConfig);
 
     assert.equal(afterOrg.provider, "openai");
@@ -223,8 +256,10 @@ describe("mergeRepoConfig", () => {
   });
 
   it("null org config is a no-op, repo config still applies", () => {
-    const afterOrg  = mergeRepoConfig(baseConfig, null);
-    const afterRepo = mergeRepoConfig(afterOrg, { provider: "openrouter" as const });
+    const afterOrg = mergeRepoConfig(baseConfig, null);
+    const afterRepo = mergeRepoConfig(afterOrg, {
+      provider: "openrouter" as const,
+    });
 
     assert.equal(afterOrg.provider, "anthropic");
     assert.equal(afterRepo.provider, "openrouter");
@@ -269,12 +304,23 @@ describe("isAllowed", () => {
 
 describe("buildUserPrompt: XML sandboxing", () => {
   it("wraps PR title in <pr_title> tags", () => {
-    const prompt = buildUserPrompt(makePR({ title: "my title" }), makeContext(), baseConfig);
-    assert.ok(prompt.includes("<pr_title>my title</pr_title>"), "title not wrapped");
+    const prompt = buildUserPrompt(
+      makePR({ title: "my title" }),
+      makeContext(),
+      baseConfig,
+    );
+    assert.ok(
+      prompt.includes("<pr_title>my title</pr_title>"),
+      "title not wrapped",
+    );
   });
 
   it("wraps PR body in <pr_description> tags", () => {
-    const prompt = buildUserPrompt(makePR({ body: "my description" }), makeContext(), baseConfig);
+    const prompt = buildUserPrompt(
+      makePR({ body: "my description" }),
+      makeContext(),
+      baseConfig,
+    );
     assert.ok(prompt.includes("<pr_description>"), "body not wrapped");
     assert.ok(prompt.includes("my description"));
     assert.ok(prompt.includes("</pr_description>"));
@@ -324,7 +370,11 @@ describe("buildReplyUserPrompt: XML sandboxing", () => {
   });
 
   it("wraps discussion in <discussion> tags", () => {
-    const prompt = buildReplyUserPrompt("t", makeComment({ body: "x" }), "the discussion text");
+    const prompt = buildReplyUserPrompt(
+      "t",
+      makeComment({ body: "x" }),
+      "the discussion text",
+    );
     assert.ok(prompt.includes("<discussion>"), "discussion not wrapped");
     assert.ok(prompt.includes("the discussion text"));
     assert.ok(prompt.includes("</discussion>"));
@@ -346,17 +396,28 @@ describe("findUnrepliedMentions", () => {
 
   it("skips already-replied comment IDs", () => {
     const comments = [makeComment({ id: 1, body: "@ZlayaZanuda hello" })];
-    assert.equal(findUnrepliedMentions(comments, "ZlayaZanuda", new Set([1])).length, 0);
+    assert.equal(
+      findUnrepliedMentions(comments, "ZlayaZanuda", new Set([1])).length,
+      0,
+    );
   });
 
   it("skips the bot's own comments", () => {
-    const comments = [makeComment({ id: 1, author: "ZlayaZanuda", body: "@ZlayaZanuda self" })];
-    assert.equal(findUnrepliedMentions(comments, "ZlayaZanuda", new Set()).length, 0);
+    const comments = [
+      makeComment({ id: 1, author: "ZlayaZanuda", body: "@ZlayaZanuda self" }),
+    ];
+    assert.equal(
+      findUnrepliedMentions(comments, "ZlayaZanuda", new Set()).length,
+      0,
+    );
   });
 
   it("matching is case-insensitive", () => {
     const comments = [makeComment({ id: 1, body: "@zlayazanuda pls look" })];
-    assert.equal(findUnrepliedMentions(comments, "ZlayaZanuda", new Set()).length, 1);
+    assert.equal(
+      findUnrepliedMentions(comments, "ZlayaZanuda", new Set()).length,
+      1,
+    );
   });
 });
 
@@ -368,23 +429,36 @@ describe("formatDiscussion", () => {
   });
 
   it("includes author and body", () => {
-    const text = formatDiscussion([makeComment({ author: "alice", body: "looks good" })]);
+    const text = formatDiscussion([
+      makeComment({ author: "alice", body: "looks good" }),
+    ]);
     assert.ok(text.includes("alice"));
     assert.ok(text.includes("looks good"));
   });
 
   it("includes file location for review comments", () => {
     const text = formatDiscussion([
-      makeComment({ type: "review", path: "src/foo.ts", line: 10, body: "bad" }),
+      makeComment({
+        type: "review",
+        path: "src/foo.ts",
+        line: 10,
+        body: "bad",
+      }),
     ]);
     assert.ok(text.includes("src/foo.ts:10"));
   });
 
   it("truncates to maxComments and notes omitted count", () => {
     const comments = Array.from({ length: 10 }, (_, i) =>
-      makeComment({ id: i, body: `comment ${i}`, createdAt: `2024-01-0${(i % 9) + 1}T00:00:00Z` }),
+      makeComment({
+        id: i,
+        body: `comment ${i}`,
+        createdAt: `2024-01-0${(i % 9) + 1}T00:00:00Z`,
+      }),
     );
-    assert.ok(formatDiscussion(comments, 3).includes("7 earlier comment(s) omitted"));
+    assert.ok(
+      formatDiscussion(comments, 3).includes("7 earlier comment(s) omitted"),
+    );
   });
 });
 
@@ -401,11 +475,16 @@ describe("buildUserPrompt: .zanuda/instructions.md injection", () => {
 
   it("instructions are NOT XML-sandboxed — model should follow them", () => {
     const instructions = "Focus on SQL injection vectors.";
-    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, { instructions });
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
+      instructions,
+    });
     // Should appear raw, not inside <...> tags
     const idx = prompt.indexOf(instructions);
     assert.ok(idx !== -1, "instructions not found in prompt");
-    assert.ok(!prompt.slice(Math.max(0, idx - 10), idx).includes("<"), "instructions should not be XML-sandboxed");
+    assert.ok(
+      !prompt.slice(Math.max(0, idx - 10), idx).includes("<"),
+      "instructions should not be XML-sandboxed",
+    );
   });
 
   it("omitted when no instructions provided", () => {
@@ -417,10 +496,13 @@ describe("buildUserPrompt: .zanuda/instructions.md injection", () => {
     const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
       instructions: "My guideline.",
     });
-    const instrIdx   = prompt.indexOf("## Repo-specific reviewer guidelines");
+    const instrIdx = prompt.indexOf("## Repo-specific reviewer guidelines");
     const contextIdx = prompt.indexOf("## Project context");
-    const taskIdx    = prompt.indexOf("## Your task");
-    assert.ok(instrIdx < contextIdx, "instructions should appear before project context");
-    assert.ok(instrIdx < taskIdx,    "instructions should appear before task");
+    const taskIdx = prompt.indexOf("## Your task");
+    assert.ok(
+      instrIdx < contextIdx,
+      "instructions should appear before project context",
+    );
+    assert.ok(instrIdx < taskIdx, "instructions should appear before task");
   });
 });

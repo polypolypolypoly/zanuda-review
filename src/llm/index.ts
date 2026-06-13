@@ -7,7 +7,11 @@ import {
 } from "./openaiCompatible.js";
 import type { LLMProvider } from "./types.js";
 
-export type { CompletionRequest, CompletionResult, LLMProvider } from "./types.js";
+export type {
+  CompletionRequest,
+  CompletionResult,
+  LLMProvider,
+} from "./types.js";
 
 /**
  * Module-level cache so that repeated calls for the same provider (e.g. one

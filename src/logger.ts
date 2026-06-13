@@ -7,5 +7,3 @@ export const logger = pino({
       ? undefined
       : { target: "pino-pretty", options: { colorize: true } },
 });
-
-

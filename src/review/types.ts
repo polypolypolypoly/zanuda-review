@@ -17,7 +17,9 @@ const ReviewCommentSchema = z.object({
 
 const FileSummarySchema = z.object({
   path: z.string().describe("Repo-relative file path."),
-  description: z.string().describe("One-line description of what changed in this file."),
+  description: z
+    .string()
+    .describe("One-line description of what changed in this file."),
 });
 
 export const ReviewResultSchema = z.object({
@@ -27,7 +29,9 @@ export const ReviewResultSchema = z.object({
     .describe(
       "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings or observations.",
     ),
-  filesSummary: z.array(FileSummarySchema).describe("One entry per changed file."),
+  filesSummary: z
+    .array(FileSummarySchema)
+    .describe("One entry per changed file."),
   comments: z.array(ReviewCommentSchema),
 });
 

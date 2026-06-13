@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { logger } from "../logger.js";
@@ -24,8 +30,10 @@ export interface PRState {
 // ─── On-disk schema ───────────────────────────────────────────────────────────
 
 /** Serialisable form: Sets become arrays; everything else is a plain value. */
-interface SerializedPRState
-  extends Omit<PRState, "repliedCommentIds" | "lastUpdatedAt"> {
+interface SerializedPRState extends Omit<
+  PRState,
+  "repliedCommentIds" | "lastUpdatedAt"
+> {
   repliedCommentIds: number[];
   lastUpdatedAt: string;
 }
@@ -85,7 +93,10 @@ export class PRStateStore {
    * keep mutation paths explicit and easy to audit.
    */
   set(id: number, state: Omit<PRState, "lastUpdatedAt">): void {
-    const entry: PRState = { ...state, lastUpdatedAt: new Date().toISOString() };
+    const entry: PRState = {
+      ...state,
+      lastUpdatedAt: new Date().toISOString(),
+    };
     this.data.set(id, entry);
     this.saveToDisk();
   }
@@ -94,7 +105,10 @@ export class PRStateStore {
 
   private loadFromDisk(): Map<number, PRState> {
     if (!existsSync(this.path)) {
-      logger.info({ path: this.path }, "No state file found — starting with empty state");
+      logger.info(
+        { path: this.path },
+        "No state file found — starting with empty state",
+      );
       return new Map();
     }
 
@@ -102,7 +116,10 @@ export class PRStateStore {
     try {
       raw = readFileSync(this.path, "utf8");
     } catch (err) {
-      logger.error({ err, path: this.path }, "Cannot read state file — starting with empty state");
+      logger.error(
+        { err, path: this.path },
+        "Cannot read state file — starting with empty state",
+      );
       return new Map();
     }
 
@@ -110,13 +127,20 @@ export class PRStateStore {
     try {
       file = JSON.parse(raw) as StateFile;
     } catch (err) {
-      logger.error({ err, path: this.path }, "State file is not valid JSON — starting with empty state");
+      logger.error(
+        { err, path: this.path },
+        "State file is not valid JSON — starting with empty state",
+      );
       return new Map();
     }
 
     if (file.version !== CURRENT_VERSION) {
       logger.warn(
-        { path: this.path, fileVersion: file.version, currentVersion: CURRENT_VERSION },
+        {
+          path: this.path,
+          fileVersion: file.version,
+          currentVersion: CURRENT_VERSION,
+        },
         "Unrecognised state file version — starting with empty state",
       );
       return new Map();
@@ -170,7 +194,10 @@ export class PRStateStore {
     } catch (err) {
       // Non-fatal: the in-memory state is still correct for this session;
       // the next successful write will catch up.
-      logger.error({ err, path: this.path }, "Failed to persist PR state to disk");
+      logger.error(
+        { err, path: this.path },
+        "Failed to persist PR state to disk",
+      );
     }
   }
 }

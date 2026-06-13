@@ -20,7 +20,7 @@ export async function postReview(
   result: ReviewResult,
   config: Config,
 ): Promise<void> {
-  const header = buildHeader(result);
+  const header = buildHeader(result, pr.changedFiles.length);
   // config.review.event acts as a hard per-repo override (e.g. always COMMENT).
   // When null the model's own reasoning drives the action.
   const event = config.review.event ?? result.action;
@@ -65,20 +65,32 @@ export async function postReview(
   }
 }
 
-function buildHeader(result: ReviewResult): string {
+function buildHeader(result: ReviewResult, totalFiles: number): string {
+  const reviewed = result.filesSummary.length;
+  const scope =
+    reviewed === totalFiles
+      ? `Checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
+      : `Checked ${reviewed} of ${totalFiles} files`;
+
   const parts: string[] = [
     `## Pull request overview`,
     ``,
     result.summary,
+    ``,
+    `<sub>${scope}</sub>`,
   ];
 
   if (result.filesSummary.length > 0) {
     parts.push(
       ``,
-      `### Changed files`,
+      `<details>`,
+      `<summary>Changed files (${reviewed})</summary>`,
+      ``,
       `| File | Description |`,
       `| --- | --- |`,
       ...result.filesSummary.map((f) => `| ${f.path} | ${f.description} |`),
+      ``,
+      `</details>`,
     );
   }
 

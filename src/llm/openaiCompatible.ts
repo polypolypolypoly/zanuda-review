@@ -1,5 +1,9 @@
 import OpenAI from "openai";
-import type { CompletionRequest, CompletionResult, LLMProvider } from "./types.js";
+import type {
+  CompletionRequest,
+  CompletionResult,
+  LLMProvider,
+} from "./types.js";
 
 /**
  * One implementation for every OpenAI-compatible Chat Completions endpoint.
@@ -49,5 +53,9 @@ export function openRouterProvider(): LLMProvider {
 export function ollamaProvider(): LLMProvider {
   // Ollama ignores the API key but the SDK requires a non-empty string.
   const baseURL = `${process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434"}/v1`;
-  return new OpenAICompatibleProvider({ name: "ollama", apiKey: "ollama", baseURL });
+  return new OpenAICompatibleProvider({
+    name: "ollama",
+    apiKey: "ollama",
+    baseURL,
+  });
 }

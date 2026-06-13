@@ -1,5 +1,9 @@
 import Anthropic from "@anthropic-ai/sdk";
-import type { CompletionRequest, CompletionResult, LLMProvider } from "./types.js";
+import type {
+  CompletionRequest,
+  CompletionResult,
+  LLMProvider,
+} from "./types.js";
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";

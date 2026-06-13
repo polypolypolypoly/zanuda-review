@@ -1,6 +1,10 @@
 import type { Octokit } from "@octokit/rest";
 import type { Config } from "./config.js";
-import { fetchPRDiscussion, findUnrepliedMentions, formatDiscussion } from "./github/comments.js";
+import {
+  fetchPRDiscussion,
+  findUnrepliedMentions,
+  formatDiscussion,
+} from "./github/comments.js";
 import { logger } from "./logger.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
@@ -39,7 +43,10 @@ export async function startPoller(opts: {
    */
   const store = new PRStateStore(config.persistence.stateFile || undefined);
 
-  logger.info({ botLogin, intervalMs }, "Poller started — watching for review requests and mentions");
+  logger.info(
+    { botLogin, intervalMs },
+    "Poller started — watching for review requests and mentions",
+  );
 
   const tick = async () => {
     await pollReviewRequests({ config, botLogin, octokit, inProgress, store });
@@ -48,7 +55,10 @@ export async function startPoller(opts: {
 
   await tick();
   setInterval(
-    () => tick().catch((err) => logger.error({ err }, "Unhandled error in poll tick")),
+    () =>
+      tick().catch((err) =>
+        logger.error({ err }, "Unhandled error in poll tick"),
+      ),
     intervalMs,
   );
 }
@@ -95,10 +105,16 @@ async function pollReviewRequests(opts: {
 
   // Cap how many *new* PRs we start per cycle to avoid thundering-herd after a
   // restart when many PRs may be queued at once.
-  const newThisCycle = pending.slice(0, Math.min(slots, config.limits.maxNewPrsPerCycle));
+  const newThisCycle = pending.slice(
+    0,
+    Math.min(slots, config.limits.maxNewPrsPerCycle),
+  );
   if (newThisCycle.length < pending.length) {
     logger.info(
-      { processing: newThisCycle.length, deferred: pending.length - newThisCycle.length },
+      {
+        processing: newThisCycle.length,
+        deferred: pending.length - newThisCycle.length,
+      },
       "Per-cycle cap applied — deferred PRs will be picked up in later cycles",
     );
   }
@@ -109,7 +125,10 @@ async function pollReviewRequests(opts: {
 
     const ref = parseRepoRef(item.repository_url);
     if (!ref) {
-      logger.warn({ url: item.repository_url }, "Could not parse repo URL — skipping");
+      logger.warn(
+        { url: item.repository_url },
+        "Could not parse repo URL — skipping",
+      );
       continue;
     }
 
@@ -133,7 +152,9 @@ async function pollReviewRequests(opts: {
               `I've completed ${MAX_REVIEW_ROUNDS} review rounds on this PR — that's my limit. ` +
               `Address the outstanding comments and request a human reviewer if needed.`,
           })
-          .catch((err) => logger.warn({ err }, "Failed to post max-rounds notification"));
+          .catch((err) =>
+            logger.warn({ err }, "Failed to post max-rounds notification"),
+          );
         store.set(item.id, { ...state!, maxRoundsNotified: true });
       }
       continue;
@@ -141,13 +162,20 @@ async function pollReviewRequests(opts: {
 
     const nextRound = completedRounds + 1;
     logger.info(
-      { repo: `${ref.owner}/${ref.repo}`, pr: item.number, round: nextRound, title: item.title },
+      {
+        repo: `${ref.owner}/${ref.repo}`,
+        pr: item.number,
+        round: nextRound,
+        title: item.title,
+      },
       "Review requested",
     );
 
     inProgress.add(item.id);
 
-    reviewPullRequest({ octokit, baseConfig: config }, ref, item.number, { round: nextRound })
+    reviewPullRequest({ octokit, baseConfig: config }, ref, item.number, {
+      round: nextRound,
+    })
       .then(() => {
         inProgress.delete(item.id);
         store.set(item.id, {
@@ -158,11 +186,23 @@ async function pollReviewRequests(opts: {
           repliedCommentIds: state?.repliedCommentIds ?? new Set(),
           maxRoundsNotified: false,
         });
-        logger.info({ repo: `${ref.owner}/${ref.repo}`, pr: item.number, round: nextRound }, "Round complete");
+        logger.info(
+          {
+            repo: `${ref.owner}/${ref.repo}`,
+            pr: item.number,
+            round: nextRound,
+          },
+          "Round complete",
+        );
       })
       .catch((err) => {
         logger.error(
-          { err, repo: `${ref.owner}/${ref.repo}`, pr: item.number, round: nextRound },
+          {
+            err,
+            repo: `${ref.owner}/${ref.repo}`,
+            pr: item.number,
+            round: nextRound,
+          },
           "Review failed — will retry next poll",
         );
         inProgress.delete(item.id);
@@ -197,17 +237,28 @@ async function pollMentions(opts: {
       continue;
     }
 
-    const mentions = findUnrepliedMentions(comments, botLogin, state.repliedCommentIds);
+    const mentions = findUnrepliedMentions(
+      comments,
+      botLogin,
+      state.repliedCommentIds,
+    );
     if (mentions.length === 0) continue;
 
     logger.info(
-      { repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number, count: mentions.length },
+      {
+        repo: `${state.ref.owner}/${state.ref.repo}`,
+        pr: state.number,
+        count: mentions.length,
+      },
       "Unread mentions found",
     );
 
     let prTitle = `PR #${state.number}`;
     try {
-      const { data: pr } = await octokit.pulls.get({ ...state.ref, pull_number: state.number });
+      const { data: pr } = await octokit.pulls.get({
+        ...state.ref,
+        pull_number: state.number,
+      });
       prTitle = pr.title;
     } catch {
       // Non-fatal — generic title is fine.
@@ -244,7 +295,10 @@ async function pollMentions(opts: {
         state.repliedCommentIds.add(mention.id);
         state.mentionReplies++;
       } catch (err) {
-        logger.error({ err, commentId: mention.id }, "Failed to reply to mention");
+        logger.error(
+          { err, commentId: mention.id },
+          "Failed to reply to mention",
+        );
       }
     }
   }
@@ -252,10 +306,10 @@ async function pollMentions(opts: {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function parseRepoRef(repositoryUrl: string): { owner: string; repo: string } | null {
+function parseRepoRef(
+  repositoryUrl: string,
+): { owner: string; repo: string } | null {
   const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
   if (!match) return null;
   return { owner: match[1]!, repo: match[2]! };
 }
-
-
