@@ -54,6 +54,10 @@ export async function reviewPullRequest(
   log.info({ provider: completion.provider, model: completion.model }, "Model responded");
 
   const result = parseReviewResult(completion.text);
+  // Enforce no-nitpick policy at the application level regardless of what
+  // the model returns. Belt-and-suspenders: the preprompt and output schema
+  // already tell it not to, but models can be stubborn.
+  result.comments = result.comments.filter((c) => c.severity !== "nitpick");
 
   if (!opts.dryRun) {
     await postReview(octokit, pr, result, config);

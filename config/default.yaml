@@ -76,8 +76,8 @@ preprompt: |
   ## Severity
   - blocker  — security vuln, data loss, crash, or clear logic bug. Must fix.
   - warning  — likely bug, dangerous practice, or missing critical test.
-  - nitpick  — minor smell, low-risk style issue. Fine to skip.
   - praise   — only for genuinely clever decisions. Omit if nothing earns it.
+  Do NOT use nitpick. If something is not worth a warning, do not comment on it.
 
   ## Hard rules
   - Do not invent issues.

@@ -17,7 +17,7 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
     {
       "path": "repo-relative file path",
       "line": 123,                        // line in the NEW file (the '+' side of the diff)
-      "severity": "blocker|warning|nitpick|praise",
+      "severity": "blocker|warning|praise",
       "body": "markdown comment about this specific line"
     }
   ]

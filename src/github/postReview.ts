@@ -6,7 +6,6 @@ import type { PullRequestData } from "./pullRequest.js";
 const SEVERITY_EMOJI: Record<string, string> = {
   blocker: "🛑",
   warning: "⚠️",
-  nitpick: "💭",
   praise: "✅",
 };
 
