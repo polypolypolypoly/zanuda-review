@@ -1,0 +1,36 @@
+# Drop this file into .github/workflows/zanuda-review.yml in any repo
+# where you want Zanuda to be automatically requested as a reviewer on
+# every non-draft pull request.
+#
+# Prerequisites:
+#   - Zanuda's bot account must be a collaborator on the repo (Read is enough).
+#   - The workflow needs `pull-requests: write` permission (granted below).
+#
+# Alternatively, add the bot account to your .github/CODEOWNERS file:
+#   * @YourZanudaAccount
+# GitHub will then auto-request a review without needing this workflow.
+
+name: Request Zanuda review
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  request-review:
+    # Skip draft PRs — Zanuda will be requested when the PR is marked ready.
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.pulls.requestReviewers({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              // Replace with your bot account's GitHub login:
+              reviewers: ['ZlayaZanuda'],
+            });

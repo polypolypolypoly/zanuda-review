@@ -27,6 +27,10 @@ If someone is running Zanuda and has given you access:
 2. Optionally commit `.zanuda.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
 3. Open a PR and request a review from the bot. That's it.
 
+**Want reviews requested automatically on every PR?** Pick one:
+- **CODEOWNERS** — add `* @YourBotAccount` to `.github/CODEOWNERS`. GitHub requests a review on every opened PR automatically.
+- **GitHub Actions** — copy `deploy/auto-review.yml.example` to `.github/workflows/zanuda-review.yml`. Skips drafts; triggers when a PR is marked ready for review.
+
 ---
 
 ## Self-hosting
