@@ -26,6 +26,13 @@ export const ConfigSchema = z.object({
     includeFileTree: z.boolean(),
     maxTreeEntries: z.number().int().positive(),
   }),
+  persistence: z.object({
+    /**
+     * Path to the PR state file (rounds completed, mention counts, etc.).
+     * Empty string = ~/.review-helper/state.json
+     */
+    stateFile: z.string(),
+  }),
   access: z.object({
     /**
      * Allowlist of owners or owner/repo slugs that may request reviews.
