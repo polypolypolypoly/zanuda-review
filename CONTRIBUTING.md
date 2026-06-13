@@ -55,7 +55,7 @@ The stub is a fully annotated skeleton. Every method has:
 - The GitLab / Bitbucket equivalent where known
 - Notes on edge cases
 
-**2. Implement the 9 methods**
+**2. Implement the 10 methods**
 
 | Method | What it does |
 |---|---|
@@ -66,7 +66,8 @@ The stub is a fully annotated skeleton. Every method has:
 | `getFileTree(ref, gitRef, maxEntries)` | List all file paths in the repo |
 | `fetchDiscussion(ref, number)` | Fetch all comments (inline + general) |
 | `postReview(pr, result, config)` | Post verdict + inline comments |
-| `postComment(ref, number, body)` | Post a plain PR comment |
+| `postComment(ref, number, body)` | Post a plain PR comment; returns comment ID |
+| `editComment(ref, commentId, body)` | Edit an existing comment by ID |
 | `replyToComment(ref, number, comment, body)` | Reply to a specific comment |
 
 Read `src/platform/types.ts` for the full type contracts and `src/platform/github/connector.ts` as a working reference.
