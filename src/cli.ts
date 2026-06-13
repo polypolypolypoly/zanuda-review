@@ -28,17 +28,13 @@ async function main(): Promise<void> {
 }
 
 async function runLocalReview(args: string[]): Promise<void> {
-  const diffFlag =
+  const diffFlag: string | undefined =
     args.find((a) => a.startsWith("--diff="))?.split("=")[1] ??
-    (args[args.indexOf("--diff") + 1]?.startsWith("-") === false
-      ? args[args.indexOf("--diff") + 1]
-      : undefined);
+    nextArgValue(args, "--diff");
 
-  const outputFlag =
+  const outputFlag: string | undefined =
     args.find((a) => a.startsWith("--output="))?.split("=")[1] ??
-    (args[args.indexOf("--output") + 1]?.startsWith("-") === false
-      ? args[args.indexOf("--output") + 1]
-      : undefined);
+    nextArgValue(args, "--output");
 
   const dryRun = args.includes("--dry-run");
 
@@ -99,6 +95,14 @@ async function runRemoteReview(args: string[]): Promise<void> {
   } else {
     console.log(`Posted review with ${result.comments.length} comment(s).`);
   }
+}
+
+/** Return the value after a flag if it doesn't start with '-', else undefined. */
+function nextArgValue(args: string[], flag: string): string | undefined {
+  const idx = args.indexOf(flag);
+  if (idx === -1) return undefined;
+  const next = args[idx + 1];
+  return next && !next.startsWith("-") ? next : undefined;
 }
 
 main().catch((err) => {
