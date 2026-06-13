@@ -90,6 +90,19 @@ memory:
   enabled: false   # opt out of repo memory for this repo
 ```
 
+## Onboarding a new user or org
+
+**Your side (once per user/org):**
+1. Add the owner slug to `access.allowlist` in `config/default.yaml` and push → CI deploys automatically.
+
+**Their side (once per org/repo):**
+2. Add `ZlayaZanuda` as a collaborator on the repo (Read access is enough on public repos). For orgs, adding the bot as an org member covers all repos at once.
+3. _(Optional)_ Commit `.review-helper.yml` to the org's `.github` repo for org-wide defaults (provider, model, preprompt rules).
+4. _(Optional)_ Commit `.review-helper.yml` to individual repos to override org defaults.
+
+**Then forever, zero setup per PR:**
+5. Open a PR → request review from `ZlayaZanuda` → review appears automatically within 60 s.
+
 ## Local / manual reviews
 
 ```bash
