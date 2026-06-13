@@ -1,22 +1,21 @@
 [Unit]
-Description=review-helper — AI code review bot webhook server
+Description=review-helper — AI code review poller (ZlayaZanuda bot)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=amogus
+User=zanuda
+Group=zanuda
 WorkingDirectory=/mnt/data/projects/review-helper
-# Secrets + config live in .env (loaded by dotenv via WorkingDirectory).
-# Node is installed via nvm; update this path if you change Node versions.
-ExecStart=/home/amogus/.nvm/versions/node/v22.22.3/bin/node dist/index.js
-Environment=PATH=/home/amogus/.nvm/versions/node/v22.22.3/bin:/usr/bin:/bin
+# Secrets live in .env, loaded by dotenv at startup.
+ExecStart=/usr/local/bin/node dist/index.js
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+Environment=NODE_ENV=production
 Restart=on-failure
 RestartSec=5
-# Pino logs to stdout; journald captures them.
 StandardOutput=journal
 StandardError=journal
-Environment=NODE_ENV=production
 
 [Install]
 WantedBy=multi-user.target

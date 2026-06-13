@@ -105,7 +105,7 @@ preprompt: |
 # Path to the PR state file that survives restarts (round counts, mention
 # reply caps, etc). Empty = ~/.review-helper/state.json
 persistence:
-  stateFile: ""
+  stateFile: "/mnt/data/apps/review-helper/state.json"
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
@@ -132,8 +132,8 @@ limits:
 # subsequent review she checks whether the memory needs updating.
 memory:
   enabled: true
-  # Absolute path for memory storage. Leave empty to use ~/.review-helper/memory
-  dir: ""
+  # Absolute path for memory storage.
+  dir: "/mnt/data/apps/review-helper/memory"
   # After posting a review, ask the model if the memory should be updated.
   updateAfterReview: true
 
