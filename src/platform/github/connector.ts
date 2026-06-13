@@ -107,8 +107,9 @@ export class GitHubConnector implements SCMConnector {
     pr: PullRequest,
     result: ReviewResult,
     config: Config,
+    opts?: { summaryPostedElsewhere?: boolean },
   ): Promise<void> {
-    return ghPostReview(this.octokit, pr, result, config);
+    return ghPostReview(this.octokit, pr, result, config, opts);
   }
 
   async postComment(

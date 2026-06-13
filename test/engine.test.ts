@@ -7,11 +7,7 @@ import {
   formatDiscussion,
   type PRComment,
 } from "../src/github/comments.ts";
-import {
-  parseReviewResult,
-  extractJson,
-  buildProgressComment,
-} from "../src/review/engine.ts";
+import { parseReviewResult, extractJson } from "../src/review/engine.ts";
 import { buildUserPrompt, truncate } from "../src/review/prompt.ts";
 import { buildReplyUserPrompt } from "../src/review/replyEngine.ts";
 import type { PullRequestData } from "../src/github/pullRequest.ts";
@@ -511,55 +507,59 @@ describe("buildUserPrompt: .zanuda/instructions.md injection", () => {
   });
 });
 
-describe("buildProgressComment", () => {
-  it("formats APPROVE with correct icon and label", () => {
-    const result = {
-      action: "APPROVE" as const,
-      summary: "Ship it.",
-      comments: [],
-    };
-    const text = buildProgressComment(result);
+// ─── buildReviewCommentBody ───────────────────────────────────────────────────
+
+import { buildReviewCommentBody } from "../src/github/postReview.ts";
+import type { ReviewComment } from "../src/review/types.ts";
+
+describe("buildReviewCommentBody", () => {
+  const makeResult = (
+    action: "APPROVE" | "REQUEST_CHANGES" | "COMMENT",
+    summary: string,
+  ) => ({
+    action,
+    summary,
+    comments: [] as ReviewComment[],
+    filesSummary: [{ path: "src/foo.ts", description: "updated logic" }],
+  });
+
+  it("formats APPROVE with correct icon, label and summary", () => {
+    const text = buildReviewCommentBody(makeResult("APPROVE", "Ship it."), 1);
     assert.ok(text.includes("✅"));
     assert.ok(text.includes("approve"));
     assert.ok(text.includes("Ship it."));
   });
 
   it("formats REQUEST_CHANGES with correct icon and label", () => {
-    const result = {
-      action: "REQUEST_CHANGES" as const,
-      summary: "Fix these issues.",
-      comments: [],
-    };
-    const text = buildProgressComment(result);
+    const text = buildReviewCommentBody(
+      makeResult("REQUEST_CHANGES", "Fix these."),
+      2,
+    );
     assert.ok(text.includes("🛑"));
     assert.ok(text.includes("request changes"));
-    assert.ok(text.includes("Fix these issues."));
   });
 
-  it("formats COMMENT with correct icon and label", () => {
+  it("includes checked files scope", () => {
+    const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 5);
+    assert.ok(text.includes("Checked 1 of 5 files"));
+  });
+
+  it("includes inline comment count when non-zero", () => {
     const result = {
       action: "COMMENT" as const,
-      summary: "A few thoughts.",
-      comments: [],
+      summary: "some thoughts",
+      filesSummary: [],
+      comments: [
+        { path: "a.ts", line: 1, severity: "warning" as const, body: "x" },
+      ],
     };
-    const text = buildProgressComment(result);
-    assert.ok(text.includes("💬"));
-    assert.ok(text.includes("comment"));
-    assert.ok(text.includes("A few thoughts."));
+    const text = buildReviewCommentBody(result, 1);
+    assert.ok(text.includes("1 inline comment"));
   });
 
-  it("falls back to comment icon for unknown action", () => {
-    const result: {
-      action: string;
-      summary: string;
-      comments: unknown[];
-    } = {
-      action: "UNKNOWN_ACTION",
-      summary: "Fallback case.",
-      comments: [],
-    };
-    const text = buildProgressComment(result);
-    assert.ok(text.includes("💬"));
-    assert.ok(text.includes("Fallback case."));
+  it("includes collapsed file table", () => {
+    const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 1);
+    assert.ok(text.includes("<details>"));
+    assert.ok(text.includes("src/foo.ts"));
   });
 });

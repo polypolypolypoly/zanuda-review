@@ -13,6 +13,7 @@ import {
   saveRepoMemory,
 } from "../context/repoMemory.js";
 import { formatDiscussion } from "../github/comments.js";
+import { buildReviewCommentBody } from "../github/postReview.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
@@ -155,14 +156,34 @@ export async function reviewPullRequest(
   }
 
   if (!opts.dryRun) {
-    await connector.postReview(pr, result, config);
-    log.info({ comments: result.comments.length }, "Review posted");
-
+    // Try to edit the progress comment to show the final verdict.
+    let progressCommentUpdated = false;
     if (startingCommentId !== null) {
-      await connector
-        .editComment(ref, startingCommentId, buildProgressComment(result))
-        .catch((err) => log.warn({ err }, "Failed to update starting comment"));
+      try {
+        await connector.editComment(
+          ref,
+          startingCommentId,
+          buildReviewCommentBody(result, pr.changedFiles.length),
+        );
+        progressCommentUpdated = true;
+      } catch (err) {
+        log.warn({ err }, "Failed to update starting comment");
+      }
     }
+
+    // Post the review. If the progress comment wasn't updated (either because
+    // it never existed or the edit failed), postReview will include the summary
+    // in the review body as a fallback.
+    await connector.postReview(pr, result, config, {
+      summaryPostedElsewhere: progressCommentUpdated,
+    });
+    log.info(
+      {
+        comments: result.comments.length,
+        summaryPostedElsewhere: progressCommentUpdated,
+      },
+      "Review posted",
+    );
   }
 
   // ── Repo memory update ────────────────────────────────────────────────────
@@ -185,26 +206,6 @@ export async function reviewPullRequest(
   }
 
   return result;
-}
-
-const ACTION_ICON: Record<string, string> = {
-  APPROVE: "\u2705",
-  REQUEST_CHANGES: "\ud83d\uded1",
-  COMMENT: "\ud83d\udcac",
-};
-
-/**
- * Build the final body for the progress comment once the review is done.
- * Replaces "Starting review\u2026" with verdict + summary.
- */
-export function buildProgressComment(result: ReviewResult): string {
-  const icon = ACTION_ICON[result.action] ?? "\ud83d\udcac";
-  const label = result.action.replace("_", " ").toLowerCase();
-  return [
-    `${icon} **Review complete** \u00b7 ${label}`,
-    "",
-    result.summary,
-  ].join("\n");
 }
 
 /** Parse the model's JSON, tolerating accidental code fences / prose wrapping. */
