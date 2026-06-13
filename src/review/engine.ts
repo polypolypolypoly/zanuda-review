@@ -47,6 +47,18 @@ export async function reviewPullRequest(
   const pr = await connector.fetchPR(ref, number);
   log.info({ files: pr.changedFiles.length }, "Fetched PR");
 
+  // Post a "starting" placeholder immediately so the author sees activity.
+  // Edited to the final verdict once the review is complete.
+  let startingCommentId: number | null = null;
+  if (!opts.dryRun) {
+    startingCommentId = await connector
+      .postComment(ref, number, "_Starting review\u2026_")
+      .catch((err) => {
+        log.warn({ err }, "Failed to post starting comment");
+        return null;
+      });
+  }
+
   // Three-level config merge: global defaults → org config → per-repo config.
   // All files are read from the base branch (not the PR head) — a PR author
   // cannot influence the bot's behaviour by editing them in their branch.
@@ -145,6 +157,12 @@ export async function reviewPullRequest(
   if (!opts.dryRun) {
     await connector.postReview(pr, result, config);
     log.info({ comments: result.comments.length }, "Review posted");
+
+    if (startingCommentId !== null) {
+      await connector
+        .editComment(ref, startingCommentId, buildProgressComment(result))
+        .catch((err) => log.warn({ err }, "Failed to update starting comment"));
+    }
   }
 
   // ── Repo memory update ────────────────────────────────────────────────────
@@ -167,6 +185,26 @@ export async function reviewPullRequest(
   }
 
   return result;
+}
+
+const ACTION_ICON: Record<string, string> = {
+  APPROVE: "\u2705",
+  REQUEST_CHANGES: "\ud83d\uded1",
+  COMMENT: "\ud83d\udcac",
+};
+
+/**
+ * Build the final body for the progress comment once the review is done.
+ * Replaces "Starting review\u2026" with verdict + summary.
+ */
+export function buildProgressComment(result: ReviewResult): string {
+  const icon = ACTION_ICON[result.action] ?? "\ud83d\udcac";
+  const label = result.action.replace("_", " ").toLowerCase();
+  return [
+    `${icon} **Review complete** \u00b7 ${label}`,
+    "",
+    result.summary,
+  ].join("\n");
 }
 
 /** Parse the model's JSON, tolerating accidental code fences / prose wrapping. */
