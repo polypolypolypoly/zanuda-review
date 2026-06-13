@@ -20,8 +20,8 @@
     "test": "node --test --import tsx ./test/*.test.ts",
     "lint": "eslint src test",
     "lint:fix": "eslint src test --fix",
-    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\""
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \".github/workflows/*.yml\" \"config/**/*.yaml\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\" \".github/workflows/*.yml\" \"config/**/*.yaml\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",

@@ -24,7 +24,7 @@ jobs:
   deploy:
     needs: test
     runs-on: self-hosted
-    environment: production  # requires manual approval from maintainers before touching the homeserver
+    environment: production # requires manual approval from maintainers before touching the homeserver
     # ── Customise the three variables below for your setup ──────────────
     # SERVICE_USER  — OS user the service runs as (must own REPO_PATH)
     # REPO_PATH     — absolute path where the repo is checked out on the server
