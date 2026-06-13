@@ -137,7 +137,7 @@ async function pollReviewRequests(opts: {
             `I've completed ${MAX_REVIEW_ROUNDS} review rounds on this PR — that's my limit. ` +
               `Address the outstanding comments and request a human reviewer if needed.`,
           )
-          .catch((err) =>
+          .catch((err: unknown) =>
             logger.warn({ err }, "Failed to post max-rounds notification"),
           );
         store.set(item.platformId, { ...state!, maxRoundsNotified: true });

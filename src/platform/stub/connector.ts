@@ -159,8 +159,22 @@ export class StubConnector implements SCMConnector {
     _ref: RepoRef,
     _number: number,
     _body: string,
-  ): Promise<void> {
+  ): Promise<number> {
     throw new Error("StubConnector.postComment: not implemented");
+  }
+
+  /**
+   * Edit an existing comment by ID.
+   *
+   * GitHub reference: octokit.issues.updateComment({ comment_id, body })
+   * GitLab equivalent: PUT /api/v4/projects/:id/merge_requests/:iid/notes/:note_id
+   */
+  async editComment(
+    _ref: RepoRef,
+    _commentId: number,
+    _body: string,
+  ): Promise<void> {
+    throw new Error("StubConnector.editComment: not implemented");
   }
 
   /**

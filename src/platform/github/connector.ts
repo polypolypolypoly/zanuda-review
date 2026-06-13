@@ -111,10 +111,27 @@ export class GitHubConnector implements SCMConnector {
     return ghPostReview(this.octokit, pr, result, config);
   }
 
-  async postComment(ref: RepoRef, number: number, body: string): Promise<void> {
-    await this.octokit.issues.createComment({
+  async postComment(
+    ref: RepoRef,
+    number: number,
+    body: string,
+  ): Promise<number> {
+    const { data } = await this.octokit.issues.createComment({
       ...ref,
       issue_number: number,
+      body,
+    });
+    return data.id;
+  }
+
+  async editComment(
+    ref: RepoRef,
+    commentId: number,
+    body: string,
+  ): Promise<void> {
+    await this.octokit.issues.updateComment({
+      ...ref,
+      comment_id: commentId,
       body,
     });
   }

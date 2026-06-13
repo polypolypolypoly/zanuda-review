@@ -147,9 +147,17 @@ export interface SCMConnector {
 
   /**
    * Post a standalone (non-review) comment on a PR.
-   * Used for system notifications, e.g. "I've reached my review round limit."
+   * Returns the platform-specific comment ID so the comment can be edited later.
+   * Used for progress indicators ("Starting review\u2026") and system notifications.
    */
-  postComment(ref: RepoRef, number: number, body: string): Promise<void>;
+  postComment(ref: RepoRef, number: number, body: string): Promise<number>;
+
+  /**
+   * Edit an existing comment by ID.
+   * Used to update the "Starting review\u2026" placeholder with the final summary
+   * once the review is complete.
+   */
+  editComment(ref: RepoRef, commentId: number, body: string): Promise<void>;
 
   /**
    * Reply to a specific comment.
