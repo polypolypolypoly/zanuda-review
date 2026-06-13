@@ -1,7 +1,7 @@
 import type { Octokit } from "@octokit/rest";
 import { mergeRepoConfig, type Config } from "../config.js";
 import { buildContext } from "../context/builder.js";
-import { fetchRepoConfig } from "../context/repoConfig.js";
+import { fetchOrgConfig, fetchRepoConfig } from "../context/repoConfig.js";
 import {
   generateRepoMemory,
   loadRepoMemory,
@@ -45,9 +45,18 @@ export async function reviewPullRequest(
   // project context files. The base branch is under the maintainer's control;
   // using the head SHA would let a PR author influence the bot's behaviour by
   // committing a crafted .review-helper.yml or editing README/CONTRIBUTING.
-  const repoConfig = await fetchRepoConfig(octokit, ref, pr.baseSha);
-  const config = mergeRepoConfig(deps.baseConfig, repoConfig);
-  log.info({ provider: config.provider, model: config.models[config.provider] }, "Config resolved");
+  // Three-level config merge: global defaults → org config → per-repo config.
+  // Both config files are read from the base branch (not the PR head) so a PR
+  // author cannot influence the bot's behaviour by editing them in their branch.
+  const [orgConfig, repoConfig] = await Promise.all([
+    fetchOrgConfig(octokit, ref.owner),
+    fetchRepoConfig(octokit, ref, pr.baseSha),
+  ]);
+  const config = mergeRepoConfig(mergeRepoConfig(deps.baseConfig, orgConfig), repoConfig);
+  log.info(
+    { provider: config.provider, model: config.models[config.provider], hasOrgConfig: orgConfig !== null, hasRepoConfig: repoConfig !== null },
+    "Config resolved",
+  );
 
   const context = await buildContext(octokit, ref, pr.baseSha, config);
 

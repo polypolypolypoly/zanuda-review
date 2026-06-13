@@ -94,6 +94,32 @@ npm test              # node --test
 | `OLLAMA_BASE_URL`      | For local Ollama (default: http://localhost:11434) |
 | `POLL_INTERVAL_SECS`   | Polling interval in seconds (default: 60)    |
 
+## Config merge order
+
+```
+global defaults (config/default.yaml)
+  → org config   ({owner}/.github repo → .review-helper.yml)
+  → repo config  (repo root → .review-helper.yml)
+```
+
+Each layer overrides only the keys it sets; everything else inherits from above.
+Both org and repo configs are fetched from the **base branch** of the PR, not
+the PR head, so a PR author cannot influence the bot by editing them in their
+branch.
+
+## Per-org config (`{owner}/.github` → `.review-helper.yml`)
+
+Applies to all repos under that owner/org. Useful for setting a provider,
+model, or preprompt rules once instead of per-repo:
+
+```yaml
+prepromptAppend: |
+  All repos here are TypeScript. Treat any use of `any` as a warning.
+provider: openrouter
+models:
+  openrouter: anthropic/claude-opus-4-8
+```
+
 ## Per-repo config (`.review-helper.yml` committed to repo root)
 
 ```yaml

@@ -51,9 +51,30 @@ never needs to reach in. There is no server to expose.
 
 No webhook configuration required.
 
-## Per-repo configuration (`.review-helper.yml`)
+## Configuration layers
 
-Commit to the repo's default branch to override global defaults:
+Settings are merged in order — each layer overrides only what it sets:
+
+```
+global defaults (config/default.yaml)
+  → org config   ({owner}/.github repo → .review-helper.yml)
+  → repo config  (repo root → .review-helper.yml)
+```
+
+**Org config** — commit `.review-helper.yml` to the org's `.github` repository.
+Applies to all repos under that org. Good for setting a shared provider, model,
+or preprompt rules once:
+
+```yaml
+prepromptAppend: |
+  All repos here are TypeScript — treat any use of `any` as a warning.
+provider: openrouter
+models:
+  openrouter: anthropic/claude-opus-4-8
+```
+
+**Per-repo config** — commit `.review-helper.yml` to the repo root to override
+global and org defaults:
 
 ```yaml
 provider: ollama

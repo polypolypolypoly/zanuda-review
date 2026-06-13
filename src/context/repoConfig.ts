@@ -4,29 +4,58 @@ import { RepoConfigSchema, type RepoConfig } from "../config.js";
 import type { RepoRef } from "../github/client.js";
 import { logger } from "../logger.js";
 
-const CONFIG_PATHS = [".review-helper.yml", ".review-helper.yaml", ".github/review-helper.yml"];
+const REPO_CONFIG_PATHS = [".review-helper.yml", ".review-helper.yaml", ".github/review-helper.yml"];
+const ORG_CONFIG_PATHS  = [".review-helper.yml", ".review-helper.yaml"];
 
 /**
- * Look for a `.review-helper.yml` on the PR's head ref. Returning null means
- * "use global defaults". A malformed file is logged and ignored rather than
- * blocking the review.
+ * Look for a per-repo `.review-helper.yml` on the PR's base ref.
+ * Returns null if not found or malformed (logged and ignored).
  */
 export async function fetchRepoConfig(
   octokit: Octokit,
   ref: RepoRef,
   gitRef: string,
 ): Promise<RepoConfig | null> {
-  for (const path of CONFIG_PATHS) {
+  return fetchConfig(octokit, ref, gitRef, REPO_CONFIG_PATHS, "repo");
+}
+
+/**
+ * Look for an org-wide `.review-helper.yml` in the `{owner}/.github` repo
+ * (GitHub's conventional location for org-level defaults).
+ * Returns null if the .github repo doesn't exist, the file isn't there,
+ * or the file is malformed.
+ *
+ * Merge order: global defaults → org config → per-repo config.
+ */
+export async function fetchOrgConfig(
+  octokit: Octokit,
+  owner: string,
+): Promise<RepoConfig | null> {
+  const ref: RepoRef = { owner, repo: ".github" };
+  // The .github repo has no meaningful gitRef for our purposes — use HEAD.
+  return fetchConfig(octokit, ref, "HEAD", ORG_CONFIG_PATHS, "org");
+}
+
+/** Shared implementation used by both fetch functions. */
+async function fetchConfig(
+  octokit: Octokit,
+  ref: RepoRef,
+  gitRef: string,
+  paths: string[],
+  label: string,
+): Promise<RepoConfig | null> {
+  for (const path of paths) {
     const raw = await tryReadFile(octokit, ref, path, gitRef);
     if (raw === null) continue;
     const parsed = RepoConfigSchema.safeParse(parseYaml(raw));
     if (!parsed.success) {
       logger.warn(
-        { path, errors: parsed.error.issues },
-        "Ignoring invalid .review-helper.yml",
+        { repo: `${ref.owner}/${ref.repo}`, path, errors: parsed.error.issues },
+        `Ignoring invalid ${label} .review-helper.yml`,
       );
       return null;
     }
+    logger.debug({ repo: `${ref.owner}/${ref.repo}`, path }, `Loaded ${label} config`);
     return parsed.data;
   }
   return null;

@@ -232,3 +232,47 @@ test("formatDiscussion: truncates to maxComments and notes omitted count", () =>
   const text = formatDiscussion(comments, 3);
   assert.ok(text.includes("7 earlier comment(s) omitted"));
 });
+
+// ── Three-level config merge (global → org → repo) ───────────────────────────
+
+test("mergeRepoConfig: org config overrides global, repo config overrides org", () => {
+  const withPersistence: Config = {
+    ...baseConfig,
+    persistence: { stateFile: "" },
+    access: { allowlist: [] },
+    limits: { maxConcurrentReviews: 3, maxNewPrsPerCycle: 5 },
+    memory: { enabled: true, dir: "", updateAfterReview: true },
+  };
+
+  const orgConfig = { provider: "openai" as const, prepromptAppend: " Org rule." };
+  const repoConfig = { provider: "ollama" as const };
+
+  const afterOrg  = mergeRepoConfig(withPersistence, orgConfig);
+  const afterRepo = mergeRepoConfig(afterOrg, repoConfig);
+
+  // Org overrides global
+  assert.equal(afterOrg.provider, "openai");
+  assert.ok(afterOrg.preprompt.includes("Org rule."));
+
+  // Repo overrides org
+  assert.equal(afterRepo.provider, "ollama");
+
+  // Org prepromptAppend still present after repo merge
+  assert.ok(afterRepo.preprompt.includes("Org rule."));
+});
+
+test("mergeRepoConfig: null org config is a no-op, repo config still applies", () => {
+  const withPersistence: Config = {
+    ...baseConfig,
+    persistence: { stateFile: "" },
+    access: { allowlist: [] },
+    limits: { maxConcurrentReviews: 3, maxNewPrsPerCycle: 5 },
+    memory: { enabled: true, dir: "", updateAfterReview: true },
+  };
+
+  const afterOrg  = mergeRepoConfig(withPersistence, null);
+  const afterRepo = mergeRepoConfig(afterOrg, { provider: "openrouter" as const });
+
+  assert.equal(afterOrg.provider, "anthropic");   // unchanged
+  assert.equal(afterRepo.provider, "openrouter"); // repo wins
+});
