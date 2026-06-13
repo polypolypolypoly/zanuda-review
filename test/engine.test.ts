@@ -7,7 +7,11 @@ import {
   formatDiscussion,
   type PRComment,
 } from "../src/github/comments.ts";
-import { parseReviewResult, extractJson } from "../src/review/engine.ts";
+import {
+  parseReviewResult,
+  extractJson,
+  adaptiveMaxTokens,
+} from "../src/review/engine.ts";
 import { buildUserPrompt, truncate } from "../src/review/prompt.ts";
 import { buildReplyUserPrompt } from "../src/review/replyEngine.ts";
 import type { PullRequestData } from "../src/github/pullRequest.ts";
@@ -177,6 +181,51 @@ describe("extractJson", () => {
     // when the caller tries to parse the malformed slice.
     // A string with only an opening brace and no closing brace throws.
     assert.throws(() => extractJson('{"a": 1'));
+  });
+});
+
+// ─── adaptiveMaxTokens ───────────────────────────────────────────────────────────
+
+describe("adaptiveMaxTokens", () => {
+  it("minimum floor of 1500 for single-file PRs", () => {
+    assert.equal(adaptiveMaxTokens(1, 8192), 1500);
+  });
+
+  it("scales up with file count", () => {
+    assert.ok(adaptiveMaxTokens(10, 8192) > adaptiveMaxTokens(3, 8192));
+  });
+
+  it("never exceeds configured max", () => {
+    assert.equal(adaptiveMaxTokens(100, 4000), 4000);
+    assert.equal(adaptiveMaxTokens(1, 1000), 1000);
+  });
+
+  it("stays below configured max for typical PRs", () => {
+    // 5-file PR should be well under 8192
+    const tokens = adaptiveMaxTokens(5, 8192);
+    assert.ok(tokens < 8192, `expected < 8192, got ${tokens}`);
+    assert.ok(tokens >= 1500, `expected >= 1500, got ${tokens}`);
+  });
+});
+
+// ─── parseReviewResult structured mode ──────────────────────────────────────────
+
+describe("parseReviewResult structured mode", () => {
+  it("parses clean JSON without extractJson when structured=true", () => {
+    // Provider returns clean JSON (no fences, no prose)
+    const json = JSON.stringify({
+      summary: "ok",
+      action: "APPROVE",
+      filesSummary: [{ path: "a.ts", description: "added export" }],
+      comments: [],
+    });
+    const r = parseReviewResult(json, { structured: true });
+    assert.equal(r.action, "APPROVE");
+    assert.equal(r.filesSummary[0]?.path, "a.ts");
+  });
+
+  it("throws immediately on malformed JSON in structured mode (no extractJson fallback)", () => {
+    assert.throws(() => parseReviewResult("not json", { structured: true }));
   });
 });
 
