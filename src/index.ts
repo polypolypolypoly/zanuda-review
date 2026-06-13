@@ -20,15 +20,6 @@ async function main(): Promise<void> {
   await startPoller({ config, botLogin, connector, intervalMs });
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required environment variable: ${name}`);
-  return value;
-}
-
-// Kept for env validation — GITHUB_TOKEN checked inside createOctokit().
-void requireEnv;
-
 main().catch((err) => {
   logger.error({ err }, "Fatal startup error");
   process.exit(1);
