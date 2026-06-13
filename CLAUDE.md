@@ -56,6 +56,7 @@ llm/
   index.ts            provider factory (reads LLM_PROVIDER env)
   anthropic.ts        Anthropic Claude implementation
   openaiCompatible.ts OpenAI / OpenRouter / Ollama implementation
+  stub.ts             annotated skeleton for new provider implementers
 context/
   repoConfig.ts       fetch & merge per-repo .zanuda/config.yml
   builder.ts          build project context string (README, CONTRIBUTING, etc.)

@@ -116,6 +116,98 @@ These are not optional — they exist for security and correctness reasons:
 
 ---
 
+## Adding a new LLM provider
+
+Zanuda's LLM layer is a one-method interface. Adding Gemini, Mistral, Cohere,
+or any other provider takes about 30 minutes.
+
+### How the abstraction works
+
+```
+LLMProvider (src/llm/types.ts)
+├── AnthropicProvider    (src/llm/anthropic.ts)        ← reference impl
+├── OpenAICompatibleProvider (src/llm/openaiCompatible.ts) ← covers OpenAI/OpenRouter/Ollama
+└── YourProvider         (src/llm/<name>.ts)           ← you build this
+```
+
+The review engine calls `provider.complete(req)` and gets back a text string.
+It never imports a concrete provider — add yours without touching any other file
+except the four wiring points below.
+
+### Step-by-step
+
+**1. Copy the stub**
+
+```bash
+cp src/llm/stub.ts src/llm/<name>.ts
+```
+
+The stub has detailed JSDoc explaining every field of `CompletionRequest` and
+what `complete()` must return.
+
+**2. Implement `complete()`**
+
+The interface is a single method:
+
+```typescript
+async complete(req: CompletionRequest): Promise<CompletionResult>
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `req.system` | `string` | System / preprompt instruction |
+| `req.user` | `string` | User message (context + diff + task) |
+| `req.model` | `string` | Model ID from config |
+| `req.temperature` | `number` | 0–2; **omit if your API doesn't support it** |
+| `req.maxTokens` | `number` | Max tokens to generate |
+
+Return `{ text, model, provider }` — just the raw text string, no JSON parsing.
+
+**3. Register in the factory** (`src/llm/index.ts`)
+
+```typescript
+case "myprovider":
+  return myProvider();
+```
+
+**4. Add to the config schema** (`src/config.ts`)
+
+```typescript
+provider: z.enum(["anthropic", "openai", "openrouter", "ollama", "myprovider"]),
+models: z.object({
+  // ...
+  myprovider: z.string(),
+}),
+```
+
+**5. Add defaults** (`config/default.yaml`)
+
+```yaml
+models:
+  myprovider: my-model-id
+```
+
+**6. Document env vars** (`.env.example`)
+
+```bash
+# MyProvider (when LLM_PROVIDER=myprovider)
+MYPROVIDER_API_KEY=
+```
+
+**7. Test**
+
+Add `test/<name>Provider.test.ts`. Mock the HTTP layer; test that `complete()`
+maps request fields correctly and handles API errors.
+
+### Key notes
+
+- **temperature** — some APIs (e.g. Claude 4+) don't accept `temperature`. Check your API's docs and omit it if unsupported rather than passing `0`.
+- **Streaming** — if your API streams, collect the full stream before returning the text string.
+- **Errors** — throw on API errors. The engine catches them, logs, and retries on the next poll cycle.
+- **Model ID** — pass `req.model` through to the API and return it in `CompletionResult.model`. If the API returns the actual resolved model name, use that instead.
+
+---
+
 ## Running tests
 
 ```bash
