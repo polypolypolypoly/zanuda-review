@@ -1,9 +1,17 @@
 import type { Config } from "../config.js";
 import type { ProjectContext } from "../context/builder.js";
 import type { PullRequestData } from "../github/pullRequest.js";
+import type { PromptDiff } from "./diff.js";
 
-/** The JSON contract we instruct the model to follow. */
-const OUTPUT_INSTRUCTIONS = `
+// ── Output schema instructions ────────────────────────────────────────────────
+
+function outputInstructions(forAllFiles: boolean): string {
+  const filesSummaryInstruction = forAllFiles
+    ? "Include one entry in filesSummary for every changed file."
+    : "Include one entry in filesSummary for every file whose diff appears above. " +
+      "Do NOT invent descriptions for files not shown in the diff.";
+
+  return `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
   "summary": "string — overall assessment, 1-4 sentences",
@@ -29,9 +37,12 @@ action rules:
   REQUEST_CHANGES  — one or more blocker-severity issues; must not merge as-is.
   COMMENT          — warnings or observations only; author can decide whether to act.
 
-Include one entry in filesSummary for every changed file.
+${filesSummaryInstruction}
 Only comment on lines that appear in the diff. If there is nothing to flag,
 return an empty "comments" array and say so in the summary.`;
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
 
 export function buildSystemPrompt(config: Config): string {
   return config.preprompt.trim();
@@ -51,6 +62,12 @@ export interface UserPromptOpts {
    * (Contrast with PR-author content which IS sandboxed.)
    */
   instructions?: string;
+  /**
+   * Structured diff assembled by buildPromptDiff().
+   * When provided, replaces the raw pr.diff truncation approach — gives the
+   * model complete per-file diffs rather than an arbitrary byte-truncated blob.
+   */
+  promptDiff?: PromptDiff;
 }
 
 export function buildUserPrompt(
@@ -60,8 +77,13 @@ export function buildUserPrompt(
   opts: UserPromptOpts = {},
 ): string {
   const { round = 1, discussion } = opts;
-  const diff = truncate(pr.diff, config.review.maxDiffChars);
   const isFinal = round >= 2;
+
+  // Use the structured per-file diff when available; fall back to the raw diff
+  // truncation for connectors that don't supply per-file patches.
+  const diffSection = opts.promptDiff
+    ? buildDiffSection(opts.promptDiff, pr.changedFiles.length)
+    : buildFallbackDiffSection(pr.diff, config.review.maxDiffChars);
 
   const parts: string[] = [];
 
@@ -115,34 +137,98 @@ export function buildUserPrompt(
   }
 
   parts.push(
-    "## Current diff",
-    "```diff",
-    diff.text,
-    "```",
-    diff.truncated ? "\n(Diff truncated due to size.)" : "",
+    ...diffSection.parts,
     "",
-    isFinal ? FINAL_TASK_INSTRUCTIONS : ROUND1_TASK_INSTRUCTIONS,
+    isFinal
+      ? finalTaskInstructions(diffSection.forAllFiles)
+      : round1TaskInstructions(diffSection.forAllFiles),
   );
 
   return parts.join("\n");
 }
 
-const ROUND1_TASK_INSTRUCTIONS =
-  `## Your task\nReview the diff above using the project context and your instructions.\n` +
-  OUTPUT_INSTRUCTIONS;
+// ── Diff section builders ─────────────────────────────────────────────────────
 
-const FINAL_TASK_INSTRUCTIONS =
-  `## Your task (FINAL — round 2 of 2)\n` +
-  `Examine the current diff and the discussion above. Assess whether the issues ` +
-  `from round 1 have been adequately addressed. This is your last word on this PR.\n\n` +
-  `Valid actions for round 2:\n` +
-  `  APPROVE — issues resolved; PR is safe to merge.\n` +
-  `  COMMENT — issues remain that were NOT adequately addressed. When using COMMENT,\n` +
-  `            your summary MUST explicitly state the PR is not ready to merge and\n` +
-  `            list what still needs fixing. Be specific and direct.\n\n` +
-  `Do NOT use REQUEST_CHANGES — this is the final round and you cannot follow up,\n` +
-  `so blocking the PR would leave it stuck permanently.\n` +
-  OUTPUT_INSTRUCTIONS;
+interface DiffSection {
+  parts: string[];
+  forAllFiles: boolean;
+}
+
+function buildDiffSection(diff: PromptDiff, totalFiles: number): DiffSection {
+  const includedCount = diff.includedFiles.length;
+  const excludedCount = diff.excludedFiles.length;
+  const forAllFiles = !diff.truncated;
+
+  const parts: string[] = ["## Current diff"];
+
+  if (diff.truncated) {
+    parts.push(
+      `> ⚠️ **Large PR** — showing ${includedCount} of ${totalFiles} files ` +
+        `(largest changes first). The following ${excludedCount} file(s) are not shown:`,
+      diff.excludedFiles
+        .filter((f) => f.patch !== undefined)
+        .map((f) => `> - \`${f.filename}\` (+${f.additions}/-${f.deletions})`)
+        .join("\n"),
+      "",
+    );
+
+    const noPatch = diff.excludedFiles.filter((f) => f.patch === undefined);
+    if (noPatch.length > 0) {
+      parts.push(
+        `> ${noPatch.length} additional file(s) have no inline diff available ` +
+          `(binary or too large for the platform to inline):`,
+        noPatch.map((f) => `> - \`${f.filename}\``).join("\n"),
+        "",
+      );
+    }
+  }
+
+  parts.push("```diff", diff.text || "(empty diff)", "```");
+
+  return { parts, forAllFiles };
+}
+
+function buildFallbackDiffSection(
+  rawDiff: string,
+  maxChars: number,
+): DiffSection {
+  const result = truncate(rawDiff, maxChars);
+  const parts = [
+    "## Current diff",
+    "```diff",
+    result.text,
+    "```",
+    result.truncated ? "\n(Diff truncated due to size.)" : "",
+  ];
+  return { parts, forAllFiles: !result.truncated };
+}
+
+// ── Task instructions ─────────────────────────────────────────────────────────
+
+function round1TaskInstructions(forAllFiles: boolean): string {
+  return (
+    `## Your task\nReview the diff above using the project context and your instructions.\n` +
+    outputInstructions(forAllFiles)
+  );
+}
+
+function finalTaskInstructions(forAllFiles: boolean): string {
+  return (
+    `## Your task (FINAL — round 2 of 2)\n` +
+    `Examine the current diff and the discussion above. Assess whether the issues ` +
+    `from round 1 have been adequately addressed. This is your last word on this PR.\n\n` +
+    `Valid actions for round 2:\n` +
+    `  APPROVE — issues resolved; PR is safe to merge.\n` +
+    `  COMMENT — issues remain that were NOT adequately addressed. When using COMMENT,\n` +
+    `            your summary MUST explicitly state the PR is not ready to merge and\n` +
+    `            list what still needs fixing. Be specific and direct.\n\n` +
+    `Do NOT use REQUEST_CHANGES — this is the final round and you cannot follow up,\n` +
+    `so blocking the PR would leave it stuck permanently.\n` +
+    outputInstructions(forAllFiles)
+  );
+}
+
+// ── truncate (kept for fallback path and tests) ───────────────────────────────
 
 /**
  * Truncate `s` to at most `max` characters, cutting at the last newline

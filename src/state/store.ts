@@ -26,6 +26,11 @@ export interface PRState {
   /** Comment ID of the progress comment (\"Starting review\u2026\") posted in round 1.
    * Passed to round 2 so it can update in place instead of creating a second comment. */
   progressCommentId: number | null;
+  /**
+   * Consecutive review failures. Reset to 0 on success. Used to detect
+   * permanently failing PRs (e.g. always produces truncated JSON output).
+   */
+  consecutiveFailures: number;
   /** Wall-clock time of last write; used to prune stale entries on load. */
   lastUpdatedAt: string;
 }
@@ -165,6 +170,8 @@ export class PRStateStore {
         repliedCommentIds: new Set(s.repliedCommentIds),
         // Default for existing state files that predate this field.
         progressCommentId: s.progressCommentId ?? null,
+        // Default to 0 for existing state files that predate this field.
+        consecutiveFailures: s.consecutiveFailures ?? 0,
       });
     }
 

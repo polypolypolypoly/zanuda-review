@@ -144,6 +144,10 @@ export class StubConnector implements SCMConnector {
     _pr: PullRequest,
     _result: ReviewResult,
     _config: Config,
+    _opts?: {
+      summaryPostedElsewhere?: boolean;
+      visibleFilePaths?: Set<string>;
+    },
   ): Promise<void> {
     throw new Error("StubConnector.postReview: not implemented");
   }

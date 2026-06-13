@@ -36,6 +36,19 @@ export interface RepoRef {
  *     and context files from the *trusted* base branch, not the PR head.
  *   - `headSha` — the PR head commit. Used to anchor inline review comments.
  */
+/**
+ * Per-file change data. `patch` is the file's unified diff section as returned
+ * by the platform's list-files API. It is `undefined` when the platform omits
+ * it (file too large, binary file, etc.).
+ */
+export interface FileChange {
+  filename: string;
+  additions: number;
+  deletions: number;
+  /** Unified diff for this file only. Undefined when platform truncated it. */
+  patch?: string;
+}
+
 export interface PullRequest {
   ref: RepoRef;
   number: number;
@@ -43,9 +56,12 @@ export interface PullRequest {
   body: string;
   baseSha: string;
   headSha: string;
-  /** Unified diff of the whole PR. */
+  /** Unified diff of the whole PR (raw blob from the platform). */
   diff: string;
+  /** Ordered list of all changed file paths (convenience alias of files[].filename). */
   changedFiles: string[];
+  /** Per-file metadata including individual patches where available. */
+  files: FileChange[];
   /** Current state of the PR: open, closed, or merged. */
   state: "open" | "closed" | "merged";
 }
@@ -144,12 +160,15 @@ export interface SCMConnector {
    * @param opts.summaryPostedElsewhere - If true, the review summary has already
    *   been posted elsewhere (e.g., in a progress comment) and the review body can
    *   be left empty. If false, the summary must be included in the review body.
+   * @param opts.visibleFilePaths - The set of file paths whose diff was actually
+   *   sent to the model. Comments on paths outside this set are anchored to lines
+   *   the model never saw and will 422; the connector should handle them specially.
    */
   postReview(
     pr: PullRequest,
     result: ReviewResult,
     config: Config,
-    opts?: { summaryPostedElsewhere?: boolean },
+    opts?: { summaryPostedElsewhere?: boolean; visibleFilePaths?: Set<string> },
   ): Promise<void>;
 
   /**

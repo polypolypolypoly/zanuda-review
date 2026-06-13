@@ -1,5 +1,5 @@
 import type { Octokit } from "@octokit/rest";
-import type { PullRequest, RepoRef } from "../platform/types.js";
+import type { FileChange, PullRequest, RepoRef } from "../platform/types.js";
 
 // PullRequestData is an alias kept for internal use within the github/ layer.
 export type PullRequestData = PullRequest;
@@ -25,6 +25,16 @@ export async function fetchPullRequest(
     per_page: 100,
   });
 
+  const fileChanges: FileChange[] = files.map((f) => ({
+    filename: f.filename,
+    additions: f.additions,
+    deletions: f.deletions,
+    // `patch` is absent for binary files and files GitHub considers too large
+    // to inline (typically > 1 MB or > 20k lines). We treat absence as
+    // "not available" rather than an error.
+    patch: f.patch,
+  }));
+
   return {
     ref,
     number,
@@ -34,6 +44,7 @@ export async function fetchPullRequest(
     headSha: pr.head.sha,
     diff: diffRes.data as unknown as string,
     changedFiles: files.map((f) => f.filename),
+    files: fileChanges,
     state: pr.merged_at ? "merged" : pr.state === "closed" ? "closed" : "open",
   };
 }
