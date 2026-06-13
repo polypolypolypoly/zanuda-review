@@ -35,8 +35,8 @@ export async function reviewPullRequest(
   deps: ReviewDeps,
   ref: RepoRef,
   number: number,
-  opts: { dryRun?: boolean; round?: number } = {},
-): Promise<ReviewResult> {
+  opts: { dryRun?: boolean; round?: number; progressCommentId?: number } = {},
+): Promise<ReviewResult & { progressCommentId: number | null }> {
   const { connector } = deps;
   const round = opts.round ?? 1;
   const log = logger.child({
@@ -48,16 +48,22 @@ export async function reviewPullRequest(
   const pr = await connector.fetchPR(ref, number);
   log.info({ files: pr.changedFiles.length }, "Fetched PR");
 
-  // Post a "starting" placeholder immediately so the author sees activity.
-  // Edited to the final verdict once the review is complete.
-  let startingCommentId: number | null = null;
+  // Round 1: post a "starting" placeholder. Round 2+: reuse the existing
+  // comment ID so we update in place and avoid a second stale comment.
+  let startingCommentId: number | null = opts.progressCommentId ?? null;
   if (!opts.dryRun) {
-    startingCommentId = await connector
-      .postComment(ref, number, "_Starting review\u2026_")
-      .catch((err) => {
-        log.warn({ err }, "Failed to post starting comment");
-        return null;
-      });
+    if (startingCommentId !== null) {
+      await connector
+        .editComment(ref, startingCommentId, "_Starting round 2 review\u2026_")
+        .catch((err) => log.warn({ err }, "Failed to update progress comment"));
+    } else {
+      startingCommentId = await connector
+        .postComment(ref, number, "_Starting review\u2026_")
+        .catch((err) => {
+          log.warn({ err }, "Failed to post starting comment");
+          return null;
+        });
+    }
   }
 
   // Three-level config merge: global defaults → org config → per-repo config.
@@ -149,6 +155,12 @@ export async function reviewPullRequest(
   const result = parseReviewResult(completion.text);
   result.comments = result.comments.filter((c) => c.severity !== "nitpick");
 
+  // APPROVE means the code is clean — inline comments on an APPROVE create
+  // unresolved threads that block the merge even though the reviewer approved.
+  if (result.action === "APPROVE") {
+    result.comments = [];
+  }
+
   // Round 2 is the final review — REQUEST_CHANGES must never be used here.
   if (round >= 2 && result.action === "REQUEST_CHANGES") {
     result.action = "COMMENT";
@@ -184,6 +196,19 @@ export async function reviewPullRequest(
       },
       "Review posted",
     );
+
+    // On APPROVE: resolve all outstanding review threads Zanuda opened in
+    // previous rounds so they don’t block the merge.
+    if (result.action === "APPROVE") {
+      const botLogin = await connector.getBotLogin().catch(() => "");
+      if (botLogin) {
+        await connector
+          .resolveReviewThreads(ref, number, botLogin)
+          .catch((err) =>
+            log.warn({ err }, "Failed to resolve threads after APPROVE"),
+          );
+      }
+    }
   }
 
   // ── Repo memory update ────────────────────────────────────────────────────
@@ -205,7 +230,7 @@ export async function reviewPullRequest(
     }
   }
 
-  return result;
+  return { ...result, progressCommentId: startingCommentId };
 }
 
 /** Parse the model's JSON, tolerating accidental code fences / prose wrapping. */

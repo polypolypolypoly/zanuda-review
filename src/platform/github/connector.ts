@@ -145,6 +145,75 @@ export class GitHubConnector implements SCMConnector {
   ): Promise<void> {
     return replyToComment(this.octokit, ref, number, comment, body);
   }
+
+  async resolveReviewThreads(
+    ref: RepoRef,
+    number: number,
+    botLogin: string,
+  ): Promise<void> {
+    // Fetch all unresolved threads where the bot authored the first comment.
+    const result = await this.octokit.graphql<{
+      repository: {
+        pullRequest: {
+          reviewThreads: {
+            nodes: Array<{
+              id: string;
+              isResolved: boolean;
+              comments: { nodes: Array<{ author: { login: string } }> };
+            }>;
+          };
+        };
+      };
+    }>(
+      `query($owner: String!, $name: String!, $number: Int!) {
+        repository(owner: $owner, name: $name) {
+          pullRequest(number: $number) {
+            reviewThreads(first: 100) {
+              nodes {
+                id
+                isResolved
+                comments(first: 1) {
+                  nodes { author { login } }
+                }
+              }
+            }
+          }
+        }
+      }`,
+      { owner: ref.owner, name: ref.repo, number },
+    );
+
+    const threads = result.repository.pullRequest.reviewThreads.nodes.filter(
+      (t) =>
+        !t.isResolved &&
+        t.comments.nodes[0]?.author.login.toLowerCase() ===
+          botLogin.toLowerCase(),
+    );
+
+    for (const thread of threads) {
+      await this.octokit
+        .graphql(
+          `mutation($id: ID!) {
+            resolveReviewThread(input: { threadId: $id }) { thread { isResolved } }
+          }`,
+          { id: thread.id },
+        )
+        .catch(() => {
+          /* best-effort — don't fail the review if resolution fails */
+        });
+    }
+
+    if (threads.length > 0) {
+      logger.info(
+        {
+          repo: `${ref.owner}/${ref.repo}`,
+          pr: number,
+          resolved: threads.length,
+        },
+        "Resolved open review threads after APPROVE",
+      );
+    }
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

@@ -162,9 +162,12 @@ async function pollReviewRequests(opts: {
       { connector, baseConfig: config },
       item.ref,
       item.number,
-      { round: nextRound },
+      {
+        round: nextRound,
+        progressCommentId: state?.progressCommentId ?? undefined,
+      },
     )
-      .then(() => {
+      .then((result) => {
         inProgress.delete(item.platformId);
         store.set(item.platformId, {
           ref: item.ref,
@@ -173,6 +176,8 @@ async function pollReviewRequests(opts: {
           mentionReplies: state?.mentionReplies ?? 0,
           repliedCommentIds: state?.repliedCommentIds ?? new Set(),
           maxRoundsNotified: false,
+          progressCommentId:
+            result.progressCommentId ?? state?.progressCommentId ?? null,
         });
         logger.info(
           {

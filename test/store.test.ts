@@ -21,6 +21,7 @@ function makeState(
     mentionReplies: 0,
     repliedCommentIds: new Set<number>(),
     maxRoundsNotified: false,
+    progressCommentId: null,
     ...overrides,
   };
 }

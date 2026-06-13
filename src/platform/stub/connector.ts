@@ -195,4 +195,19 @@ export class StubConnector implements SCMConnector {
   ): Promise<void> {
     throw new Error("StubConnector.replyToComment: not implemented");
   }
+
+  /**
+   * Resolve all open review threads started by the bot.
+   * Called after APPROVE so outstanding threads don't block the merge.
+   *
+   * GitHub reference: GraphQL resolveReviewThread mutation
+   * GitLab equivalent: resolve discussion via PUT .../notes/:id (set resolved=true)
+   */
+  async resolveReviewThreads(
+    _ref: RepoRef,
+    _number: number,
+    _botLogin: string,
+  ): Promise<void> {
+    throw new Error("StubConnector.resolveReviewThreads: not implemented");
+  }
 }
