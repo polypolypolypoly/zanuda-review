@@ -67,7 +67,7 @@ state/
 
 - `config/default.yaml` — global defaults (preprompt, models, limits, context file list)
 - `.env` / `.env.example` — secrets (GITHUB_TOKEN, LLM API keys)
-- `deploy/zanuda.service` — systemd unit for homeserver deployment
+- `deploy/zanuda.service.example` — systemd unit template for deployment
 - `Dockerfile` — Docker deployment (note: needs env vars at runtime)
 - `test/` — Node built-in test runner tests
 
