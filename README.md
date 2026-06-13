@@ -1,91 +1,57 @@
 # Zanuda the Reviewer
 
-A model-agnostic AI code-review bot for GitHub. It runs under its own GitHub
-account; when you **request a review from the bot on a pull request**, it
-gathers project context, runs the diff through the configured LLM, and posts
-structured review comments back on the PR.
+A GitHub code review bot that runs as its own account. Add it as a reviewer on a PR and it posts inline comments, approves, or requests changes — powered by whatever LLM you configure.
 
 ## How it works
 
-```
-[every 60 s] poller → GitHub search API (review-requested:<bot-account>)
-  → fetch PR diff + repo config + project context + repo memory
-  → build prompt (preprompt + memory + context + diff)
-  → LLM (Anthropic | OpenAI | OpenRouter | Ollama)
-  → parse structured JSON result
-  → post review comments via GitHub API
-```
+Zanuda polls GitHub every 60 s for PRs with a pending review request, then:
 
-**No webhook or public endpoint required.** The bot polls GitHub — GitHub
-never needs to reach in. There is no server to expose.
+1. Fetches the diff, per-repo config, and convention files (README, manifests, etc.)
+2. On first encounter with a repo, generates a persistent memory doc (architecture, code style, invariants) and reuses it on every subsequent review
+3. Sends everything to the configured LLM and parses the structured result
+4. Posts inline review comments via the GitHub API
 
-- **Poller-based.** Every 60 s (configurable) the bot searches for open PRs
-  requesting review from the bot account and processes them. Round counts and
-  reply caps persist across restarts.
-- **Two review rounds.** Round 1 is the initial review. If the author pushes
-  fixes and re-requests, round 2 checks whether the issues were addressed
-  (final verdict — no round 3).
-- **@mention replies.** After reviewing, the bot monitors the PR discussion for
-  mentions and replies (up to 5 per PR).
-- **Repo memory.** On first encounter with a repo the bot generates a
-  persistent knowledge document (architecture, code style, key invariants).
-  Every subsequent review injects this memory and optionally updates it.
-- **Model-agnostic.** Every backend implements one `LLMProvider` interface.
-  Switch with `LLM_PROVIDER`; nothing else changes.
-- **Per-project context.** Pulls convention files (README, CONTRIBUTING,
-  CLAUDE.md, manifests, …) and an optional file tree to ground the review.
-- **Access control.** An allowlist (`access.allowlist` in config) restricts
-  which owners/repos can request reviews. Empty = open to all.
+No webhook or public endpoint needed — the bot reaches out to GitHub, not the other way around.
+
+**Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. If the author pushes fixes and re-requests, round 2 is the final verdict. It also replies to `@mentions` in the PR discussion (up to 5 per PR).
+
+**Providers.** Anthropic, OpenAI, OpenRouter (200+ models), and Ollama for local models. Switch with `LLM_PROVIDER` in `.env`; nothing else changes.
 
 ---
 
 ## Using a hosted instance
 
-If someone is already running Zanuda the Reviewer as a service and has given you
-access, you only need to do the following — no server or API keys required
-on your end.
+If someone is running Zanuda and has given you access:
 
-**Once per repo:**
-1. Add the bot account as a collaborator on your repo (Read access is enough
-   on public repos). For orgs, adding it as an org member covers all repos.
-2. _(Optional)_ Commit `.zanuda.yml` to your org's `.github` repo for
-   org-wide defaults (provider, model, extra rules).
-3. _(Optional)_ Commit `.zanuda.yml` to individual repos to override
-   org defaults.
-
-**Then forever, zero setup per PR:**
-
-4. Open a PR → request review from the bot → review appears within 60 s.
+1. Add the bot account as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
+2. Optionally commit `.zanuda.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
+3. Open a PR and request a review from the bot. That's it.
 
 ---
 
 ## Self-hosting
 
-### 1. Create a bot GitHub account and token
+### 1. Bot account
 
-Create a dedicated GitHub account for the bot (e.g. `MyReviewBot`) and
-generate a Personal Access Token:
-- Classic token: `repo` scope.
-- Fine-grained: *Pull requests* read/write + *Contents* read on target repos.
+Create a dedicated GitHub account and a Personal Access Token — classic with `repo` scope, or fine-grained with *Pull requests* read/write and *Contents* read on the target repos.
 
-### 2. Configure secrets
+### 2. Secrets
 
 ```bash
 cp .env.example .env
-# Fill in: GITHUB_TOKEN, GITHUB_BOT_LOGIN, and your LLM provider key
+# Set GITHUB_TOKEN, GITHUB_BOT_LOGIN, and your LLM provider key
 ```
 
-### 3. Create a local config override (not committed)
+### 3. Local config
 
-`config/default.yaml` ships with generic defaults. Create a separate file for
-your deployment-specific values:
+`config/default.yaml` has the generic defaults. Put your deployment-specific overrides in a separate file that you don't commit:
 
 ```yaml
-# e.g. /etc/zanuda/config.yaml  (or anywhere you like)
+# /etc/zanuda/config.yaml
 access:
   allowlist:
-    - your-org     # owner slug — any repo under this org/account
-    # - other-org/specific-repo   # or a single repo
+    - your-org          # any repo under this org/account
+    # - your-org/repo   # or a single repo
 
 persistence:
   stateFile: "/var/lib/zanuda/state.json"
@@ -93,8 +59,6 @@ persistence:
 memory:
   dir: "/var/lib/zanuda/memory"
 ```
-
-Point the service at it:
 
 ```bash
 export ZANUDA_CONFIG=/etc/zanuda/config.yaml
@@ -106,123 +70,68 @@ export ZANUDA_CONFIG=/etc/zanuda/config.yaml
 npm ci && npm run build && npm start
 ```
 
-### 5. Systemd (recommended for production)
+### 5. Systemd
 
 ```bash
 cp deploy/zanuda.service.example /etc/systemd/system/zanuda.service
-$EDITOR /etc/systemd/system/zanuda.service   # fill in the <PLACEHOLDERS>
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now zanuda
+# Edit the file — fill in <PLACEHOLDERS>
+sudo systemctl daemon-reload && sudo systemctl enable --now zanuda
 journalctl -u zanuda -f
 ```
 
-### 6. CI/CD (optional)
+### 6. CI/CD
 
-See `.github/workflows/deploy.yml` for a self-hosted GitHub Actions runner
-example. Customise the `SERVICE_USER`, `REPO_PATH`, and `SERVICE_NAME` env
-vars at the top of the deploy job.
+`.github/workflows/deploy.yml` has a self-hosted runner example. Set `SERVICE_USER`, `REPO_PATH`, and `SERVICE_NAME` at the top of the deploy job.
 
-### 7. Onboarding a user or org
+### 7. Adding users
 
-Once your instance is running, onboarding a new user/org is:
-
-1. Add their owner slug to `access.allowlist` in your local config and restart.
-2. Have them follow the **"Using a hosted instance"** steps above.
+To give a user or org access: add their slug to `access.allowlist` in your local config and restart. Have them follow the hosted-instance steps above.
 
 ---
 
-## Configuration layers
+## Configuration
 
-Settings are merged in order — each layer overrides only what it sets:
+Settings merge in order — each layer overrides only what it sets:
 
 ```
-global defaults (config/default.yaml)
-  → org config   ({owner}/.github repo → .zanuda.yml)
-  → repo config  (repo root → .zanuda.yml)
+config/default.yaml  →  {owner}/.github/.zanuda.yml  →  repo-root/.zanuda.yml
 ```
 
-**Org config** — commit `.zanuda.yml` to the org's `.github` repository.
-Applies to all repos under that org. Good for setting a shared provider, model,
-or preprompt rules once:
+The org config (`.github` repo) is good for shared provider/model/rules across all repos in an org. Per-repo config overrides just what it needs to.
 
 ```yaml
-prepromptAppend: |
-  All repos here are TypeScript — treat any use of `any` as a warning.
+# .zanuda.yml example
 provider: openrouter
 models:
   openrouter: anthropic/claude-opus-4-8
-```
-
-**Per-repo config** — commit `.zanuda.yml` to the repo root:
-
-```yaml
-provider: ollama
-models:
-  ollama: qwen2.5:3b
 prepromptAppend: |
-  This is a Rust project — pay attention to ownership and unsafe blocks.
-review:
-  inlineComments: true
+  This is a Rust project. Flag any use of unsafe.
 context:
   includeFiles: [README.md, ARCHITECTURE.md]
 memory:
-  enabled: false   # opt out of repo memory for this repo
+  enabled: false
 ```
+
+Full list of options: see `config/default.yaml`.
 
 ---
 
-## Local / manual reviews
+## Manual reviews
 
 ```bash
-npm run review -- owner/repo#123 --dry-run   # print JSON, post nothing
-npm run review -- owner/repo#123             # post the review
-npm run review -- owner/repo#123 --round=2   # simulate round 2
+npm run review -- owner/repo#123            # post the review
+npm run review -- owner/repo#123 --dry-run  # print JSON, don't post
+npm run review -- owner/repo#123 --round=2  # run as round 2
 ```
 
-## Choosing a model
+## Models
 
-Set `LLM_PROVIDER` and the matching key in `.env`, or per-repo in
-`.zanuda.yml`. Defaults live in `config/default.yaml` under `models:`.
-
-| Provider     | Env key              | Notes                               |
+| Provider     | Env var              | Notes                               |
 | ------------ | -------------------- | ------------------------------------|
-| `anthropic`  | `ANTHROPIC_API_KEY`  | Claude models                       |
-| `openai`     | `OPENAI_API_KEY`     | GPT / OpenAI-compatible             |
-| `openrouter` | `OPENROUTER_API_KEY` | Any model via OpenRouter            |
-| `ollama`     | (none)               | Local models; set `OLLAMA_BASE_URL` |
-
-## Project layout
-
-```
-src/
-  index.ts              entrypoint — starts the poller
-  poller.ts             poll loop: find PRs, enforce limits, dispatch reviews
-  config.ts             config schema, env overrides, per-repo merge
-  cli.ts                manual review runner
-  logger.ts             pino logger setup
-  github/
-    client.ts           Octokit singleton
-    pullRequest.ts      fetch PR data & diff
-    postReview.ts       post review comments back to GitHub
-    comments.ts         fetch/format PR discussion, find @mentions
-  llm/
-    types.ts            LLMProvider interface
-    index.ts            provider factory
-    anthropic.ts        Anthropic Claude implementation
-    openaiCompatible.ts OpenAI / OpenRouter / Ollama implementation
-  context/
-    repoConfig.ts       fetch & merge per-repo .zanuda.yml
-    builder.ts          build project context string
-    repoMemory.ts       generate, load, update persistent repo memory
-  review/
-    types.ts            ReviewComment, ReviewResult types
-    prompt.ts           assemble final prompt
-    engine.ts           orchestrate: context → prompt → LLM → parse → post
-    replyEngine.ts      generate and post @mention replies
-  state/
-    store.ts            atomic persistent PR state (rounds, mention caps)
-```
+| `anthropic`  | `ANTHROPIC_API_KEY`  | Claude                              |
+| `openai`     | `OPENAI_API_KEY`     | GPT and compatible                  |
+| `openrouter` | `OPENROUTER_API_KEY` | 200+ models                         |
+| `ollama`     | —                    | Local; set `OLLAMA_BASE_URL`        |
 
 ## Tests
 
