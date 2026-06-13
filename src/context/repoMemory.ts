@@ -40,6 +40,12 @@ export function saveRepoMemory(config: Config, ref: RepoRef, content: string): v
   logger.info({ path }, "Repo memory saved");
 }
 
+// ─── In-process generation lock ─────────────────────────────────────────────
+// Prevents two concurrent reviews of the same repo from both seeing no memory
+// file and both firing off a generation LLM call. The second one waits until
+// the first has written the file, then loads it instead of re-generating.
+const _generatingFor = new Set<string>();
+
 // ─── Generation ───────────────────────────────────────────────────────────────
 
 const GENERATE_SYSTEM = `\
@@ -81,33 +87,51 @@ export async function generateRepoMemory(
   config: Config,
   provider: LLMProvider,
 ): Promise<string> {
-  const log = logger.child({ repo: `${ref.owner}/${ref.repo}` });
+  const repoKey = `${ref.owner}/${ref.repo}`;
+  const log = logger.child({ repo: repoKey });
+
+  // If another concurrent review of the same repo is already generating memory,
+  // wait for it to finish then return the file it wrote instead of re-generating.
+  if (_generatingFor.has(repoKey)) {
+    log.info("Repo memory generation already in progress — waiting");
+    await waitUntil(() => !_generatingFor.has(repoKey));
+    const existing = loadRepoMemory(config, ref);
+    if (existing) return existing;
+    // If it still doesn't exist (the other call failed), fall through and try ourselves.
+  }
+
+  _generatingFor.add(repoKey);
   log.info("Generating repo memory (first encounter)");
 
-  const context = await buildContext(octokit, ref, gitRef, config);
+  try {
+    const context = await buildContext(octokit, ref, gitRef, config);
 
-  const user = [
-    `Repository: ${ref.owner}/${ref.repo}`,
-    "",
-    context.text,
-  ].join("\n");
+    const user = [
+      `Repository: ${ref.owner}/${ref.repo}`,
+      "",
+      context.text,
+    ].join("\n");
 
-  const completion = await provider.complete({
-    system: GENERATE_SYSTEM,
-    user,
-    model: config.models[config.provider],
-    temperature: 0.1,
-    maxTokens: 2048,
-  });
+    const completion = await provider.complete({
+      system: GENERATE_SYSTEM,
+      user,
+      model: config.models[config.provider],
+      temperature: 0.1,
+      maxTokens: 2048,
+    });
 
-  const now = today();
-  return [
-    `# Repo Memory: ${ref.owner}/${ref.repo}`,
-    `Generated: ${now}`,
-    `Updated: ${now}`,
-    "",
-    completion.text.trim(),
-  ].join("\n");
+    const now = today();
+    return [
+      `# Repo Memory: ${ref.owner}/${ref.repo}`,
+      `Generated: ${now}`,
+      `Updated: ${now}`,
+      "",
+      completion.text.trim(),
+    ].join("\n");
+  } finally {
+    // Always release the lock so waiting callers can proceed.
+    _generatingFor.delete(repoKey);
+  }
 }
 
 // ─── Update ───────────────────────────────────────────────────────────────────
@@ -189,4 +213,12 @@ export async function maybeUpdateRepoMemory(
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Poll until predicate is true, used to wait for concurrent memory generation. */
+function waitUntil(pred: () => boolean, intervalMs = 500): Promise<void> {
+  return new Promise((resolve) => {
+    const check = () => (pred() ? resolve() : setTimeout(check, intervalMs));
+    check();
+  });
 }

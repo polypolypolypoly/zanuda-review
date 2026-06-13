@@ -4,6 +4,12 @@ on:
   push:
     branches: [main]
 
+# Prevent two deploys running simultaneously on the self-hosted runner.
+# A second push while a deploy is in progress cancels the in-progress run.
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
 jobs:
   test:
     runs-on: ubuntu-latest

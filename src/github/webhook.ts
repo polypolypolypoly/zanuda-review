@@ -13,6 +13,16 @@ export interface WebhookDeps {
   octokit: Octokit;
 }
 
+/** Mirror of the allowlist logic in poller.ts — kept in sync manually. */
+function isAllowed(ref: { owner: string; repo: string }, allowlist: string[]): boolean {
+  if (allowlist.length === 0) return true;
+  const full = `${ref.owner}/${ref.repo}`.toLowerCase();
+  return allowlist.some((e) => {
+    const entry = e.toLowerCase();
+    return entry === ref.owner.toLowerCase() || entry === full;
+  });
+}
+
 /**
  * Wire up the `pull_request.review_requested` event. We only act when *this*
  * bot account is the requested reviewer — that is the user's "request a review
@@ -30,6 +40,12 @@ export function createWebhooks(deps: WebhookDeps): Webhooks {
 
     const ref = { owner: payload.repository.owner.login, repo: payload.repository.name };
     const number = payload.pull_request.number;
+
+    if (!isAllowed(ref, deps.baseConfig.access.allowlist)) {
+      logger.warn({ repo: `${ref.owner}/${ref.repo}` }, "Webhook from unlisted repo — ignoring");
+      return;
+    }
+
     logger.info({ repo: `${ref.owner}/${ref.repo}`, pr: number }, "Review requested");
 
     // Run the review in the background so the webhook returns 200 promptly;
