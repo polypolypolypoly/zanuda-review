@@ -23,7 +23,6 @@ export class AnthropicProvider implements LLMProvider {
       max_tokens: req.maxTokens,
       system: req.system,
       messages: [{ role: "user", content: req.user }],
-      temperature: req.temperature,
     });
     const text = res.content
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
