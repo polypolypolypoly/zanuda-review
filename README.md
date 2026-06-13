@@ -184,7 +184,7 @@ Zanuda's GitHub integration is one connector behind a clean interface. The revie
    cp src/platform/stub/connector.ts src/platform/<name>/connector.ts
    ```
 
-2. **Implement the interface** — 8 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
+2. **Implement the interface** — 9 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
 
 3. **Register in the factory** — add one `case` to `src/platform/index.ts`:
 

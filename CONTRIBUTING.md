@@ -55,7 +55,7 @@ The stub is a fully annotated skeleton. Every method has:
 - The GitLab / Bitbucket equivalent where known
 - Notes on edge cases
 
-**2. Implement the 8 methods**
+**2. Implement the 9 methods**
 
 | Method | What it does |
 |---|---|
