@@ -45,7 +45,7 @@ jobs:
         run: |
           sudo -u $SERVICE_USER git -C $REPO_PATH fetch origin main
           sudo -u $SERVICE_USER git -C $REPO_PATH checkout main
-          sudo -u $SERVICE_USER git -C $REPO_PATH reset --hard origin/main
+          sudo -u $SERVICE_USER git -C $REPO_PATH reset --hard FETCH_HEAD
 
       - name: Install dependencies
         # --ignore-scripts: never run dependency lifecycle scripts on the host.
