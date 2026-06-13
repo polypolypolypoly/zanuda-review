@@ -23,6 +23,9 @@ export interface PRState {
   repliedCommentIds: Set<number>;
   /** Set once the "max rounds reached" message has been posted. */
   maxRoundsNotified: boolean;
+  /** Comment ID of the progress comment (\"Starting review\u2026\") posted in round 1.
+   * Passed to round 2 so it can update in place instead of creating a second comment. */
+  progressCommentId: number | null;
   /** Wall-clock time of last write; used to prune stale entries on load. */
   lastUpdatedAt: string;
 }
@@ -160,6 +163,8 @@ export class PRStateStore {
       map.set(Number(key), {
         ...s,
         repliedCommentIds: new Set(s.repliedCommentIds),
+        // Default for existing state files that predate this field.
+        progressCommentId: s.progressCommentId ?? null,
       });
     }
 

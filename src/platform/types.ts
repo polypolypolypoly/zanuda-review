@@ -165,6 +165,20 @@ export interface SCMConnector {
   editComment(ref: RepoRef, commentId: number, body: string): Promise<void>;
 
   /**
+   * Resolve all open review threads on a PR that were started by the given
+   * author. Called after posting an APPROVE review so that outstanding threads
+   * from previous rounds don't block the merge.
+   *
+   * Implementations may no-op if the platform doesn't support thread resolution
+   * (e.g. local connector) or if no threads are found.
+   */
+  resolveReviewThreads(
+    ref: RepoRef,
+    number: number,
+    botLogin: string,
+  ): Promise<void>;
+
+  /**
    * Reply to a specific comment.
    * Inline replies should appear in the same thread; general replies post
    * a new top-level comment.
