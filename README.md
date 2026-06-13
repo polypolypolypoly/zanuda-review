@@ -167,3 +167,13 @@ npm run review -- owner/repo#123 --round=2  # run as round 2
 ```bash
 npm test
 ```
+
+## Contributing
+
+Bug reports and pull requests are welcome. A few things to know before you start:
+
+- **Open an issue first** for anything beyond a small fix. It avoids wasted effort if the direction isn't a fit.
+- **Tests are required.** New behaviour needs tests; bug fixes should include a regression test. Run `npm test` and `npm run typecheck` before submitting.
+- **Security issues** — please don't open a public issue. Email the maintainers directly instead.
+
+This project is MIT licensed. By contributing you agree your work will be distributed under the same terms.
