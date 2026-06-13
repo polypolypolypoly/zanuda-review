@@ -1,6 +1,6 @@
 # Zanuda the Reviewer
 
-A GitHub code review bot that runs as its own account. Add it as a reviewer on a PR and it posts inline comments, approves, or requests changes — powered by whatever LLM you configure.
+An AI code reviewer that runs as its own GitHub account. Add her to a PR and she posts inline comments, approves, or requests changes — with a consistent voice, codebase memory, and security-first judgment.
 
 ## How it works
 
@@ -11,7 +11,7 @@ Zanuda polls GitHub every 60 s for PRs with a pending review request, then:
 3. Sends everything to the configured LLM and parses the structured result
 4. Posts inline review comments via the GitHub API
 
-No webhook or public endpoint needed — the bot reaches out to GitHub, not the other way around.
+No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the other way around.
 
 **Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. If the author pushes fixes and re-requests, round 2 is the final verdict. It also replies to `@mentions` in the PR discussion (up to 5 per PR).
 
@@ -25,19 +25,19 @@ The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If y
 
 1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
 2. Optionally commit `.zanuda.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
-3. Open a PR and request a review from the bot. That's it.
+3. Open a PR and request a review from Zanuda. That's it.
 
 **Want reviews requested automatically on every PR?** Pick one:
-- **CODEOWNERS** — add `* @YourBotAccount` to `.github/CODEOWNERS`. GitHub requests a review on every opened PR automatically.
+- **CODEOWNERS** — add `* @YourReviewerAccount` to `.github/CODEOWNERS`. GitHub requests a review on every opened PR automatically.
 - **GitHub Actions** — copy `deploy/auto-review.yml.example` to `.github/workflows/zanuda-review.yml`. Skips drafts; triggers when a PR is marked ready for review.
 
 ---
 
 ## Self-hosting
 
-### 1. Bot account
+### 1. Reviewer account
 
-Create a dedicated GitHub account and a Personal Access Token — classic with `repo` scope, or fine-grained with *Pull requests* read/write and *Contents* read on the target repos.
+Create a dedicated GitHub account for Zanuda and a Personal Access Token — classic with `repo` scope, or fine-grained with *Pull requests* read/write and *Contents* read on the target repos.
 
 ### 2. Secrets
 
@@ -91,7 +91,7 @@ Both work. Docker is self-contained; Node is simpler if you're already on the ma
 
 ### 5. Long-running in production (optional)
 
-If you want the bot to survive reboots and restart on failure, use a process
+If you want Zanuda to survive reboots and restart on failure, use a process
 manager. Systemd example (`deploy/zanuda.service.example`), Docker's
 `--restart unless-stopped`, or PM2 all work fine. Pick what you already use.
 
