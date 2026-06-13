@@ -7,7 +7,11 @@ import {
   formatDiscussion,
   type PRComment,
 } from "../src/github/comments.ts";
-import { parseReviewResult, extractJson } from "../src/review/engine.ts";
+import {
+  parseReviewResult,
+  extractJson,
+  buildProgressComment,
+} from "../src/review/engine.ts";
 import { buildUserPrompt, truncate } from "../src/review/prompt.ts";
 import { buildReplyUserPrompt } from "../src/review/replyEngine.ts";
 import type { PullRequestData } from "../src/github/pullRequest.ts";
@@ -504,5 +508,58 @@ describe("buildUserPrompt: .zanuda/instructions.md injection", () => {
       "instructions should appear before project context",
     );
     assert.ok(instrIdx < taskIdx, "instructions should appear before task");
+  });
+});
+
+describe("buildProgressComment", () => {
+  it("formats APPROVE with correct icon and label", () => {
+    const result = {
+      action: "APPROVE" as const,
+      summary: "Ship it.",
+      comments: [],
+    };
+    const text = buildProgressComment(result);
+    assert.ok(text.includes("✅"));
+    assert.ok(text.includes("approve"));
+    assert.ok(text.includes("Ship it."));
+  });
+
+  it("formats REQUEST_CHANGES with correct icon and label", () => {
+    const result = {
+      action: "REQUEST_CHANGES" as const,
+      summary: "Fix these issues.",
+      comments: [],
+    };
+    const text = buildProgressComment(result);
+    assert.ok(text.includes("🛑"));
+    assert.ok(text.includes("request changes"));
+    assert.ok(text.includes("Fix these issues."));
+  });
+
+  it("formats COMMENT with correct icon and label", () => {
+    const result = {
+      action: "COMMENT" as const,
+      summary: "A few thoughts.",
+      comments: [],
+    };
+    const text = buildProgressComment(result);
+    assert.ok(text.includes("💬"));
+    assert.ok(text.includes("comment"));
+    assert.ok(text.includes("A few thoughts."));
+  });
+
+  it("falls back to comment icon for unknown action", () => {
+    const result: {
+      action: string;
+      summary: string;
+      comments: unknown[];
+    } = {
+      action: "UNKNOWN_ACTION",
+      summary: "Fallback case.",
+      comments: [],
+    };
+    const text = buildProgressComment(result);
+    assert.ok(text.includes("💬"));
+    assert.ok(text.includes("Fallback case."));
   });
 });
