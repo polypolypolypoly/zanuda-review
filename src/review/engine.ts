@@ -48,8 +48,9 @@ export async function reviewPullRequest(
     round,
   });
 
-  // Round 1: post a "starting" placeholder. Round 2+: reuse the existing
-  // comment ID so we update in place and avoid a second stale comment.
+  // Each round gets its own fresh progress comment so each round's verdict
+  // is preserved independently. progressCommentId is only non-null during a
+  // retry of the *same* round (stale discard path) — never across rounds.
   let startingCommentId: number | null = opts.progressCommentId ?? null;
 
   const pr = await connector.fetchPR(ref, number);
@@ -77,26 +78,21 @@ export async function reviewPullRequest(
   }
   if (!opts.dryRun) {
     if (startingCommentId !== null) {
-      // Try to update the round-1 comment. If it was deleted, fall back to posting
-      // a new one so the verdict isn't lost.
-      const edited = await connector
-        .editComment(ref, startingCommentId, "_Starting round 2 review\u2026_")
-        .then(() => true)
-        .catch((err) => {
-          log.warn({ err }, "Failed to update progress comment, will post new");
-          return false;
-        });
-      if (!edited) {
-        startingCommentId = await connector
-          .postComment(ref, number, "_Starting round 2 review\u2026_")
-          .catch((err) => {
-            log.warn({ err }, "Failed to post fallback progress comment");
-            return null;
-          });
-      }
+      // Same-round retry (stale discard): update the existing placeholder
+      // rather than posting another one.
+      await connector
+        .editComment(ref, startingCommentId, `_Starting review\u2026_`)
+        .catch((err) =>
+          log.warn({ err }, "Failed to update progress comment on retry"),
+        );
     } else {
+      // Fresh start for this round.
+      const label =
+        round >= 2
+          ? "_Starting final review\u2026_"
+          : "_Starting review\u2026_";
       startingCommentId = await connector
-        .postComment(ref, number, "_Starting review\u2026_")
+        .postComment(ref, number, label)
         .catch((err) => {
           log.warn({ err }, "Failed to post starting comment");
           return null;

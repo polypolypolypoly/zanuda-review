@@ -27,7 +27,6 @@ import type {
 const SEVERITY_EMOJI: Record<string, string> = {
   blocker: "🛑",
   warning: "⚠️",
-  praise: "✅",
 };
 
 const ACTION_ICON: Record<string, string> = {

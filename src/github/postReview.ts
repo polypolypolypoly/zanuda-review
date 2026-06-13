@@ -11,7 +11,6 @@ export { buildReviewCommentBody };
 const SEVERITY_EMOJI: Record<string, string> = {
   blocker: "🛑",
   warning: "⚠️",
-  praise: "✅",
 };
 
 /**
