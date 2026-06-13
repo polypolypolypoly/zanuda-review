@@ -161,7 +161,7 @@ async complete(req: CompletionRequest): Promise<CompletionResult>
 | `req.temperature` | `number` | 0–2; **omit if your API doesn't support it** |
 | `req.maxTokens` | `number` | Max tokens to generate |
 
-Return `{ text, model, provider }` — just the raw text string, no JSON parsing.
+Return `{ text, model, provider }` where `text` is the raw completion string (no JSON parsing).
 
 **3. Register in the factory** (`src/llm/index.ts`)
 
