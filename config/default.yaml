@@ -105,7 +105,7 @@ preprompt: |
 # Path to the PR state file that survives restarts (round counts, mention
 # reply caps, etc). Empty = ~/.review-helper/state.json
 persistence:
-  stateFile: "/mnt/data/apps/review-helper/state.json"
+  stateFile: ""   # empty = ~/.review-helper/state.json
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
@@ -114,8 +114,9 @@ persistence:
 #   "octocat"         — any repo owned by octocat
 #   "octocat/hello"   — that specific repo only
 access:
-  allowlist:
-    - polypolypolypoly
+  # Empty = accept reviews from any repo (open to all).
+  # Add owner slugs or owner/repo to restrict access.
+  allowlist: []
 
 # ─── Rate limits ─────────────────────────────────────────────────────
 # Guards against abuse and accidental runaway LLM costs.
@@ -132,8 +133,8 @@ limits:
 # subsequent review she checks whether the memory needs updating.
 memory:
   enabled: true
-  # Absolute path for memory storage.
-  dir: "/mnt/data/apps/review-helper/memory"
+  # Absolute path for memory storage. Empty = ~/.review-helper/memory
+  dir: ""
   # After posting a review, ask the model if the memory should be updated.
   updateAfterReview: true
 

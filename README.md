@@ -123,23 +123,66 @@ Set `LLM_PROVIDER` and the matching key in `.env`, or per-repo in
 | `openrouter` | `OPENROUTER_API_KEY` | Any model via OpenRouter        |
 | `ollama`     | (none)               | Local models; set `OLLAMA_BASE_URL` |
 
-## Deployment (homeserver)
+## Self-hosting
 
-Runs as a systemd service under the `zanuda` service account. CI/CD via a
-self-hosted GitHub Actions runner that pulls, builds, and restarts on every
-push to `main`.
+### 1. Create a bot GitHub account and token
+
+Create a dedicated GitHub account for the bot (e.g. `MyReviewBot`) and
+generate a Personal Access Token:
+- Classic token: `repo` scope.
+- Fine-grained: *Pull requests* read/write + *Contents* read on target repos.
+
+### 2. Configure
 
 ```bash
-# First-time setup
-sudo cp deploy/review-helper.service /etc/systemd/system/
+cp .env.example .env
+# Fill in: GITHUB_TOKEN, GITHUB_BOT_LOGIN, and your LLM provider key
+```
+
+Create a local config override file (not committed) with your specifics:
+
+```yaml
+# e.g. /etc/review-helper/config.yaml
+access:
+  allowlist:
+    - your-org   # or leave empty to accept all
+
+persistence:
+  stateFile: "/var/lib/review-helper/state.json"
+
+memory:
+  dir: "/var/lib/review-helper/memory"
+```
+
+Then point the service at it:
+
+```bash
+export REVIEW_HELPER_CONFIG=/etc/review-helper/config.yaml
+```
+
+### 3. Run
+
+```bash
+npm ci && npm run build && npm start
+```
+
+### 4. Systemd (recommended for production)
+
+```bash
+# Customise the placeholders in the example unit first
+cp deploy/review-helper.service.example /etc/systemd/system/review-helper.service
+$EDITOR /etc/systemd/system/review-helper.service
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now review-helper
-
-# Logs
 journalctl -u review-helper -f
 ```
 
-Persistent data (state file + repo memory) lives in `/mnt/data/apps/review-helper/`.
+### 5. CI/CD (optional)
+
+See `.github/workflows/deploy.yml` for a self-hosted runner example.
+Customise the `SERVICE_USER`, `REPO_PATH`, and `SERVICE_NAME` env vars at
+the top of the deploy job.
 
 ## Project layout
 

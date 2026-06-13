@@ -149,14 +149,20 @@ memory:
 **Then forever, zero setup per PR:**
 5. Open a PR → request review from `ZlayaZanuda` → review appears within 60 s.
 
-## Deployment (homeserver)
+## Deployment (this instance — homeserver)
 
-- Runs as a **systemd service** (`deploy/review-helper.service`) under the dedicated `zanuda` service account.
+- Runs as a **systemd service** under the dedicated `zanuda` service account.
 - **CI/CD via GitHub Actions self-hosted runner** on the homeserver.
   - On push to `main`: pull → `npm ci` → `npm run build` → `systemctl restart review-helper`.
   - Deploy job has `concurrency: group: deploy` to prevent parallel deploys.
 - Persistent data lives in `/mnt/data/apps/review-helper/` (state file + repo memory).
-- No public endpoint or Tailscale Funnel — the poller reaches out to GitHub, GitHub never needs to reach in.
+- Homeserver-specific config (allowlist, paths) lives in `/mnt/data/apps/review-helper/config.yaml` — **not committed**. Loaded via `REVIEW_HELPER_CONFIG` env var in the systemd unit.
+- No public endpoint — the poller reaches out to GitHub, GitHub never needs to reach in.
+
+## Self-hosting (for others)
+
+See `README.md → Self-hosting` and `deploy/review-helper.service.example`.
+The `config/default.yaml` in the repo contains generic defaults (empty allowlist, default paths). Create your own local config file with overrides and point `REVIEW_HELPER_CONFIG` at it.
 
 ## Access control & limits
 

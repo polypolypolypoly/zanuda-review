@@ -5,7 +5,6 @@ on:
     branches: [main]
 
 # Prevent two deploys running simultaneously on the self-hosted runner.
-# A second push while a deploy is in progress cancels the in-progress run.
 concurrency:
   group: deploy
   cancel-in-progress: true
@@ -15,36 +14,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Run tests
-        run: npm test
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
 
   deploy:
     needs: test
     runs-on: self-hosted
+    # ── Customise the three variables below for your setup ──────────────
+    # SERVICE_USER  — OS user the service runs as (must own REPO_PATH)
+    # REPO_PATH     — absolute path where the repo is checked out on the server
+    # SERVICE_NAME  — systemd service name (matches your .service file)
+    env:
+      SERVICE_USER: <SERVICE_USER>
+      REPO_PATH: <REPO_PATH>
+      SERVICE_NAME: review-helper
+    # ────────────────────────────────────────────────────────────────────
     steps:
-      # Pull and build as `zanuda` — the user the service runs as.
-      # HTTPS remote; credentials in zanuda's ~/.git-credentials.
       - name: Pull latest code
-        run: sudo -u zanuda bash -c 'git -C /mnt/data/projects/review-helper pull --ff-only origin main'
+        run: sudo -u $SERVICE_USER bash -c "git -C $REPO_PATH pull --ff-only origin main"
 
-      # --ignore-scripts: never run dependency lifecycle scripts on the host.
-      # npm ci installs exactly the locked tree (package-lock.json).
       - name: Install dependencies
-        run: sudo -u zanuda bash -c 'npm ci --ignore-scripts --prefix /mnt/data/projects/review-helper'
+        # --ignore-scripts: never run dependency lifecycle scripts on the host.
+        run: sudo -u $SERVICE_USER bash -c "npm ci --ignore-scripts --prefix $REPO_PATH"
 
       - name: Build
-        run: sudo -u zanuda bash -c 'npm run build --prefix /mnt/data/projects/review-helper'
+        run: sudo -u $SERVICE_USER bash -c "npm run build --prefix $REPO_PATH"
 
       - name: Restart service
-        run: sudo systemctl restart review-helper
+        run: sudo systemctl restart $SERVICE_NAME
