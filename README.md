@@ -137,17 +137,11 @@ Full list of options: see `config/default.yaml`.
 
 ### `.zanuda/instructions.md`
 
-Free-form markdown instructions injected directly into every review as reviewer guidelines. Use this to tell Zanuda what matters for your specific codebase:
+Free-form markdown injected into every review as reviewer guidelines. Use it to tell Zanuda what matters for your specific codebase — naming conventions, invariants, things to always flag, things to ignore.
 
-```markdown
-## Our standards
-- Every public function must have a docstring. Flag any that don't.
-- We use structured logging only — flag any raw print/console.log.
-- SQL queries must use parameterised statements. Treat any string interpolation as a blocker.
-- We're mid-migration from v1 to v2 API. Ignore deprecated v1 usage in files not touched by the PR.
-```
+This repo ships its own `.zanuda/instructions.md` as a working example. Copy it and adapt to your project.
 
-Commit this to the base branch. It is read from the base branch (not the PR head), so PR authors cannot influence it.
+Committed to the base branch only — PR authors cannot influence it.
 
 ---
 

@@ -132,11 +132,7 @@ memory:
 
 Free-form markdown injected into every review as reviewer guidelines. Not XML-sandboxed (intentional — we want the model to follow these). Fetched from the base branch so PR authors cannot tamper with them.
 
-```markdown
-- Every public function must have a docstring. Flag any that don't.
-- SQL queries must use parameterised statements — string interpolation is a blocker.
-- We're mid-migration from v1 to v2 API. Ignore deprecated v1 usage in files not touched by the PR.
-```
+This repo ships its own `.zanuda/instructions.md` — it serves as both the live configuration and a reference example for other projects.
 
 ## Onboarding a new user or org
 
