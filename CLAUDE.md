@@ -85,8 +85,7 @@ npm test              # node --test
 
 | Var                    | Purpose                                      |
 |------------------------|----------------------------------------------|
-| `GITHUB_TOKEN`         | Bot PAT (classic `repo` scope recommended)   |
-| `GITHUB_BOT_LOGIN`     | Bot's GitHub username (`ZlayaZanuda`)        |
+| `GITHUB_TOKEN`         | Bot PAT — login is resolved from it automatically |
 | `LLM_PROVIDER`         | `anthropic` \| `openai` \| `openrouter` \| `ollama` |
 | `ANTHROPIC_API_KEY`    | For Anthropic provider                       |
 | `OPENAI_API_KEY`       | For OpenAI provider                          |

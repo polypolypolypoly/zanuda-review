@@ -1,19 +1,22 @@
 import "dotenv/config";
 import { loadConfig } from "./config.js";
-import { createOctokit } from "./github/client.js";
+import { createOctokit, getBotLogin } from "./github/client.js";
 import { logger } from "./logger.js";
 import { startPoller } from "./poller.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
-  const botLogin = requireEnv("GITHUB_BOT_LOGIN");
   requireEnv("GITHUB_TOKEN");
+
+  const octokit = createOctokit();
+  const botLogin = await getBotLogin(octokit);
+  logger.info({ botLogin }, "Authenticated as bot account");
 
   const intervalMs = process.env.POLL_INTERVAL_SECS
     ? Number(process.env.POLL_INTERVAL_SECS) * 1000
-    : undefined; // falls back to 60s default in poller
+    : undefined;
 
-  await startPoller({ config, botLogin, octokit: createOctokit(), intervalMs });
+  await startPoller({ config, botLogin, octokit, intervalMs });
 }
 
 function requireEnv(name: string): string {
