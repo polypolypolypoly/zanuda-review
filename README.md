@@ -1,14 +1,14 @@
-# review-helper (Zanuda)
+# review-helper
 
 A model-agnostic AI code-review bot for GitHub. It runs under its own GitHub
-account (`ZlayaZanuda`); when you **request a review from the bot on a pull
-request**, it gathers project context, runs the diff through the configured
-LLM, and posts structured review comments back on the PR.
+account; when you **request a review from the bot on a pull request**, it
+gathers project context, runs the diff through the configured LLM, and posts
+structured review comments back on the PR.
 
 ## How it works
 
 ```
-[every 60 s] poller → GitHub search API (review-requested:ZlayaZanuda)
+[every 60 s] poller → GitHub search API (review-requested:<bot-account>)
   → fetch PR diff + repo config + project context + repo memory
   → build prompt (preprompt + memory + context + diff)
   → LLM (Anthropic | OpenAI | OpenRouter | Ollama)
@@ -20,13 +20,13 @@ LLM, and posts structured review comments back on the PR.
 never needs to reach in. There is no server to expose.
 
 - **Poller-based.** Every 60 s (configurable) the bot searches for open PRs
-  with `review-requested:ZlayaZanuda` and processes them. Round counts and
+  requesting review from the bot account and processes them. Round counts and
   reply caps persist across restarts.
 - **Two review rounds.** Round 1 is the initial review. If the author pushes
   fixes and re-requests, round 2 checks whether the issues were addressed
   (final verdict — no round 3).
 - **@mention replies.** After reviewing, the bot monitors the PR discussion for
-  `@ZlayaZanuda` mentions and replies (up to 5 per PR).
+  mentions and replies (up to 5 per PR).
 - **Repo memory.** On first encounter with a repo the bot generates a
   persistent knowledge document (architecture, code style, key invariants).
   Every subsequent review injects this memory and optionally updates it.
@@ -37,19 +37,100 @@ never needs to reach in. There is no server to expose.
 - **Access control.** An allowlist (`access.allowlist` in config) restricts
   which owners/repos can request reviews. Empty = open to all.
 
-## Setup
+---
 
-1. **Create the bot's GitHub account** and a Personal Access Token.
-   - Classic token: `repo` scope.
-   - Fine-grained: *Pull requests* read/write + *Contents* read on target repos.
-2. `cp .env.example .env` — fill in `GITHUB_TOKEN`, `GITHUB_BOT_LOGIN`, and
-   the API key for your chosen LLM provider.
-3. `npm install && npm run build`
-4. `npm start` (or via systemd — see Deployment below).
-5. For each repo to review: add `ZlayaZanuda` as a collaborator (Read access
-   is enough), then **request a review from the bot** on a PR.
+## Using a hosted instance
 
-No webhook configuration required.
+If someone is already running review-helper as a service and has given you
+access, you only need to do the following — no server or API keys required
+on your end.
+
+**Once per repo:**
+1. Add the bot account as a collaborator on your repo (Read access is enough
+   on public repos). For orgs, adding it as an org member covers all repos.
+2. _(Optional)_ Commit `.review-helper.yml` to your org's `.github` repo for
+   org-wide defaults (provider, model, extra rules).
+3. _(Optional)_ Commit `.review-helper.yml` to individual repos to override
+   org defaults.
+
+**Then forever, zero setup per PR:**
+
+4. Open a PR → request review from the bot → review appears within 60 s.
+
+---
+
+## Self-hosting
+
+### 1. Create a bot GitHub account and token
+
+Create a dedicated GitHub account for the bot (e.g. `MyReviewBot`) and
+generate a Personal Access Token:
+- Classic token: `repo` scope.
+- Fine-grained: *Pull requests* read/write + *Contents* read on target repos.
+
+### 2. Configure secrets
+
+```bash
+cp .env.example .env
+# Fill in: GITHUB_TOKEN, GITHUB_BOT_LOGIN, and your LLM provider key
+```
+
+### 3. Create a local config override (not committed)
+
+`config/default.yaml` ships with generic defaults. Create a separate file for
+your deployment-specific values:
+
+```yaml
+# e.g. /etc/review-helper/config.yaml  (or anywhere you like)
+access:
+  allowlist:
+    - your-org     # owner slug — any repo under this org/account
+    # - other-org/specific-repo   # or a single repo
+
+persistence:
+  stateFile: "/var/lib/review-helper/state.json"
+
+memory:
+  dir: "/var/lib/review-helper/memory"
+```
+
+Point the service at it:
+
+```bash
+export REVIEW_HELPER_CONFIG=/etc/review-helper/config.yaml
+```
+
+### 4. Run
+
+```bash
+npm ci && npm run build && npm start
+```
+
+### 5. Systemd (recommended for production)
+
+```bash
+cp deploy/review-helper.service.example /etc/systemd/system/review-helper.service
+$EDITOR /etc/systemd/system/review-helper.service   # fill in the <PLACEHOLDERS>
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now review-helper
+journalctl -u review-helper -f
+```
+
+### 6. CI/CD (optional)
+
+See `.github/workflows/deploy.yml` for a self-hosted GitHub Actions runner
+example. Customise the `SERVICE_USER`, `REPO_PATH`, and `SERVICE_NAME` env
+vars at the top of the deploy job.
+
+### 7. Onboarding a user or org
+
+Once your instance is running, onboarding a new user/org is:
+
+1. Add their owner slug to `access.allowlist` in your local config and restart.
+2. Have them follow the **"Using a hosted instance"** steps above.
+
+---
 
 ## Configuration layers
 
@@ -73,8 +154,7 @@ models:
   openrouter: anthropic/claude-opus-4-8
 ```
 
-**Per-repo config** — commit `.review-helper.yml` to the repo root to override
-global and org defaults:
+**Per-repo config** — commit `.review-helper.yml` to the repo root:
 
 ```yaml
 provider: ollama
@@ -90,18 +170,7 @@ memory:
   enabled: false   # opt out of repo memory for this repo
 ```
 
-## Onboarding a new user or org
-
-**Your side (once per user/org):**
-1. Add the owner slug to `access.allowlist` in `config/default.yaml` and push → CI deploys automatically.
-
-**Their side (once per org/repo):**
-2. Add `ZlayaZanuda` as a collaborator on the repo (Read access is enough on public repos). For orgs, adding the bot as an org member covers all repos at once.
-3. _(Optional)_ Commit `.review-helper.yml` to the org's `.github` repo for org-wide defaults (provider, model, preprompt rules).
-4. _(Optional)_ Commit `.review-helper.yml` to individual repos to override org defaults.
-
-**Then forever, zero setup per PR:**
-5. Open a PR → request review from `ZlayaZanuda` → review appears automatically within 60 s.
+---
 
 ## Local / manual reviews
 
@@ -116,73 +185,12 @@ npm run review -- owner/repo#123 --round=2   # simulate round 2
 Set `LLM_PROVIDER` and the matching key in `.env`, or per-repo in
 `.review-helper.yml`. Defaults live in `config/default.yaml` under `models:`.
 
-| Provider     | Env key              | Notes                           |
-| ------------ | -------------------- | --------------------------------|
-| `anthropic`  | `ANTHROPIC_API_KEY`  | Claude models                   |
-| `openai`     | `OPENAI_API_KEY`     | GPT / OpenAI-compatible         |
-| `openrouter` | `OPENROUTER_API_KEY` | Any model via OpenRouter        |
+| Provider     | Env key              | Notes                               |
+| ------------ | -------------------- | ------------------------------------|
+| `anthropic`  | `ANTHROPIC_API_KEY`  | Claude models                       |
+| `openai`     | `OPENAI_API_KEY`     | GPT / OpenAI-compatible             |
+| `openrouter` | `OPENROUTER_API_KEY` | Any model via OpenRouter            |
 | `ollama`     | (none)               | Local models; set `OLLAMA_BASE_URL` |
-
-## Self-hosting
-
-### 1. Create a bot GitHub account and token
-
-Create a dedicated GitHub account for the bot (e.g. `MyReviewBot`) and
-generate a Personal Access Token:
-- Classic token: `repo` scope.
-- Fine-grained: *Pull requests* read/write + *Contents* read on target repos.
-
-### 2. Configure
-
-```bash
-cp .env.example .env
-# Fill in: GITHUB_TOKEN, GITHUB_BOT_LOGIN, and your LLM provider key
-```
-
-Create a local config override file (not committed) with your specifics:
-
-```yaml
-# e.g. /etc/review-helper/config.yaml
-access:
-  allowlist:
-    - your-org   # or leave empty to accept all
-
-persistence:
-  stateFile: "/var/lib/review-helper/state.json"
-
-memory:
-  dir: "/var/lib/review-helper/memory"
-```
-
-Then point the service at it:
-
-```bash
-export REVIEW_HELPER_CONFIG=/etc/review-helper/config.yaml
-```
-
-### 3. Run
-
-```bash
-npm ci && npm run build && npm start
-```
-
-### 4. Systemd (recommended for production)
-
-```bash
-# Customise the placeholders in the example unit first
-cp deploy/review-helper.service.example /etc/systemd/system/review-helper.service
-$EDITOR /etc/systemd/system/review-helper.service
-
-sudo systemctl daemon-reload
-sudo systemctl enable --now review-helper
-journalctl -u review-helper -f
-```
-
-### 5. CI/CD (optional)
-
-See `.github/workflows/deploy.yml` for a self-hosted runner example.
-Customise the `SERVICE_USER`, `REPO_PATH`, and `SERVICE_NAME` env vars at
-the top of the deploy job.
 
 ## Project layout
 
@@ -193,13 +201,11 @@ src/
   config.ts             config schema, env overrides, per-repo merge
   cli.ts                manual review runner
   logger.ts             pino logger setup
-  server.ts             (unused in prod) Fastify webhook server
   github/
     client.ts           Octokit singleton
     pullRequest.ts      fetch PR data & diff
     postReview.ts       post review comments back to GitHub
     comments.ts         fetch/format PR discussion, find @mentions
-    webhook.ts          (unused in prod) webhook event routing
   llm/
     types.ts            LLMProvider interface
     index.ts            provider factory
