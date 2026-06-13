@@ -2,5 +2,5 @@
 # ZlayaZanuda reviews the code; the humans merge it.
 * @polypolypolypoly @katamarinaki @ZlayaZanuda
 
-# CI/CD workflows and GitHub config require katamarinaki specifically.
-/.github/ @katamarinaki
+# CI/CD workflows require katamarinaki specifically.
+/.github/workflows/ @katamarinaki
