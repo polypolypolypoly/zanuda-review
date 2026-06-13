@@ -4,6 +4,7 @@
  * Handles two classes of failure:
  *   - Rate limits (429): back off and retry — hammering immediately makes it worse.
  *   - Transient server errors (500/502/503/504): retry with backoff.
+ *   - Network failures (ECONNRESET, ETIMEDOUT, etc.): retry with backoff.
  *   - Everything else (400 bad request, auth errors, …): throw immediately.
  *
  * Uses full jitter: actual delay = random value in [0, baseDelay * 2^attempt].
@@ -30,10 +31,28 @@ const BASE_DELAY_MS = 2_000;
 /** Hard ceiling on any single delay to avoid waiting forever on a 429 storm. */
 const MAX_DELAY_MS = 60_000;
 
+/** Network error codes that should trigger retry. */
+const RETRYABLE_ERROR_CODES = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ECONNREFUSED",
+]);
+
 function isRetryable(err: unknown): boolean {
   if (err && typeof err === "object") {
+    // HTTP status-based retry (rate limits, server errors)
     const status = (err as { status?: number }).status;
     if (typeof status === "number") return RETRYABLE_STATUSES.has(status);
+
+    // Network error retry (socket failures, DNS issues)
+    const code = (err as { code?: string }).code;
+    if (typeof code === "string") return RETRYABLE_ERROR_CODES.has(code);
+
+    // AbortError from fetch timeouts
+    const name = (err as { name?: string }).name;
+    if (name === "AbortError") return true;
   }
   return false;
 }
