@@ -59,7 +59,13 @@ export function buildUserPrompt(
   const parts: string[] = [];
 
   if (opts.repoMemory) {
-    parts.push("## Repo memory (persistent knowledge about this codebase)", opts.repoMemory, "");
+    parts.push(
+      "## Repo memory (persistent knowledge about this codebase)",
+      "<repo_memory>",
+      opts.repoMemory,
+      "</repo_memory>",
+      "",
+    );
   }
 
   parts.push(
@@ -79,7 +85,15 @@ export function buildUserPrompt(
   );
 
   if (isFinal && discussion) {
-    parts.push("## Discussion since round 1", discussion, "");
+    parts.push(
+      "## Discussion since round 1",
+      // Wrap in XML — discussion contains user-controlled comment bodies and
+      // must not be mistaken for trusted instructions by the model.
+      "<discussion>",
+      discussion,
+      "</discussion>",
+      "",
+    );
   }
 
   parts.push(

@@ -69,8 +69,11 @@ function buildReplyUserPrompt(
   return [
     `## PR: ${prTitle}`,
     "",
+    // Wrap in XML — discussion contains user-controlled comment bodies.
     "## Recent discussion (for context)",
+    "<discussion>",
     discussion,
+    "</discussion>",
     "",
     // Wrap in XML tags so the model can clearly distinguish untrusted
     // user content from trusted instructions — same pattern as the main
