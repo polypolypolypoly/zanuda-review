@@ -63,6 +63,15 @@ export interface SCMComment {
   /** Only set for inline comments. */
   path?: string;
   line?: number;
+  /**
+   * For inline comments that are replies within a thread, this is the ID of
+   * the root (top-level) comment of the thread. Absent on root comments.
+   *
+   * GitHub's createReplyForReviewComment API requires the root comment's ID,
+   * not the reply's own ID. Without this field we'd pass the wrong ID and
+   * GitHub would either 422 or create an unthreaded comment.
+   */
+  inReplyToId?: number;
   createdAt: string;
 }
 

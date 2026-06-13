@@ -40,6 +40,10 @@ export async function fetchPRDiscussion(
       body: c.body ?? "",
       path: c.path,
       line: c.line ?? c.original_line ?? undefined,
+      // in_reply_to_id is set on reply comments (not root comments).
+      // We need it to pass the correct ID to createReplyForReviewComment,
+      // which requires the root comment's ID, not the reply's own ID.
+      inReplyToId: c.in_reply_to_id ?? undefined,
       createdAt: c.created_at,
     })),
     ...issueComments.map((c) => ({
@@ -85,10 +89,14 @@ export async function replyToComment(
   body: string,
 ): Promise<void> {
   if (comment.type === "inline") {
+    // GitHub's createReplyForReviewComment requires the root comment's ID.
+    // Reply comments have inReplyToId pointing to the root; root comments
+    // don't have it, so we fall back to their own ID.
+    const rootId = comment.inReplyToId ?? comment.id;
     await octokit.pulls.createReplyForReviewComment({
       ...ref,
       pull_number: prNumber,
-      comment_id: comment.id,
+      comment_id: rootId,
       body,
     });
   } else {
