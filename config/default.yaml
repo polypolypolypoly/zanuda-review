@@ -107,7 +107,7 @@ preprompt: |
 # Path to the PR state file that survives restarts (round counts, mention
 # reply caps, etc). Empty = ~/.review-helper/state.json
 persistence:
-  stateFile: ""   # empty = ~/.zanuda/state.json
+  stateFile: "" # empty = ~/.zanuda/state.json
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
