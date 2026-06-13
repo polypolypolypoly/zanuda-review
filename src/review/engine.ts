@@ -2,6 +2,12 @@ import type { Octokit } from "@octokit/rest";
 import { mergeRepoConfig, type Config } from "../config.js";
 import { buildContext } from "../context/builder.js";
 import { fetchRepoConfig } from "../context/repoConfig.js";
+import {
+  generateRepoMemory,
+  loadRepoMemory,
+  maybeUpdateRepoMemory,
+  saveRepoMemory,
+} from "../context/repoMemory.js";
 import { fetchPRDiscussion, formatDiscussion } from "../github/comments.js";
 import type { RepoRef } from "../github/client.js";
 import { postReview } from "../github/postReview.js";
@@ -45,6 +51,25 @@ export async function reviewPullRequest(
 
   const context = await buildContext(octokit, ref, pr.baseSha, config);
 
+  // ── Provider + repo memory ──────────────────────────────────────────────────
+  // Provider is instantiated here (not later) so it can be reused for both
+  // the review completion and the post-review memory update.
+  const provider: LLMProvider = createProvider(config.provider);
+
+  let repoMemory: string | null = null;
+  if (config.memory.enabled) {
+    repoMemory = loadRepoMemory(config, ref);
+    if (!repoMemory) {
+      try {
+        repoMemory = await generateRepoMemory(octokit, ref, pr.baseSha, config, provider);
+        saveRepoMemory(config, ref, repoMemory);
+        log.info("Repo memory generated and saved");
+      } catch (err) {
+        log.warn({ err }, "Failed to generate repo memory — proceeding without it");
+      }
+    }
+  }
+
   // On round 2, include the full PR discussion so the model can judge whether
   // issues from round 1 were addressed.
   let discussion: string | undefined;
@@ -54,10 +79,9 @@ export async function reviewPullRequest(
     log.info({ commentCount: comments.length }, "Fetched PR discussion for round 2");
   }
 
-  const provider: LLMProvider = createProvider(config.provider);
   const completion = await provider.complete({
     system: buildSystemPrompt(config),
-    user: buildUserPrompt(pr, context, config, { round, discussion }),
+    user: buildUserPrompt(pr, context, config, { round, discussion, repoMemory: repoMemory ?? undefined }),
     model: config.models[config.provider],
     temperature: config.generation.temperature,
     maxTokens: config.generation.maxTokens,
@@ -83,6 +107,27 @@ export async function reviewPullRequest(
     await postReview(octokit, pr, result, config);
     log.info({ comments: result.comments.length }, "Review posted");
   }
+
+  // ── Repo memory update ────────────────────────────────────────────────────
+  // Run after posting so it never blocks the review. Fire-and-forget on error.
+  if (config.memory.enabled && repoMemory) {
+    try {
+      const updated = await maybeUpdateRepoMemory(
+        ref,
+        repoMemory,
+        pr.title,
+        pr.changedFiles,
+        result.summary,
+        pr.diff,
+        config,
+        provider,
+      );
+      if (updated) saveRepoMemory(config, ref, updated);
+    } catch (err) {
+      log.warn({ err }, "Failed to update repo memory — ignoring");
+    }
+  }
+
   return result;
 }
 

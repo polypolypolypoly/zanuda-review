@@ -26,6 +26,14 @@ export const ConfigSchema = z.object({
     includeFileTree: z.boolean(),
     maxTreeEntries: z.number().int().positive(),
   }),
+  memory: z.object({
+    /** Toggle the whole feature on/off. */
+    enabled: z.boolean(),
+    /** Directory to store per-repo memory files. Empty string = ~/.review-helper/memory. */
+    dir: z.string(),
+    /** After every review, ask the model if the memory should be updated. */
+    updateAfterReview: z.boolean(),
+  }),
   review: z.object({
     maxDiffChars: z.number().int().positive(),
     inlineComments: z.boolean(),
@@ -41,6 +49,7 @@ export const RepoConfigSchema = ConfigSchema.partial().extend({
   // Convenience: a repo can append extra instructions without replacing the
   // whole preprompt.
   prepromptAppend: z.string().optional(),
+  memory: ConfigSchema.shape.memory.partial().optional(),
   context: ConfigSchema.shape.context.partial().optional(),
   review: ConfigSchema.shape.review.partial().optional(),
   generation: ConfigSchema.shape.generation.partial().optional(),
@@ -93,6 +102,7 @@ export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {
     ...stripUndefined(repo),
     models: { ...base.models, ...repo.models },
     generation: { ...base.generation, ...repo.generation },
+    memory: { ...base.memory, ...repo.memory },
     context: { ...base.context, ...repo.context },
     review: { ...base.review, ...repo.review },
   };
