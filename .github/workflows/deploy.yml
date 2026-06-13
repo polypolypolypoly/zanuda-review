@@ -27,16 +27,18 @@ jobs:
     needs: test
     runs-on: self-hosted
     steps:
+      # Pull and build as `zanuda` — the user the service runs as.
+      # HTTPS remote; credentials in zanuda's ~/.git-credentials.
       - name: Pull latest code
-        run: git -C /mnt/data/projects/review-helper pull origin main
+        run: sudo -u zanuda bash -c 'git -C /mnt/data/projects/review-helper pull --ff-only origin main'
 
+      # --ignore-scripts: never run dependency lifecycle scripts on the host.
+      # npm ci installs exactly the locked tree (package-lock.json).
       - name: Install dependencies
-        run: npm ci --ignore-scripts
-        working-directory: /mnt/data/projects/review-helper
+        run: sudo -u zanuda bash -c 'npm ci --ignore-scripts --prefix /mnt/data/projects/review-helper'
 
       - name: Build
-        run: npm run build
-        working-directory: /mnt/data/projects/review-helper
+        run: sudo -u zanuda bash -c 'npm run build --prefix /mnt/data/projects/review-helper'
 
       - name: Restart service
         run: sudo systemctl restart review-helper
