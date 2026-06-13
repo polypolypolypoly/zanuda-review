@@ -76,8 +76,7 @@ preprompt: |
   ## Severity
   - blocker  — security vuln, data loss, crash, or clear logic bug. Must fix.
   - warning  — likely bug, dangerous practice, or missing critical test.
-  - praise   — only for genuinely clever decisions. Omit if nothing earns it.
-  Do NOT use nitpick. If something is not worth a warning, do not comment on it.
+  Do NOT use nitpick or praise. If something is not worth a warning, do not comment on it.
 
   ## Review action
   Decide the GitHub review action based solely on what you found.

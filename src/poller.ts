@@ -242,8 +242,11 @@ async function pollReviewRequests(opts: {
           mentionReplies: state?.mentionReplies ?? 0,
           repliedCommentIds: state?.repliedCommentIds ?? new Set(),
           maxRoundsNotified: false,
-          progressCommentId:
-            result.progressCommentId ?? state?.progressCommentId ?? null,
+          // Clear progressCommentId after each completed round so the next
+          // round always opens a fresh comment. Each round should stand alone
+          // as its own record; editing round 1's comment with round 2's verdict
+          // destroys the round 1 history.
+          progressCommentId: null,
           consecutiveFailures: 0, // success — reset the failure counter
         });
         logger.info(
