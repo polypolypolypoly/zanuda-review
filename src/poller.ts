@@ -1,19 +1,15 @@
-import type { Octokit } from "@octokit/rest";
 import type { Config } from "./config.js";
-import {
-  fetchPRDiscussion,
-  findUnrepliedMentions,
-  formatDiscussion,
-} from "./github/comments.js";
+import { findUnrepliedMentions, formatDiscussion } from "./github/comments.js";
+import { isAllowed } from "./github/allowlist.js";
 import { logger } from "./logger.js";
+import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
-import { isAllowed } from "./github/allowlist.js";
 import { PRStateStore } from "./state/store.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
-/** Maximum number of full review rounds Zanuda will do per PR. */
+/** Maximum number of full review rounds per PR. */
 const MAX_REVIEW_ROUNDS = 2;
 
 /** Maximum number of @mention replies per PR before going silent. */
@@ -22,35 +18,39 @@ const MAX_MENTION_REPLIES = 5;
 export async function startPoller(opts: {
   config: Config;
   botLogin: string;
-  octokit: Octokit;
+  connector: SCMConnector;
   intervalMs?: number;
 }): Promise<void> {
-  const { config, botLogin, octokit, intervalMs = DEFAULT_INTERVAL_MS } = opts;
+  const {
+    config,
+    botLogin,
+    connector,
+    intervalMs = DEFAULT_INTERVAL_MS,
+  } = opts;
 
   /**
    * Items currently being reviewed (fire-and-forget, not yet completed).
-   * Prevents duplicate processing within the same session while the async
-   * review is in flight. Cleared on completion (success or failure).
-   * Intentionally not persisted: on restart it is correct to retry work
-   * that was in flight when the process died.
+   * Intentionally not persisted: on restart it is correct to retry in-flight work.
    */
   const inProgress = new Set<number>();
 
-  /**
-   * Persistent per-PR state — survives restarts.
-   * Loaded from disk on construction; every mutation is atomically written
-   * back before the next poll cycle can read it.
-   */
+  /** Persistent per-PR state — survives restarts. */
   const store = new PRStateStore(config.persistence.stateFile || undefined);
 
   logger.info(
-    { botLogin, intervalMs },
+    { botLogin, platform: connector.name, intervalMs },
     "Poller started — watching for review requests and mentions",
   );
 
   const tick = async () => {
-    await pollReviewRequests({ config, botLogin, octokit, inProgress, store });
-    await pollMentions({ config, botLogin, octokit, store });
+    await pollReviewRequests({
+      config,
+      botLogin,
+      connector,
+      inProgress,
+      store,
+    });
+    await pollMentions({ config, botLogin, connector, store });
   };
 
   await tick();
@@ -68,32 +68,29 @@ export async function startPoller(opts: {
 async function pollReviewRequests(opts: {
   config: Config;
   botLogin: string;
-  octokit: Octokit;
+  connector: SCMConnector;
   inProgress: Set<number>;
   store: PRStateStore;
 }): Promise<void> {
-  const { config, botLogin, octokit, inProgress, store } = opts;
+  const { config, botLogin, connector, inProgress, store } = opts;
 
   logger.debug("Polling for review requests…");
 
-  let data;
+  let pending: PendingReview[];
   try {
-    ({ data } = await octokit.rest.search.issuesAndPullRequests({
-      q: `is:pr is:open review-requested:${botLogin}`,
-      per_page: 50,
-    }));
+    const all = await connector.pollPendingReviews(botLogin);
+    pending = all.filter((item) => !inProgress.has(item.platformId));
   } catch (err) {
-    logger.error({ err }, "Search API error in review-request poll");
+    logger.error({ err }, "Error polling for review requests");
     return;
   }
 
-  const pending = data.items.filter((item) => !inProgress.has(item.id));
   if (pending.length === 0) {
-    logger.debug({ total: data.total_count }, "No new review requests");
+    logger.debug("No new review requests");
     return;
   }
 
-  // Apply concurrency cap: don't start more reviews than the global limit allows.
+  // Apply concurrency cap.
   const slots = config.limits.maxConcurrentReviews - inProgress.size;
   if (slots <= 0) {
     logger.warn(
@@ -103,8 +100,6 @@ async function pollReviewRequests(opts: {
     return;
   }
 
-  // Cap how many *new* PRs we start per cycle to avoid thundering-herd after a
-  // restart when many PRs may be queued at once.
   const newThisCycle = pending.slice(
     0,
     Math.min(slots, config.limits.maxNewPrsPerCycle),
@@ -120,22 +115,13 @@ async function pollReviewRequests(opts: {
   }
 
   for (const item of newThisCycle) {
-    const state = store.get(item.id);
+    const state = store.get(item.platformId);
     const completedRounds = state?.rounds ?? 0;
 
-    const ref = parseRepoRef(item.repository_url);
-    if (!ref) {
-      logger.warn(
-        { url: item.repository_url },
-        "Could not parse repo URL — skipping",
-      );
-      continue;
-    }
-
     // ── Allowlist check ───────────────────────────────────────────────────────
-    if (!isAllowed(ref, config.access.allowlist)) {
+    if (!isAllowed(item.ref, config.access.allowlist)) {
       logger.warn(
-        { repo: `${ref.owner}/${ref.repo}` },
+        { repo: `${item.ref.owner}/${item.ref.repo}` },
         "Review request from unlisted repo — ignoring (not in access.allowlist)",
       );
       continue;
@@ -144,18 +130,17 @@ async function pollReviewRequests(opts: {
     // ── Hard stop: max rounds reached ─────────────────────────────────────────
     if (completedRounds >= MAX_REVIEW_ROUNDS) {
       if (!state?.maxRoundsNotified) {
-        await octokit.issues
-          .createComment({
-            ...ref,
-            issue_number: item.number,
-            body:
-              `I've completed ${MAX_REVIEW_ROUNDS} review rounds on this PR — that's my limit. ` +
+        await connector
+          .postComment(
+            item.ref,
+            item.number,
+            `I've completed ${MAX_REVIEW_ROUNDS} review rounds on this PR — that's my limit. ` +
               `Address the outstanding comments and request a human reviewer if needed.`,
-          })
+          )
           .catch((err) =>
             logger.warn({ err }, "Failed to post max-rounds notification"),
           );
-        store.set(item.id, { ...state!, maxRoundsNotified: true });
+        store.set(item.platformId, { ...state!, maxRoundsNotified: true });
       }
       continue;
     }
@@ -163,7 +148,7 @@ async function pollReviewRequests(opts: {
     const nextRound = completedRounds + 1;
     logger.info(
       {
-        repo: `${ref.owner}/${ref.repo}`,
+        repo: `${item.ref.owner}/${item.ref.repo}`,
         pr: item.number,
         round: nextRound,
         title: item.title,
@@ -171,15 +156,18 @@ async function pollReviewRequests(opts: {
       "Review requested",
     );
 
-    inProgress.add(item.id);
+    inProgress.add(item.platformId);
 
-    reviewPullRequest({ octokit, baseConfig: config }, ref, item.number, {
-      round: nextRound,
-    })
+    reviewPullRequest(
+      { connector, baseConfig: config },
+      item.ref,
+      item.number,
+      { round: nextRound },
+    )
       .then(() => {
-        inProgress.delete(item.id);
-        store.set(item.id, {
-          ref,
+        inProgress.delete(item.platformId);
+        store.set(item.platformId, {
+          ref: item.ref,
           number: item.number,
           rounds: nextRound,
           mentionReplies: state?.mentionReplies ?? 0,
@@ -188,7 +176,7 @@ async function pollReviewRequests(opts: {
         });
         logger.info(
           {
-            repo: `${ref.owner}/${ref.repo}`,
+            repo: `${item.ref.owner}/${item.ref.repo}`,
             pr: item.number,
             round: nextRound,
           },
@@ -199,14 +187,13 @@ async function pollReviewRequests(opts: {
         logger.error(
           {
             err,
-            repo: `${ref.owner}/${ref.repo}`,
+            repo: `${item.ref.owner}/${item.ref.repo}`,
             pr: item.number,
             round: nextRound,
           },
           "Review failed — will retry next poll",
         );
-        inProgress.delete(item.id);
-        // Do NOT advance rounds on failure so the next poll retries.
+        inProgress.delete(item.platformId);
       });
   }
 }
@@ -216,19 +203,18 @@ async function pollReviewRequests(opts: {
 async function pollMentions(opts: {
   config: Config;
   botLogin: string;
-  octokit: Octokit;
+  connector: SCMConnector;
   store: PRStateStore;
 }): Promise<void> {
-  const { config, botLogin, octokit, store } = opts;
+  const { config, botLogin, connector, store } = opts;
 
   for (const [id, state] of store.entries()) {
-    // Only scan PRs that have at least one completed review round.
     if (state.rounds === 0) continue;
     if (state.mentionReplies >= MAX_MENTION_REPLIES) continue;
 
     let comments;
     try {
-      comments = await fetchPRDiscussion(octokit, state.ref, state.number);
+      comments = await connector.fetchDiscussion(state.ref, state.number);
     } catch (err) {
       logger.warn(
         { err, repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
@@ -255,10 +241,7 @@ async function pollMentions(opts: {
 
     let prTitle = `PR #${state.number}`;
     try {
-      const { data: pr } = await octokit.pulls.get({
-        ...state.ref,
-        pull_number: state.number,
-      });
+      const pr = await connector.fetchPR(state.ref, state.number);
       prTitle = pr.title;
     } catch {
       // Non-fatal — generic title is fine.
@@ -277,21 +260,18 @@ async function pollMentions(opts: {
 
       try {
         await replyToMention(
-          { octokit, config, botLogin },
+          { connector, config, botLogin },
           state.ref,
           state.number,
           mention,
           prTitle,
           discussion,
         );
-        // Persist each reply immediately so a crash mid-loop doesn't cause
-        // duplicate replies on the next start.
         store.set(id, {
           ...state,
           repliedCommentIds: new Set([...state.repliedCommentIds, mention.id]),
           mentionReplies: state.mentionReplies + 1,
         });
-        // Keep the local reference in sync for the rest of this loop iteration.
         state.repliedCommentIds.add(mention.id);
         state.mentionReplies++;
       } catch (err) {
@@ -302,14 +282,4 @@ async function pollMentions(opts: {
       }
     }
   }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function parseRepoRef(
-  repositoryUrl: string,
-): { owner: string; repo: string } | null {
-  const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
-  if (!match) return null;
-  return { owner: match[1]!, repo: match[2]! };
 }

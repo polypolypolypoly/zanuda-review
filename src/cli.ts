@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { loadConfig } from "./config.js";
-import { createOctokit } from "./github/client.js";
+import { createConnector } from "./platform/index.js";
 import { reviewPullRequest } from "./review/engine.js";
 
 /**
@@ -25,7 +25,7 @@ async function main(): Promise<void> {
   const round = roundFlag ? Number(roundFlag.split("=")[1]) : 1;
 
   const result = await reviewPullRequest(
-    { octokit: createOctokit(), baseConfig: loadConfig() },
+    { connector: createConnector(), baseConfig: loadConfig() },
     { owner: owner!, repo: repo! },
     Number(num),
     { dryRun, round },

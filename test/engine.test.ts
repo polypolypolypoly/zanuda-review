@@ -49,7 +49,7 @@ const makeContext = (text = "(no context)"): ProjectContext => ({ text });
 
 const makeComment = (overrides: Partial<PRComment>): PRComment => ({
   id: 1,
-  type: "issue",
+  type: "general",
   author: "alice",
   body: "hello",
   createdAt: "2024-01-01T00:00:00Z",
@@ -439,7 +439,7 @@ describe("formatDiscussion", () => {
   it("includes file location for review comments", () => {
     const text = formatDiscussion([
       makeComment({
-        type: "review",
+        type: "inline",
         path: "src/foo.ts",
         line: 10,
         body: "bad",

@@ -1,12 +1,10 @@
 import type { Config } from "../config.js";
-import { replyToComment, type PRComment } from "../github/comments.js";
-import type { Octokit } from "@octokit/rest";
-import type { RepoRef } from "../github/client.js";
+import type { SCMComment, SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 
 export interface ReplyDeps {
-  octokit: Octokit;
+  connector: SCMConnector;
   config: Config;
   botLogin: string;
 }
@@ -19,11 +17,11 @@ export async function replyToMention(
   deps: ReplyDeps,
   ref: RepoRef,
   prNumber: number,
-  comment: PRComment,
+  comment: SCMComment,
   prTitle: string,
   discussion: string,
 ): Promise<void> {
-  const { octokit, config, botLogin } = deps;
+  const { connector, config, botLogin } = deps;
 
   const provider = createProvider(config.provider);
   const completion = await provider.complete({
@@ -36,7 +34,7 @@ export async function replyToMention(
   });
 
   const replyBody = completion.text.trim();
-  await replyToComment(octokit, ref, prNumber, comment, replyBody);
+  await connector.replyToComment(ref, prNumber, comment, replyBody);
 
   logger.info(
     { repo: `${ref.owner}/${ref.repo}`, pr: prNumber, commentId: comment.id },
@@ -59,7 +57,7 @@ function buildReplySystem(botLogin: string): string {
 
 export function buildReplyUserPrompt(
   prTitle: string,
-  comment: PRComment,
+  comment: SCMComment,
   discussion: string,
 ): string {
   const location = comment.path
