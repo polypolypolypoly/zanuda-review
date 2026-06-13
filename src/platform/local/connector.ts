@@ -61,12 +61,12 @@ export class LocalConnector implements SCMConnector {
     this.outputFile = opts.outputFile ?? null;
   }
 
-  async getBotLogin(): Promise<string> {
+  async getReviewerLogin(): Promise<string> {
     return git(this.repoPath, ["config", "user.name"]).trim() || "zanuda-local";
   }
 
   // Not used — local reviews are triggered directly from the CLI, not polled.
-  async pollPendingReviews(_botLogin: string): Promise<PendingReview[]> {
+  async pollPendingReviews(_reviewerLogin: string): Promise<PendingReview[]> {
     return [];
   }
 

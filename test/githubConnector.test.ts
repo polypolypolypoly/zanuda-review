@@ -66,7 +66,7 @@ describe("GitHubConnector.pollPendingReviews", () => {
 });
 
 describe("GitHubConnector.resolveReviewThreads", () => {
-  it("resolves only unresolved bot-authored threads", async () => {
+  it("resolves only unresolved Zanuda-authored threads", async () => {
     const mutationCalls: string[] = [];
     const octokit = {
       graphql: async (query: string, vars: Record<string, unknown>) => {
@@ -93,7 +93,7 @@ describe("GitHubConnector.resolveReviewThreads", () => {
                   {
                     id: "thread-3",
                     isResolved: false,
-                    comments: { nodes: [{ author: { login: "human" } }] }, // not bot
+                    comments: { nodes: [{ author: { login: "human" } }] }, // not Zanuda
                   },
                   {
                     id: "thread-4",

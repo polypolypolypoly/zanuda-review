@@ -6,14 +6,14 @@ import { logger } from "../logger.js";
 export interface ReplyDeps {
   connector: SCMConnector;
   config: Config;
-  botLogin: string;
+  reviewerLogin: string;
   /** Provider instance to use for generating replies. Created once at startup. */
   provider: LLMProvider;
 }
 
 /**
- * Generate a reply to a comment that @mentions the bot and post it.
- * Keeps the bot's character: terse, technical, security-minded.
+ * Generate a reply to a comment that @mentions Zanuda and post it.
+ * Keeps the voice consistent: terse, technical, security-minded.
  */
 export async function replyToMention(
   deps: ReplyDeps,
@@ -23,10 +23,10 @@ export async function replyToMention(
   prTitle: string,
   discussion: string,
 ): Promise<void> {
-  const { connector, config, botLogin, provider } = deps;
+  const { connector, config, reviewerLogin, provider } = deps;
 
   const completion = await provider.complete({
-    system: buildReplySystem(botLogin),
+    system: buildReplySystem(reviewerLogin),
     user: buildReplyUserPrompt(prTitle, comment, discussion),
     model: config.models[config.provider],
     temperature: config.generation.temperature,
@@ -43,9 +43,9 @@ export async function replyToMention(
   );
 }
 
-function buildReplySystem(botLogin: string): string {
+function buildReplySystem(reviewerLogin: string): string {
   return (
-    `You are ${botLogin}, a senior security engineer and blockchain auditor. ` +
+    `You are ${reviewerLogin}, a senior security engineer and blockchain auditor. ` +
     `You have already reviewed this PR and someone has mentioned you in a comment.\n\n` +
     `Rules:\n` +
     `- Get straight to the point. No greetings, no filler.\n` +

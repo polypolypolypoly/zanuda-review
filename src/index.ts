@@ -7,10 +7,10 @@ import { startPoller } from "./poller.js";
 async function main(): Promise<void> {
   const config = loadConfig();
   const connector = createConnector();
-  const botLogin = await connector.getBotLogin();
+  const reviewerLogin = await connector.getReviewerLogin();
   logger.info(
-    { botLogin, platform: connector.name },
-    "Authenticated as bot account",
+    { reviewerLogin, platform: connector.name },
+    "Authenticated as reviewer account",
   );
 
   let intervalMs: number | undefined;
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
     intervalMs = secs * 1000;
   }
 
-  await startPoller({ config, botLogin, connector, intervalMs });
+  await startPoller({ config, reviewerLogin, connector, intervalMs });
 }
 
 main().catch((err) => {

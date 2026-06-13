@@ -20,7 +20,7 @@ content from the base branch. If you see it sandboxed, that is a bug.
 
 **Config must always be read from `pr.baseSha` (base branch), never from the
 PR head SHA.** Reading config from the PR head lets PR authors influence the
-bot's behaviour. Flag any `getContent` call that uses `headSha` for config or
+Zanuda's behaviour. Flag any `getContent` call that uses `headSha` for config or
 context files.
 
 **Allowlist check must happen before any LLM call.** If a PR bypasses

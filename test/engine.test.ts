@@ -396,7 +396,7 @@ describe("buildReplyUserPrompt: XML sandboxing", () => {
 // ─── findUnrepliedMentions ────────────────────────────────────────────────────
 
 describe("findUnrepliedMentions", () => {
-  it("returns comments mentioning the bot", () => {
+  it("returns comments mentioning Zanuda", () => {
     const comments = [
       makeComment({ id: 1, body: "hey @ZlayaZanuda is this ok?" }),
       makeComment({ id: 2, body: "no mention here" }),
@@ -414,7 +414,7 @@ describe("findUnrepliedMentions", () => {
     );
   });
 
-  it("skips the bot's own comments", () => {
+  it("skips Zanuda's own comments", () => {
     const comments = [
       makeComment({ id: 1, author: "ZlayaZanuda", body: "@ZlayaZanuda self" }),
     ];

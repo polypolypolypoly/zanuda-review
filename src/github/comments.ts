@@ -55,19 +55,19 @@ export async function fetchPRDiscussion(
 }
 
 /**
- * Return comments that mention the bot and haven't been replied to yet,
- * excluding the bot's own comments.
+ * Return comments that mention Zanuda and haven't been replied to yet,
+ * excluding Zanuda's own comments.
  */
 export function findUnrepliedMentions(
   comments: SCMComment[],
-  botLogin: string,
+  reviewerLogin: string,
   repliedIds: Set<number>,
 ): SCMComment[] {
-  const mention = new RegExp(`@${botLogin}`, "i");
+  const mention = new RegExp(`@${reviewerLogin}`, "i");
   return comments.filter(
     (c) =>
       mention.test(c.body) &&
-      c.author.toLowerCase() !== botLogin.toLowerCase() &&
+      c.author.toLowerCase() !== reviewerLogin.toLowerCase() &&
       !repliedIds.has(c.id),
   );
 }

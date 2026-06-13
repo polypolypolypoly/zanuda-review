@@ -19,14 +19,14 @@ export class GitHubConnector implements SCMConnector {
 
   constructor(private readonly octokit: Octokit) {}
 
-  async getBotLogin(): Promise<string> {
+  async getReviewerLogin(): Promise<string> {
     const { data } = await this.octokit.users.getAuthenticated();
     return data.login;
   }
 
-  async pollPendingReviews(botLogin: string): Promise<PendingReview[]> {
+  async pollPendingReviews(reviewerLogin: string): Promise<PendingReview[]> {
     const { data } = await this.octokit.rest.search.issuesAndPullRequests({
-      q: `is:pr is:open review-requested:${botLogin}`,
+      q: `is:pr is:open review-requested:${reviewerLogin}`,
       per_page: 50,
     });
     return data.items.flatMap((item) => {
@@ -149,9 +149,9 @@ export class GitHubConnector implements SCMConnector {
   async resolveReviewThreads(
     ref: RepoRef,
     number: number,
-    botLogin: string,
+    reviewerLogin: string,
   ): Promise<void> {
-    // Fetch all unresolved threads where the bot authored the first comment.
+    // Fetch all unresolved threads where Zanuda authored the first comment.
     // Note: first:100 is not paginated — PRs with >100 threads won't fully resolve.
     // This is acceptable for now; such PRs are rare and partial resolution is
     // better than none.
@@ -190,7 +190,7 @@ export class GitHubConnector implements SCMConnector {
       (t) =>
         !t.isResolved &&
         t.comments.nodes[0]?.author.login.toLowerCase() ===
-          botLogin.toLowerCase(),
+          reviewerLogin.toLowerCase(),
     );
 
     for (const thread of threads) {

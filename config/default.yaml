@@ -142,7 +142,7 @@ memory:
 
 # ─── Context building ────────────────────────────────────────────────
 # Controls what repository context is gathered and fed to the model
-# alongside the diff. Applied to every project the bot is added to.
+# alongside the diff. Applied to every project Zanuda is added to.
 context:
   # Files to always pull (if present) to ground the review in project
   # conventions. Globs are resolved against the repo root.

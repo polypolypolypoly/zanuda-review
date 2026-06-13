@@ -2,7 +2,7 @@
   "name": "zanuda-review",
   "version": "0.1.0",
   "private": true,
-  "description": "Zanuda the Reviewer — a model-agnostic AI code review bot for GitHub.",
+  "description": "Zanuda the Reviewer — a model-agnostic AI code reviewer for GitHub.",
   "type": "module",
   "engines": {
     "node": ">=20"

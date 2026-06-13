@@ -19,13 +19,13 @@ const MAX_MENTION_REPLIES = 5;
 
 export async function startPoller(opts: {
   config: Config;
-  botLogin: string;
+  reviewerLogin: string;
   connector: SCMConnector;
   intervalMs?: number;
 }): Promise<void> {
   const {
     config,
-    botLogin,
+    reviewerLogin,
     connector,
     intervalMs = DEFAULT_INTERVAL_MS,
   } = opts;
@@ -47,19 +47,19 @@ export async function startPoller(opts: {
   const provider = createProvider(config.provider);
 
   logger.info(
-    { botLogin, platform: connector.name, intervalMs },
+    { reviewerLogin, platform: connector.name, intervalMs },
     "Poller started — watching for review requests and mentions",
   );
 
   const tick = async () => {
     await pollReviewRequests({
       config,
-      botLogin,
+      reviewerLogin,
       connector,
       inProgress,
       store,
     });
-    await pollMentions({ config, botLogin, connector, store, provider });
+    await pollMentions({ config, reviewerLogin, connector, store, provider });
   };
 
   await tick();
@@ -76,18 +76,18 @@ export async function startPoller(opts: {
 
 async function pollReviewRequests(opts: {
   config: Config;
-  botLogin: string;
+  reviewerLogin: string;
   connector: SCMConnector;
   inProgress: Set<number>;
   store: PRStateStore;
 }): Promise<void> {
-  const { config, botLogin, connector, inProgress, store } = opts;
+  const { config, reviewerLogin, connector, inProgress, store } = opts;
 
   logger.debug("Polling for review requests…");
 
   let pending: PendingReview[];
   try {
-    const all = await connector.pollPendingReviews(botLogin);
+    const all = await connector.pollPendingReviews(reviewerLogin);
     pending = all.filter((item) => !inProgress.has(item.platformId));
   } catch (err) {
     logger.error({ err }, "Error polling for review requests");
@@ -253,12 +253,12 @@ const MENTION_SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
 async function pollMentions(opts: {
   config: Config;
-  botLogin: string;
+  reviewerLogin: string;
   connector: SCMConnector;
   store: PRStateStore;
   provider: ReturnType<typeof createProvider>;
 }): Promise<void> {
-  const { config, botLogin, connector, store, provider } = opts;
+  const { config, reviewerLogin, connector, store, provider } = opts;
   const cutoff = new Date(Date.now() - MENTION_SCAN_WINDOW_MS);
 
   for (const [id, state] of store.entries()) {
@@ -281,7 +281,7 @@ async function pollMentions(opts: {
 
     const mentions = findUnrepliedMentions(
       comments,
-      botLogin,
+      reviewerLogin,
       state.repliedCommentIds,
     );
     if (mentions.length === 0) continue;
@@ -319,7 +319,7 @@ async function pollMentions(opts: {
 
       try {
         await replyToMention(
-          { connector, config, botLogin, provider },
+          { connector, config, reviewerLogin, provider },
           state.ref,
           state.number,
           mention,

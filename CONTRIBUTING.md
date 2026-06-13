@@ -59,8 +59,8 @@ The stub is a fully annotated skeleton. Every method has:
 
 | Method | What it does |
 |---|---|
-| `getBotLogin()` | Return the reviewer account's username |
-| `pollPendingReviews(botLogin)` | Return open PRs/MRs where the reviewer is requested |
+| `getReviewerLogin()` | Return the reviewer account's username |
+| `pollPendingReviews(reviewerLogin)` | Return open PRs/MRs where the reviewer is requested |
 | `fetchPR(ref, number)` | Fetch diff, files, title, body, base/head refs |
 | `readFile(ref, path, gitRef)` | Read one file at a given git ref (null if 404) |
 | `getFileTree(ref, gitRef, maxEntries)` | List all file paths in the repo |

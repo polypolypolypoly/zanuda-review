@@ -30,7 +30,7 @@ export class StubConnector implements SCMConnector {
   readonly name = "stub";
 
   /**
-   * Return the bot account's login/username.
+   * Return the reviewer account's login/username.
    *
    * Implementation hint: make an authenticated API call to the platform
    * and return the "current user" login. The result is cached by the
@@ -39,25 +39,25 @@ export class StubConnector implements SCMConnector {
    * GitHub reference: octokit.users.getAuthenticated() → data.login
    * GitLab equivalent: GET /api/v4/user → .username
    */
-  async getBotLogin(): Promise<string> {
-    throw new Error("StubConnector.getBotLogin: not implemented");
+  async getReviewerLogin(): Promise<string> {
+    throw new Error("StubConnector.getReviewerLogin: not implemented");
   }
 
   /**
-   * Return all open PRs/MRs where the bot has been requested as a reviewer.
+   * Return all open PRs/MRs where the reviewer has been requested.
    *
    * This is called on every poll tick. Return [] when there is nothing to do.
    * The `platformId` field must be a stable, globally-unique integer for the
    * lifetime of the PR — it is used as the key for round and mention tracking.
    *
    * Implementation hints:
-   * - GitHub: search API with `is:pr is:open review-requested:<botLogin>`
-   * - GitLab: GET /api/v4/merge_requests?reviewer_username=<botLogin>&state=opened
-   * - Bitbucket: GET /2.0/pullrequests/<workspace>?q=reviewers.nickname="<botLogin>"
+   * - GitHub: search API with `is:pr is:open review-requested:<reviewerLogin>`
+   * - GitLab: GET /api/v4/merge_requests?reviewer_username=<reviewerLogin>&state=opened
+   * - Bitbucket: GET /2.0/pullrequests/<workspace>?q=reviewers.nickname="<reviewerLogin>"
    *
    * Only return PRs from repos that pass your allowlist check.
    */
-  async pollPendingReviews(_botLogin: string): Promise<PendingReview[]> {
+  async pollPendingReviews(_reviewerLogin: string): Promise<PendingReview[]> {
     throw new Error("StubConnector.pollPendingReviews: not implemented");
   }
 
@@ -82,7 +82,7 @@ export class StubConnector implements SCMConnector {
    * Return null if the file does not exist (404). Throw on other errors.
    *
    * IMPORTANT: callers always pass `pr.baseSha` for config and context files,
-   * never `pr.headSha`. This prevents PR authors from influencing the bot's
+   * never `pr.headSha`. This prevents PR authors from influencing Zanuda's
    * behaviour by editing config files in their branch.
    *
    * GitHub reference: octokit.repos.getContent({ ref: gitRef }) → base64 decode
@@ -197,7 +197,7 @@ export class StubConnector implements SCMConnector {
   }
 
   /**
-   * Resolve all open review threads started by the bot.
+   * Resolve all open review threads started by Zanuda.
    * Called after APPROVE so outstanding threads don't block the merge.
    *
    * GitHub reference: GraphQL resolveReviewThread mutation
@@ -206,7 +206,7 @@ export class StubConnector implements SCMConnector {
   async resolveReviewThreads(
     _ref: RepoRef,
     _number: number,
-    _botLogin: string,
+    _reviewerLogin: string,
   ): Promise<void> {
     throw new Error("StubConnector.resolveReviewThreads: not implemented");
   }
