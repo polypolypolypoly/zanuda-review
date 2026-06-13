@@ -131,7 +131,7 @@ export class GitHubConnector implements SCMConnector {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function parseRepoRef(repositoryUrl: string): RepoRef | null {
+export function parseRepoRef(repositoryUrl: string): RepoRef | null {
   const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
   if (!match) return null;
   return { owner: match[1]!, repo: match[2]! };
