@@ -46,7 +46,10 @@ export async function startPoller(opts: {
   };
 
   await tick();
-  setInterval(tick, intervalMs);
+  setInterval(
+    () => tick().catch((err) => logger.error({ err }, "Unhandled error in poll tick")),
+    intervalMs,
+  );
 }
 
 // ── Review-request polling ────────────────────────────────────────────────────
