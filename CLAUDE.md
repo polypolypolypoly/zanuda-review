@@ -34,24 +34,30 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
 
 ```
 index.ts              entrypoint — starts the poller
-poller.ts             poll loop: search PRs, enforce limits, dispatch reviews
+poller.ts             poll loop: find PRs, enforce limits, dispatch reviews
 config.ts             config schema, env overrides, per-repo merge
 cli.ts                manual review runner (npm run review -- owner/repo#123)
 logger.ts             pino logger setup
-server.ts             (unused in prod) Fastify server: /webhook + /health
+platform/
+  types.ts            SCMConnector interface + shared types (PullRequest, SCMComment, …)
+  index.ts            connector factory (reads PLATFORM env var)
+  github/
+    connector.ts      GitHubConnector — reference implementation
+  stub/
+    connector.ts      annotated skeleton for new platform implementers
 github/
-  client.ts           Octokit singleton
+  client.ts           Octokit singleton + createOctokit()
   pullRequest.ts      fetch PR data & diff
-  webhook.ts          (unused in prod) webhook event routing
   postReview.ts       post review comments back to GitHub
   comments.ts         fetch/format PR discussion; find @mentions
+  allowlist.ts        allowlist check (isAllowed)
 llm/
   types.ts            LLMProvider interface
   index.ts            provider factory (reads LLM_PROVIDER env)
   anthropic.ts        Anthropic Claude implementation
   openaiCompatible.ts OpenAI / OpenRouter / Ollama implementation
 context/
-  repoConfig.ts       fetch & merge per-repo .zanuda.yml
+  repoConfig.ts       fetch & merge per-repo .zanuda/config.yml
   builder.ts          build project context string (README, CONTRIBUTING, etc.)
   repoMemory.ts       generate, load, and update persistent per-repo memory
 review/
