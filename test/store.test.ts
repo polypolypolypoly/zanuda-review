@@ -11,7 +11,9 @@ function makeTmpDir(): string {
   return mkdtempSync(join(tmpdir(), "zanuda-store-test-"));
 }
 
-function makeState(overrides: Partial<Parameters<PRStateStore["set"]>[1]> = {}) {
+function makeState(
+  overrides: Partial<Parameters<PRStateStore["set"]>[1]> = {},
+) {
   return {
     ref: { owner: "acme", repo: "widget" },
     number: 42,
@@ -27,7 +29,9 @@ function makeState(overrides: Partial<Parameters<PRStateStore["set"]>[1]> = {}) 
 
 describe("PRStateStore: basic read/write", () => {
   let dir: string;
-  before(() => { dir = makeTmpDir(); });
+  before(() => {
+    dir = makeTmpDir();
+  });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
   it("starts empty when no file exists", () => {
@@ -61,7 +65,9 @@ describe("PRStateStore: basic read/write", () => {
 describe("PRStateStore: persistence across restarts", () => {
   let dir: string;
   const filePath = () => join(dir, "state.json");
-  before(() => { dir = makeTmpDir(); });
+  before(() => {
+    dir = makeTmpDir();
+  });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
   it("second instance loads what first instance saved", () => {
@@ -99,7 +105,9 @@ describe("PRStateStore: persistence across restarts", () => {
 
 describe("PRStateStore: stale-entry pruning", () => {
   let dir: string;
-  before(() => { dir = makeTmpDir(); });
+  before(() => {
+    dir = makeTmpDir();
+  });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
   it("prunes entries older than 30 days on load", () => {
@@ -114,13 +122,21 @@ describe("PRStateStore: stale-entry pruning", () => {
       version: 1,
       prs: {
         "1": {
-          ref: { owner: "a", repo: "b" }, number: 1, rounds: 1,
-          mentionReplies: 0, repliedCommentIds: [], maxRoundsNotified: false,
+          ref: { owner: "a", repo: "b" },
+          number: 1,
+          rounds: 1,
+          mentionReplies: 0,
+          repliedCommentIds: [],
+          maxRoundsNotified: false,
           lastUpdatedAt: old.toISOString(),
         },
         "2": {
-          ref: { owner: "a", repo: "b" }, number: 2, rounds: 1,
-          mentionReplies: 0, repliedCommentIds: [], maxRoundsNotified: false,
+          ref: { owner: "a", repo: "b" },
+          number: 2,
+          rounds: 1,
+          mentionReplies: 0,
+          repliedCommentIds: [],
+          maxRoundsNotified: false,
           lastUpdatedAt: recent.toISOString(),
         },
       },
@@ -129,13 +145,15 @@ describe("PRStateStore: stale-entry pruning", () => {
 
     const store = new PRStateStore(filePath);
     assert.equal(store.has(1), false, "old entry should be pruned");
-    assert.equal(store.has(2), true,  "recent entry should be kept");
+    assert.equal(store.has(2), true, "recent entry should be kept");
   });
 });
 
 describe("PRStateStore: corrupt/unknown file handling", () => {
   let dir: string;
-  before(() => { dir = makeTmpDir(); });
+  before(() => {
+    dir = makeTmpDir();
+  });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
   it("starts fresh when file contains invalid JSON", () => {

@@ -66,11 +66,7 @@ export async function postReview(
 }
 
 function buildHeader(result: ReviewResult): string {
-  const parts: string[] = [
-    `## Pull request overview`,
-    ``,
-    result.summary,
-  ];
+  const parts: string[] = [`## Pull request overview`, ``, result.summary];
 
   if (result.filesSummary.length > 0) {
     parts.push(

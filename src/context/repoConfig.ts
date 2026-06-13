@@ -6,9 +6,9 @@ import { logger } from "../logger.js";
 
 // All Zanuda-related files now live under .zanuda/ in the repo root.
 // Kept in priority order — first match wins.
-const REPO_CONFIG_PATHS   = [".zanuda/config.yml", ".zanuda/config.yaml"];
-const ORG_CONFIG_PATHS    = [".zanuda/config.yml", ".zanuda/config.yaml"];
-const INSTRUCTIONS_PATH   = ".zanuda/instructions.md";
+const REPO_CONFIG_PATHS = [".zanuda/config.yml", ".zanuda/config.yaml"];
+const ORG_CONFIG_PATHS = [".zanuda/config.yml", ".zanuda/config.yaml"];
+const INSTRUCTIONS_PATH = ".zanuda/instructions.md";
 
 /**
  * Look for a per-repo `.zanuda/config.yml` on the PR's base ref.
@@ -55,7 +55,10 @@ async function fetchConfig(
       );
       return null;
     }
-    logger.debug({ repo: `${ref.owner}/${ref.repo}`, path }, `Loaded ${label} config`);
+    logger.debug(
+      { repo: `${ref.owner}/${ref.repo}`, path },
+      `Loaded ${label} config`,
+    );
     return parsed.data;
   }
   return null;
@@ -77,7 +80,10 @@ export async function fetchInstructions(
 ): Promise<string | null> {
   const content = await tryReadFile(octokit, ref, INSTRUCTIONS_PATH, gitRef);
   if (content !== null) {
-    logger.debug({ repo: `${ref.owner}/${ref.repo}` }, "Loaded .zanuda/instructions.md");
+    logger.debug(
+      { repo: `${ref.owner}/${ref.repo}` },
+      "Loaded .zanuda/instructions.md",
+    );
   }
   return content;
 }
@@ -100,7 +106,11 @@ export async function tryReadFile(
   gitRef: string,
 ): Promise<string | null> {
   try {
-    const { data } = await octokit.repos.getContent({ ...ref, path, ref: gitRef });
+    const { data } = await octokit.repos.getContent({
+      ...ref,
+      path,
+      ref: gitRef,
+    });
     if (!Array.isArray(data) && data.type === "file") {
       return Buffer.from(data.content, "base64").toString("utf8");
     }

@@ -31,7 +31,11 @@ export function loadRepoMemory(config: Config, ref: RepoRef): string | null {
   }
 }
 
-export function saveRepoMemory(config: Config, ref: RepoRef, content: string): void {
+export function saveRepoMemory(
+  config: Config,
+  ref: RepoRef,
+  content: string,
+): void {
   if (!config.memory.enabled) return;
   const dir = memoryDir(config);
   mkdirSync(dir, { recursive: true });

@@ -63,7 +63,7 @@ export function buildReplyUserPrompt(
   discussion: string,
 ): string {
   const location = comment.path
-    ? ` (on \`${comment.path}${comment.line != null ? `:${comment.line}` : ""}\`)`
+    ? ` (on \`${comment.path}${comment.line !== null && comment.line !== undefined ? `:${comment.line}` : ""}\`)`
     : "";
 
   return [

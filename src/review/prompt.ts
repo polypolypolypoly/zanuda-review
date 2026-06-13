@@ -148,7 +148,10 @@ const FINAL_TASK_INSTRUCTIONS =
  * Truncate `s` to at most `max` characters, cutting at the last newline
  * before the limit so the model never receives a half-line of diff.
  */
-export function truncate(s: string, max: number): { text: string; truncated: boolean } {
+export function truncate(
+  s: string,
+  max: number,
+): { text: string; truncated: boolean } {
   if (s.length <= max) return { text: s, truncated: false };
   const cut = s.lastIndexOf("\n", max - 1);
   // Fall back to a hard character cut if there's no newline before the limit

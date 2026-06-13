@@ -32,7 +32,12 @@ export async function buildContext(
   }
 
   if (config.context.includeFileTree) {
-    const tree = await buildFileTree(octokit, ref, gitRef, config.context.maxTreeEntries);
+    const tree = await buildFileTree(
+      octokit,
+      ref,
+      gitRef,
+      config.context.maxTreeEntries,
+    );
     if (tree) sections.push(`<file_tree>\n${tree}\n</file_tree>`);
   }
 
@@ -53,7 +58,9 @@ async function collectFiles(
   // rate limits when many context files are configured.
   const results: Array<{ path: string; content: string }> = [];
   for (const path of config.context.includeFiles) {
-    const content = await tryReadFile(octokit, ref, path, gitRef).catch(() => null);
+    const content = await tryReadFile(octokit, ref, path, gitRef).catch(
+      () => null,
+    );
     if (content !== null) results.push({ path, content });
   }
   return results;

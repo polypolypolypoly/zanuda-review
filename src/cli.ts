@@ -14,7 +14,9 @@ async function main(): Promise<void> {
   const [target, ...flags] = process.argv.slice(2);
   const match = target?.match(/^([^/]+)\/([^#]+)#(\d+)$/);
   if (!match) {
-    console.error("Usage: zanuda <owner>/<repo>#<pr-number> [--dry-run] [--round=1|2]");
+    console.error(
+      "Usage: zanuda <owner>/<repo>#<pr-number> [--dry-run] [--round=1|2]",
+    );
     process.exit(2);
   }
   const [, owner, repo, num] = match;

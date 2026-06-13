@@ -1,7 +1,12 @@
 import type { Octokit } from "@octokit/rest";
 import { mergeRepoConfig, type Config } from "../config.js";
 import { buildContext } from "../context/builder.js";
-import { fetchInstructions, fetchOrgConfig, fetchOrgInstructions, fetchRepoConfig } from "../context/repoConfig.js";
+import {
+  fetchInstructions,
+  fetchOrgConfig,
+  fetchOrgInstructions,
+  fetchRepoConfig,
+} from "../context/repoConfig.js";
 import {
   generateRepoMemory,
   loadRepoMemory,
@@ -36,7 +41,11 @@ export async function reviewPullRequest(
 ): Promise<ReviewResult> {
   const { octokit } = deps;
   const round = opts.round ?? 1;
-  const log = logger.child({ repo: `${ref.owner}/${ref.repo}`, pr: number, round });
+  const log = logger.child({
+    repo: `${ref.owner}/${ref.repo}`,
+    pr: number,
+    round,
+  });
 
   const pr = await fetchPullRequest(octokit, ref, number);
   log.info({ files: pr.changedFiles.length }, "Fetched PR");
@@ -48,15 +57,21 @@ export async function reviewPullRequest(
   // Three-level config merge: global defaults → org config → per-repo config.
   // Both config files are read from the base branch (not the PR head) so a PR
   // author cannot influence the bot's behaviour by editing them in their branch.
-  const [orgConfig, repoConfig, orgInstructions, repoInstructions] = await Promise.all([
-    fetchOrgConfig(octokit, ref.owner),
-    fetchRepoConfig(octokit, ref, pr.baseSha),
-    fetchOrgInstructions(octokit, ref.owner),
-    fetchInstructions(octokit, ref, pr.baseSha),
-  ]);
-  const config = mergeRepoConfig(mergeRepoConfig(deps.baseConfig, orgConfig), repoConfig);
+  const [orgConfig, repoConfig, orgInstructions, repoInstructions] =
+    await Promise.all([
+      fetchOrgConfig(octokit, ref.owner),
+      fetchRepoConfig(octokit, ref, pr.baseSha),
+      fetchOrgInstructions(octokit, ref.owner),
+      fetchInstructions(octokit, ref, pr.baseSha),
+    ]);
+  const config = mergeRepoConfig(
+    mergeRepoConfig(deps.baseConfig, orgConfig),
+    repoConfig,
+  );
   // Merge instructions: org sets the baseline, repo extends or overrides.
-  const instructions = [orgInstructions, repoInstructions].filter(Boolean).join("\n\n") || undefined;
+  const instructions =
+    [orgInstructions, repoInstructions].filter(Boolean).join("\n\n") ||
+    undefined;
   log.info(
     {
       provider: config.provider,
@@ -81,11 +96,20 @@ export async function reviewPullRequest(
     repoMemory = loadRepoMemory(config, ref);
     if (!repoMemory) {
       try {
-        repoMemory = await generateRepoMemory(octokit, ref, pr.baseSha, config, provider);
+        repoMemory = await generateRepoMemory(
+          octokit,
+          ref,
+          pr.baseSha,
+          config,
+          provider,
+        );
         saveRepoMemory(config, ref, repoMemory);
         log.info("Repo memory generated and saved");
       } catch (err) {
-        log.warn({ err }, "Failed to generate repo memory — proceeding without it");
+        log.warn(
+          { err },
+          "Failed to generate repo memory — proceeding without it",
+        );
       }
     }
   }
@@ -96,17 +120,28 @@ export async function reviewPullRequest(
   if (round >= 2) {
     const comments = await fetchPRDiscussion(octokit, ref, number);
     discussion = formatDiscussion(comments);
-    log.info({ commentCount: comments.length }, "Fetched PR discussion for round 2");
+    log.info(
+      { commentCount: comments.length },
+      "Fetched PR discussion for round 2",
+    );
   }
 
   const completion = await provider.complete({
     system: buildSystemPrompt(config),
-    user: buildUserPrompt(pr, context, config, { round, discussion, repoMemory: repoMemory ?? undefined, instructions }),
+    user: buildUserPrompt(pr, context, config, {
+      round,
+      discussion,
+      repoMemory: repoMemory ?? undefined,
+      instructions,
+    }),
     model: config.models[config.provider],
     temperature: config.generation.temperature,
     maxTokens: config.generation.maxTokens,
   });
-  log.info({ provider: completion.provider, model: completion.model }, "Model responded");
+  log.info(
+    { provider: completion.provider, model: completion.model },
+    "Model responded",
+  );
 
   const result = parseReviewResult(completion.text);
   // Enforce no-nitpick policy at the application level regardless of what
@@ -170,16 +205,27 @@ export function parseReviewResult(text: string): ReviewResult {
 export function extractJson(text: string): string {
   const start = text.indexOf("{");
   if (start === -1) {
-    throw new Error(`No JSON object found in model response: ${text.slice(0, 200)}`);
+    throw new Error(
+      `No JSON object found in model response: ${text.slice(0, 200)}`,
+    );
   }
   let depth = 0;
   let inString = false;
   let escaped = false;
   for (let i = start; i < text.length; i++) {
     const ch = text[i]!;
-    if (escaped) { escaped = false; continue; }
-    if (ch === "\\" && inString) { escaped = true; continue; }
-    if (ch === '"') { inString = !inString; continue; }
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\" && inString) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
     if (inString) continue;
     if (ch === "{") depth++;
     else if (ch === "}") {
@@ -187,5 +233,7 @@ export function extractJson(text: string): string {
       if (depth === 0) return text.slice(start, i + 1);
     }
   }
-  throw new Error(`Unterminated JSON object in model response: ${text.slice(0, 200)}`);
+  throw new Error(
+    `Unterminated JSON object in model response: ${text.slice(0, 200)}`,
+  );
 }

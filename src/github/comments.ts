@@ -63,7 +63,10 @@ export async function fetchPRDiscussion(
  * Format comments as a readable block for the model.
  * Takes the most recent `maxComments` entries so we stay within token budget.
  */
-export function formatDiscussion(comments: PRComment[], maxComments = 30): string {
+export function formatDiscussion(
+  comments: PRComment[],
+  maxComments = 30,
+): string {
   if (comments.length === 0) return "(No discussion found.)";
 
   const omitted = Math.max(0, comments.length - maxComments);
@@ -76,7 +79,7 @@ export function formatDiscussion(comments: PRComment[], maxComments = 30): strin
 
   for (const c of slice) {
     const location = c.path
-      ? ` [\`${c.path}${c.line != null ? `:${c.line}` : ""}\`]`
+      ? ` [\`${c.path}${c.line !== null && c.line !== undefined ? `:${c.line}` : ""}\`]`
       : "";
     lines.push(`**${c.author}**${location}:\n${c.body.trim()}`);
   }
