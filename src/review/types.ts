@@ -11,7 +11,7 @@ const ReviewCommentSchema = z.object({
     .int()
     .positive()
     .describe("Line number in the NEW version of the file (the '+' side)."),
-  severity: z.enum(["blocker", "warning", "nitpick", "praise"]),
+  severity: z.enum(["blocker", "warning", "praise"]),
   body: z.string().describe("The comment text, in markdown."),
 });
 

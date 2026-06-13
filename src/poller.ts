@@ -1,7 +1,9 @@
 import type { Config } from "./config.js";
-import { findUnrepliedMentions, formatDiscussion } from "./github/comments.js";
+import { findUnrepliedMentions } from "./github/comments.js";
+import { formatDiscussion } from "./review/format.js";
 import { isAllowed } from "./github/allowlist.js";
 import { logger } from "./logger.js";
+import { createProvider } from "./llm/index.js";
 import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
@@ -37,6 +39,13 @@ export async function startPoller(opts: {
   /** Persistent per-PR state — survives restarts. */
   const store = new PRStateStore(config.persistence.stateFile || undefined);
 
+  /**
+   * Single provider instance shared across both review rounds and mention
+   * replies. Creating it once avoids allocating a new HTTP client on every
+   * mention reply and ensures consistent provider configuration.
+   */
+  const provider = createProvider(config.provider);
+
   logger.info(
     { botLogin, platform: connector.name, intervalMs },
     "Poller started — watching for review requests and mentions",
@@ -50,7 +59,7 @@ export async function startPoller(opts: {
       inProgress,
       store,
     });
-    await pollMentions({ config, botLogin, connector, store });
+    await pollMentions({ config, botLogin, connector, store, provider });
   };
 
   await tick();
@@ -168,7 +177,10 @@ async function pollReviewRequests(opts: {
       },
     )
       .then((result) => {
-        inProgress.delete(item.platformId);
+        // Persist the completed round BEFORE removing from inProgress.
+        // A concurrent poll tick arriving between delete() and set() would
+        // see rounds=0 and start a duplicate review. Writing first means any
+        // concurrent poll sees the updated round count and skips the PR.
         store.set(item.platformId, {
           ref: item.ref,
           number: item.number,
@@ -187,6 +199,7 @@ async function pollReviewRequests(opts: {
           },
           "Round complete",
         );
+        inProgress.delete(item.platformId);
       })
       .catch((err) => {
         logger.error(
@@ -205,17 +218,30 @@ async function pollReviewRequests(opts: {
 
 // ── Mention polling ───────────────────────────────────────────────────────────
 
+/**
+ * Only scan PRs updated within this window. A PR that has been silent for
+ * longer than this is unlikely to receive new @mentions worth responding to,
+ * and scanning all stored entries unconditionally creates O(n) GitHub API
+ * calls per tick.
+ */
+const MENTION_SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
 async function pollMentions(opts: {
   config: Config;
   botLogin: string;
   connector: SCMConnector;
   store: PRStateStore;
+  provider: ReturnType<typeof createProvider>;
 }): Promise<void> {
-  const { config, botLogin, connector, store } = opts;
+  const { config, botLogin, connector, store, provider } = opts;
+  const cutoff = new Date(Date.now() - MENTION_SCAN_WINDOW_MS);
 
   for (const [id, state] of store.entries()) {
     if (state.rounds === 0) continue;
     if (state.mentionReplies >= MAX_MENTION_REPLIES) continue;
+    // Skip PRs that haven't been touched recently — avoids a GitHub API call
+    // for every stored PR on every tick.
+    if (new Date(state.lastUpdatedAt) < cutoff) continue;
 
     let comments;
     try {
@@ -255,7 +281,10 @@ async function pollMentions(opts: {
     const discussion = formatDiscussion(comments, 20);
 
     for (const mention of mentions) {
-      if (state.mentionReplies >= MAX_MENTION_REPLIES) {
+      // Re-read from the store each iteration so the cap check sees the
+      // count that was actually persisted, not a stale local copy.
+      const current = store.get(id);
+      if (!current || current.mentionReplies >= MAX_MENTION_REPLIES) {
         logger.info(
           { repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
           `Mention reply cap (${MAX_MENTION_REPLIES}) reached — going silent on this PR`,
@@ -265,20 +294,22 @@ async function pollMentions(opts: {
 
       try {
         await replyToMention(
-          { connector, config, botLogin },
+          { connector, config, botLogin, provider },
           state.ref,
           state.number,
           mention,
           prTitle,
           discussion,
         );
+        // All state mutations go through store.set() — no direct field mutation.
         store.set(id, {
-          ...state,
-          repliedCommentIds: new Set([...state.repliedCommentIds, mention.id]),
-          mentionReplies: state.mentionReplies + 1,
+          ...current,
+          repliedCommentIds: new Set([
+            ...current.repliedCommentIds,
+            mention.id,
+          ]),
+          mentionReplies: current.mentionReplies + 1,
         });
-        state.repliedCommentIds.add(mention.id);
-        state.mentionReplies++;
       } catch (err) {
         logger.error(
           { err, commentId: mention.id },

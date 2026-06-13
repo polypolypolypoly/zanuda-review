@@ -46,6 +46,8 @@ export interface PullRequest {
   /** Unified diff of the whole PR. */
   diff: string;
   changedFiles: string[];
+  /** Current state of the PR: open, closed, or merged. */
+  state: "open" | "closed" | "merged";
 }
 
 /**

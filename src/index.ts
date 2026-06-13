@@ -13,9 +13,16 @@ async function main(): Promise<void> {
     "Authenticated as bot account",
   );
 
-  const intervalMs = process.env.POLL_INTERVAL_SECS
-    ? Number(process.env.POLL_INTERVAL_SECS) * 1000
-    : undefined;
+  let intervalMs: number | undefined;
+  if (process.env.POLL_INTERVAL_SECS) {
+    const secs = Number(process.env.POLL_INTERVAL_SECS);
+    if (!Number.isFinite(secs) || secs <= 0) {
+      throw new Error(
+        `Invalid POLL_INTERVAL_SECS="${process.env.POLL_INTERVAL_SECS}": must be a positive number`,
+      );
+    }
+    intervalMs = secs * 1000;
+  }
 
   await startPoller({ config, botLogin, connector, intervalMs });
 }

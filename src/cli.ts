@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { parseArgs } from "node:util";
 import { loadConfig } from "./config.js";
 import { createConnector, LocalConnector } from "./platform/index.js";
 import { reviewPullRequest } from "./review/engine.js";
@@ -18,32 +19,39 @@ import { reviewPullRequest } from "./review/engine.js";
  *   zanuda --local --output review.md     # write to file instead of stdout
  */
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  const { values, positionals } = parseArgs({
+    args: process.argv.slice(2),
+    options: {
+      local: { type: "boolean", default: false },
+      "dry-run": { type: "boolean", default: false },
+      diff: { type: "string" },
+      output: { type: "string" },
+      round: { type: "string" },
+    },
+    allowPositionals: true,
+    strict: true,
+  });
 
-  if (args.includes("--local")) {
-    await runLocalReview(args);
+  if (values.local) {
+    await runLocalReview(values);
   } else {
-    await runRemoteReview(args);
+    await runRemoteReview(positionals, values);
   }
 }
 
-async function runLocalReview(args: string[]): Promise<void> {
-  const diffFlag: string | undefined =
-    args.find((a) => a.startsWith("--diff="))?.split("=")[1] ??
-    nextArgValue(args, "--diff");
-
-  const outputFlag: string | undefined =
-    args.find((a) => a.startsWith("--output="))?.split("=")[1] ??
-    nextArgValue(args, "--output");
-
-  const dryRun = args.includes("--dry-run");
+async function runLocalReview(
+  values: Record<string, string | boolean | undefined>,
+): Promise<void> {
+  const dryRun = values["dry-run"] === true;
+  const diffFlag = typeof values.diff === "string" ? values.diff : undefined;
+  const outputFlag =
+    typeof values.output === "string" ? values.output : undefined;
 
   const connector = new LocalConnector({
     diffRef: diffFlag ?? "staged",
     outputFile: outputFlag ?? null,
   });
 
-  const botLogin = await connector.getBotLogin();
   const ref = {
     owner: "local",
     repo: process.cwd().split("/").pop() ?? "repo",
@@ -63,12 +71,13 @@ async function runLocalReview(args: string[]): Promise<void> {
       `Review complete — ${result.comments.length} inline comment(s).\n`,
     );
   }
-
-  void botLogin; // used by engine internally
 }
 
-async function runRemoteReview(args: string[]): Promise<void> {
-  const [target, ...flags] = args;
+async function runRemoteReview(
+  positionals: string[],
+  values: Record<string, string | boolean | undefined>,
+): Promise<void> {
+  const target = positionals[0];
   const match = target?.match(/^([^/]+)\/([^#]+)#(\d+)$/);
   if (!match) {
     console.error(
@@ -79,9 +88,8 @@ async function runRemoteReview(args: string[]): Promise<void> {
     process.exit(2);
   }
   const [, owner, repo, num] = match;
-  const dryRun = flags.includes("--dry-run");
-  const roundFlag = flags.find((f) => f.startsWith("--round="));
-  const round = roundFlag ? Number(roundFlag.split("=")[1]) : 1;
+  const dryRun = values["dry-run"] === true;
+  const round = typeof values.round === "string" ? Number(values.round) : 1;
 
   const result = await reviewPullRequest(
     { connector: createConnector(), baseConfig: loadConfig() },
@@ -95,14 +103,6 @@ async function runRemoteReview(args: string[]): Promise<void> {
   } else {
     console.log(`Posted review with ${result.comments.length} comment(s).`);
   }
-}
-
-/** Return the value after a flag if it doesn't start with '-', else undefined. */
-function nextArgValue(args: string[], flag: string): string | undefined {
-  const idx = args.indexOf(flag);
-  if (idx === -1) return undefined;
-  const next = args[idx + 1];
-  return next && !next.startsWith("-") ? next : undefined;
 }
 
 main().catch((err) => {

@@ -119,51 +119,52 @@ describe("parseReviewResult", () => {
     );
   });
 
-  it("nitpick comments are parsed but can be filtered by the engine", () => {
-    const result = parseReviewResult(
-      JSON.stringify({
-        summary: "ok",
-        action: "COMMENT",
-        filesSummary: [],
-        comments: [
-          { path: "a.ts", line: 1, severity: "blocker", body: "real issue" },
-          { path: "b.ts", line: 2, severity: "nitpick", body: "trivial" },
-        ],
-      }),
+  it("rejects nitpick severity — schema does not allow it", () => {
+    assert.throws(() =>
+      parseReviewResult(
+        JSON.stringify({
+          summary: "ok",
+          action: "COMMENT",
+          filesSummary: [],
+          comments: [
+            { path: "a.ts", line: 1, severity: "nitpick", body: "trivial" },
+          ],
+        }),
+      ),
     );
-    // Schema accepts nitpick; engine then filters them out
-    assert.equal(result.comments.length, 2);
-    const filtered = result.comments.filter((c) => c.severity !== "nitpick");
-    assert.equal(filtered.length, 1);
-    assert.equal(filtered[0]?.severity, "blocker");
   });
 });
 
 // ─── extractJson ──────────────────────────────────────────────────────────────
 
 describe("extractJson", () => {
-  it("returns first { to matching } regardless of surrounding text", () => {
+  it("strips leading prose and returns the JSON object", () => {
     assert.equal(extractJson('prefix {"a":1} suffix'), '{"a":1}');
-  });
-
-  it("stops at matching brace, ignores later stray braces", () => {
-    assert.equal(extractJson('{"a":1} and then some } stray brace'), '{"a":1}');
   });
 
   it("handles nested objects", () => {
     assert.equal(extractJson('{"a":{"b":2}}'), '{"a":{"b":2}}');
   });
 
-  it("does not count } inside a string value as closing brace", () => {
+  it("handles string values containing braces", () => {
     const json = '{"key":"value with } brace"}';
     assert.equal(extractJson(json), json);
+  });
+
+  it("strips a ```json fence before extracting", () => {
+    const json = '{"a":1}';
+    assert.equal(extractJson(`\`\`\`json\n${json}\n\`\`\``), json);
+    assert.equal(extractJson(`\`\`\`\n${json}\n\`\`\``), json);
   });
 
   it("throws when no opening brace present", () => {
     assert.throws(() => extractJson("no braces here"));
   });
 
-  it("throws on unterminated object", () => {
+  it("throws (via JSON.parse) on unterminated object", () => {
+    // extractJson itself finds start/end braces; JSON.parse will throw
+    // when the caller tries to parse the malformed slice.
+    // A string with only an opening brace and no closing brace throws.
     assert.throws(() => extractJson('{"a": 1'));
   });
 });

@@ -12,8 +12,7 @@ import {
   maybeUpdateRepoMemory,
   saveRepoMemory,
 } from "../context/repoMemory.js";
-import { formatDiscussion } from "../github/comments.js";
-import { buildReviewCommentBody } from "../github/postReview.js";
+import { formatDiscussion, buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
@@ -45,12 +44,32 @@ export async function reviewPullRequest(
     round,
   });
 
-  const pr = await connector.fetchPR(ref, number);
-  log.info({ files: pr.changedFiles.length }, "Fetched PR");
-
   // Round 1: post a "starting" placeholder. Round 2+: reuse the existing
   // comment ID so we update in place and avoid a second stale comment.
   let startingCommentId: number | null = opts.progressCommentId ?? null;
+
+  const pr = await connector.fetchPR(ref, number);
+  log.info({ files: pr.changedFiles.length, state: pr.state }, "Fetched PR");
+
+  if (pr.state !== "open" && !opts.dryRun) {
+    log.info({ state: pr.state }, "PR is not open — skipping review");
+    if (startingCommentId !== null) {
+      await connector
+        .editComment(
+          ref,
+          startingCommentId,
+          `⏭️ **Review skipped** — this PR is already ${pr.state}.`,
+        )
+        .catch(() => undefined);
+    }
+    return {
+      summary: `PR is ${pr.state}.`,
+      action: "COMMENT",
+      filesSummary: [],
+      comments: [],
+      progressCommentId: startingCommentId,
+    };
+  }
   if (!opts.dryRun) {
     if (startingCommentId !== null) {
       // Try to update the round-1 comment. If it was deleted, fall back to posting
@@ -80,171 +99,195 @@ export async function reviewPullRequest(
     }
   }
 
-  // Three-level config merge: global defaults → org config → per-repo config.
-  // All files are read from the base branch (not the PR head) — a PR author
-  // cannot influence the bot's behaviour by editing them in their branch.
-  const [orgConfig, repoConfig, orgInstructions, repoInstructions] =
-    await Promise.all([
-      fetchOrgConfig(connector, ref.owner),
-      fetchRepoConfig(connector, ref, pr.baseSha),
-      fetchOrgInstructions(connector, ref.owner),
-      fetchInstructions(connector, ref, pr.baseSha),
-    ]);
-  const config = mergeRepoConfig(
-    mergeRepoConfig(deps.baseConfig, orgConfig),
-    repoConfig,
-  );
-  const instructions =
-    [orgInstructions, repoInstructions].filter(Boolean).join("\n\n") ||
-    undefined;
-  log.info(
-    {
-      provider: config.provider,
-      model: config.models[config.provider],
-      hasOrgConfig: orgConfig !== null,
-      hasRepoConfig: repoConfig !== null,
-      hasOrgInstructions: orgInstructions !== null,
-      hasRepoInstructions: repoInstructions !== null,
-    },
-    "Config resolved",
-  );
-
-  const context = await buildContext(connector, ref, pr.baseSha, config);
-
-  // ── Provider + repo memory ──────────────────────────────────────────────────
-  const provider: LLMProvider = createProvider(config.provider);
-
-  let repoMemory: string | null = null;
-  if (config.memory.enabled) {
-    repoMemory = loadRepoMemory(config, ref);
-    if (!repoMemory) {
-      try {
-        repoMemory = await generateRepoMemory(
-          connector,
+  // If the engine throws after posting the progress comment, update it to
+  // show an error state so the author isn't left staring at "Starting review…".
+  const failSafe = async (err: unknown) => {
+    if (!opts.dryRun && startingCommentId !== null) {
+      await connector
+        .editComment(
           ref,
-          pr.baseSha,
+          startingCommentId,
+          `⚠️ **Review failed** — will retry on the next poll cycle.\n\n<sub>${String(err).slice(0, 200)}</sub>`,
+        )
+        .catch(() => undefined); // best-effort; don't mask the original error
+    }
+    throw err;
+  };
+
+  try {
+    // Three-level config merge: global defaults → org config → per-repo config.
+    // All files are read from the base branch (not the PR head) — a PR author
+    // cannot influence the bot's behaviour by editing them in their branch.
+    const [orgConfig, repoConfig, orgInstructions, repoInstructions] =
+      await Promise.all([
+        fetchOrgConfig(connector, ref.owner),
+        fetchRepoConfig(connector, ref, pr.baseSha),
+        fetchOrgInstructions(connector, ref.owner),
+        fetchInstructions(connector, ref, pr.baseSha),
+      ]);
+    const config = mergeRepoConfig(
+      mergeRepoConfig(deps.baseConfig, orgConfig),
+      repoConfig,
+    );
+    const instructions =
+      [orgInstructions, repoInstructions].filter(Boolean).join("\n\n") ||
+      undefined;
+    log.info(
+      {
+        provider: config.provider,
+        model: config.models[config.provider],
+        hasOrgConfig: orgConfig !== null,
+        hasRepoConfig: repoConfig !== null,
+        hasOrgInstructions: orgInstructions !== null,
+        hasRepoInstructions: repoInstructions !== null,
+      },
+      "Config resolved",
+    );
+
+    const context = await buildContext(connector, ref, pr.baseSha, config);
+
+    // ── Provider + repo memory ──────────────────────────────────────────────────
+    const provider: LLMProvider = createProvider(config.provider);
+
+    let repoMemory: string | null = null;
+    if (config.memory.enabled) {
+      repoMemory = loadRepoMemory(config, ref);
+      if (!repoMemory) {
+        try {
+          repoMemory = await generateRepoMemory(
+            connector,
+            ref,
+            pr.baseSha,
+            config,
+            provider,
+          );
+          saveRepoMemory(config, ref, repoMemory);
+          log.info("Repo memory generated and saved");
+        } catch (err) {
+          log.warn(
+            { err },
+            "Failed to generate repo memory — proceeding without it",
+          );
+        }
+      }
+    }
+
+    // On round 2, include the full PR discussion so the model can judge whether
+    // issues from round 1 were addressed.
+    let discussion: string | undefined;
+    if (round >= 2) {
+      const comments = await connector.fetchDiscussion(ref, number);
+      discussion = formatDiscussion(comments);
+      log.info(
+        { commentCount: comments.length },
+        "Fetched PR discussion for round 2",
+      );
+    }
+
+    const completion = await provider.complete({
+      system: buildSystemPrompt(config),
+      user: buildUserPrompt(pr, context, config, {
+        round,
+        discussion,
+        repoMemory: repoMemory ?? undefined,
+        instructions,
+      }),
+      model: config.models[config.provider],
+      temperature: config.generation.temperature,
+      maxTokens: config.generation.maxTokens,
+    });
+    log.info(
+      { provider: completion.provider, model: completion.model },
+      "Model responded",
+    );
+
+    const result = parseReviewResult(completion.text);
+    const diffTruncated = pr.diff.length > config.review.maxDiffChars;
+
+    // APPROVE means the code is clean — inline comments on an APPROVE create
+    // unresolved threads that block the merge even though the reviewer approved.
+    if (result.action === "APPROVE") {
+      result.comments = [];
+    }
+
+    // Round 2 is the final review — REQUEST_CHANGES must never be used here.
+    if (round >= 2 && result.action === "REQUEST_CHANGES") {
+      result.action = "COMMENT";
+      log.info(
+        "Round 2: coerced REQUEST_CHANGES → COMMENT to avoid blocking PR",
+      );
+    }
+
+    if (!opts.dryRun) {
+      // Try to edit the progress comment to show the final verdict.
+      let progressCommentUpdated = false;
+      if (startingCommentId !== null) {
+        try {
+          await connector.editComment(
+            ref,
+            startingCommentId,
+            buildReviewCommentBody(result, pr.changedFiles.length, {
+              diffTruncated,
+            }),
+          );
+          progressCommentUpdated = true;
+        } catch (err) {
+          log.warn({ err }, "Failed to update starting comment");
+        }
+      }
+
+      // Post the review. If the progress comment wasn't updated (either because
+      // it never existed or the edit failed), postReview will include the summary
+      // in the review body as a fallback.
+      await connector.postReview(pr, result, config, {
+        summaryPostedElsewhere: progressCommentUpdated,
+      });
+      log.info(
+        {
+          comments: result.comments.length,
+          summaryPostedElsewhere: progressCommentUpdated,
+        },
+        "Review posted",
+      );
+
+      // On APPROVE: resolve all outstanding review threads Zanuda opened in
+      // previous rounds so they don’t block the merge.
+      if (result.action === "APPROVE") {
+        const botLogin = await connector.getBotLogin().catch(() => "");
+        if (botLogin) {
+          await connector
+            .resolveReviewThreads(ref, number, botLogin)
+            .catch((err) =>
+              log.warn({ err }, "Failed to resolve threads after APPROVE"),
+            );
+        }
+      }
+    }
+
+    // ── Repo memory update ────────────────────────────────────────────────────
+    if (config.memory.enabled && repoMemory) {
+      try {
+        const updated = await maybeUpdateRepoMemory(
+          ref,
+          repoMemory,
+          pr.title,
+          pr.changedFiles,
+          result.summary,
+          pr.diff,
           config,
           provider,
         );
-        saveRepoMemory(config, ref, repoMemory);
-        log.info("Repo memory generated and saved");
+        if (updated) saveRepoMemory(config, ref, updated);
       } catch (err) {
-        log.warn(
-          { err },
-          "Failed to generate repo memory — proceeding without it",
-        );
-      }
-    }
-  }
-
-  // On round 2, include the full PR discussion so the model can judge whether
-  // issues from round 1 were addressed.
-  let discussion: string | undefined;
-  if (round >= 2) {
-    const comments = await connector.fetchDiscussion(ref, number);
-    discussion = formatDiscussion(comments);
-    log.info(
-      { commentCount: comments.length },
-      "Fetched PR discussion for round 2",
-    );
-  }
-
-  const completion = await provider.complete({
-    system: buildSystemPrompt(config),
-    user: buildUserPrompt(pr, context, config, {
-      round,
-      discussion,
-      repoMemory: repoMemory ?? undefined,
-      instructions,
-    }),
-    model: config.models[config.provider],
-    temperature: config.generation.temperature,
-    maxTokens: config.generation.maxTokens,
-  });
-  log.info(
-    { provider: completion.provider, model: completion.model },
-    "Model responded",
-  );
-
-  const result = parseReviewResult(completion.text);
-  result.comments = result.comments.filter((c) => c.severity !== "nitpick");
-
-  // APPROVE means the code is clean — inline comments on an APPROVE create
-  // unresolved threads that block the merge even though the reviewer approved.
-  if (result.action === "APPROVE") {
-    result.comments = [];
-  }
-
-  // Round 2 is the final review — REQUEST_CHANGES must never be used here.
-  if (round >= 2 && result.action === "REQUEST_CHANGES") {
-    result.action = "COMMENT";
-    log.info("Round 2: coerced REQUEST_CHANGES → COMMENT to avoid blocking PR");
-  }
-
-  if (!opts.dryRun) {
-    // Try to edit the progress comment to show the final verdict.
-    let progressCommentUpdated = false;
-    if (startingCommentId !== null) {
-      try {
-        await connector.editComment(
-          ref,
-          startingCommentId,
-          buildReviewCommentBody(result, pr.changedFiles.length),
-        );
-        progressCommentUpdated = true;
-      } catch (err) {
-        log.warn({ err }, "Failed to update starting comment");
+        log.warn({ err }, "Failed to update repo memory — ignoring");
       }
     }
 
-    // Post the review. If the progress comment wasn't updated (either because
-    // it never existed or the edit failed), postReview will include the summary
-    // in the review body as a fallback.
-    await connector.postReview(pr, result, config, {
-      summaryPostedElsewhere: progressCommentUpdated,
-    });
-    log.info(
-      {
-        comments: result.comments.length,
-        summaryPostedElsewhere: progressCommentUpdated,
-      },
-      "Review posted",
-    );
-
-    // On APPROVE: resolve all outstanding review threads Zanuda opened in
-    // previous rounds so they don’t block the merge.
-    if (result.action === "APPROVE") {
-      const botLogin = await connector.getBotLogin().catch(() => "");
-      if (botLogin) {
-        await connector
-          .resolveReviewThreads(ref, number, botLogin)
-          .catch((err) =>
-            log.warn({ err }, "Failed to resolve threads after APPROVE"),
-          );
-      }
-    }
+    return { ...result, progressCommentId: startingCommentId };
+  } catch (err) {
+    await failSafe(err);
+    throw err; // unreachable — failSafe always rethrows; satisfies TypeScript
   }
-
-  // ── Repo memory update ────────────────────────────────────────────────────
-  if (config.memory.enabled && repoMemory) {
-    try {
-      const updated = await maybeUpdateRepoMemory(
-        ref,
-        repoMemory,
-        pr.title,
-        pr.changedFiles,
-        result.summary,
-        pr.diff,
-        config,
-        provider,
-      );
-      if (updated) saveRepoMemory(config, ref, updated);
-    } catch (err) {
-      log.warn({ err }, "Failed to update repo memory — ignoring");
-    }
-  }
-
-  return { ...result, progressCommentId: startingCommentId };
 }
 
 /** Parse the model's JSON, tolerating accidental code fences / prose wrapping. */
@@ -254,40 +297,44 @@ export function parseReviewResult(text: string): ReviewResult {
 }
 
 /**
- * Extract the outermost JSON object from the model's response.
+ * Extract a JSON object from the model's response.
+ *
+ * Strategy:
+ * 1. Try a simple first-`{` to last-`}` slice on the raw text — works for
+ *    plain JSON responses and prose-wrapped JSON.
+ * 2. If that doesn't parse (e.g. trailing prose after the closing brace
+ *    somehow trips things up), strip a wrapping ` ```json ``` ` code fence
+ *    and try again.
+ *
+ * Delegates actual JSON validation to `JSON.parse` rather than re-implementing
+ * escape-sequence handling.
  */
 export function extractJson(text: string): string {
+  // Fast path: find the outermost { … } span.
   const start = text.indexOf("{");
-  if (start === -1) {
-    throw new Error(
-      `No JSON object found in model response: ${text.slice(0, 200)}`,
-    );
-  }
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i]!;
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) return text.slice(start, i + 1);
+  const end = text.lastIndexOf("}");
+  if (start !== -1 && end !== -1 && end >= start) {
+    const slice = text.slice(start, end + 1);
+    try {
+      JSON.parse(slice); // validate — throws if malformed
+      return slice;
+    } catch {
+      // fall through to fence-strip path
     }
   }
+
+  // Slow path: strip a wrapping code fence (model sometimes wraps in ```json).
+  const fenced = text.match(/^```(?:json)?[ \t]*\n([\s\S]*?)\n```[ \t]*$/);
+  if (fenced) {
+    const inner = fenced[1]!.trim();
+    const s = inner.indexOf("{");
+    const e = inner.lastIndexOf("}");
+    if (s !== -1 && e !== -1 && e >= s) {
+      return inner.slice(s, e + 1);
+    }
+  }
+
   throw new Error(
-    `Unterminated JSON object in model response: ${text.slice(0, 200)}`,
+    `No JSON object found in model response: ${text.slice(0, 200)}`,
   );
 }
