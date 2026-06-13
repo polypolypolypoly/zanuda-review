@@ -66,18 +66,30 @@ export ZANUDA_CONFIG=/etc/zanuda/config.yaml
 
 ### 4. Run
 
+**Docker** (easiest):
+
+```bash
+docker build -t zanuda .
+docker run -d --restart unless-stopped --env-file .env \
+  -e ZANUDA_CONFIG=/config.yaml \
+  -v /path/to/your/config.yaml:/config.yaml:ro \
+  -v zanuda-data:/root/.zanuda \
+  zanuda
+```
+
+**Node directly:**
+
 ```bash
 npm ci && npm run build && npm start
 ```
 
-### 5. Systemd
+Both work. Docker is self-contained; Node is simpler if you're already on the machine.
 
-```bash
-cp deploy/zanuda.service.example /etc/systemd/system/zanuda.service
-# Edit the file — fill in <PLACEHOLDERS>
-sudo systemctl daemon-reload && sudo systemctl enable --now zanuda
-journalctl -u zanuda -f
-```
+### 5. Long-running in production (optional)
+
+If you want the bot to survive reboots and restart on failure, use a process
+manager. Systemd example (`deploy/zanuda.service.example`), Docker's
+`--restart unless-stopped`, or PM2 all work fine. Pick what you already use.
 
 ### 6. CI/CD
 

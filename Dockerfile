@@ -15,6 +15,8 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
 COPY config ./config
-EXPOSE 3000
-# Provide secrets at run time: docker run --env-file .env -p 3000:3000 ...
+# Provide secrets at run time via --env-file .env
+# Mount a local config override: -v /your/config.yaml:/config.yaml:ro
+#   and set -e ZANUDA_CONFIG=/config.yaml
+# Mount a data volume for persistent state: -v zanuda-data:/root/.zanuda
 CMD ["node", "dist/index.js"]
