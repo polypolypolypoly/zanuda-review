@@ -14,17 +14,19 @@ async function main(): Promise<void> {
   const [target, ...flags] = process.argv.slice(2);
   const match = target?.match(/^([^/]+)\/([^#]+)#(\d+)$/);
   if (!match) {
-    console.error("Usage: review-helper <owner>/<repo>#<pr-number> [--dry-run]");
+    console.error("Usage: review-helper <owner>/<repo>#<pr-number> [--dry-run] [--round=1|2]");
     process.exit(2);
   }
   const [, owner, repo, num] = match;
   const dryRun = flags.includes("--dry-run");
+  const roundFlag = flags.find((f) => f.startsWith("--round="));
+  const round = roundFlag ? Number(roundFlag.split("=")[1]) : 1;
 
   const result = await reviewPullRequest(
     { octokit: createOctokit(), baseConfig: loadConfig() },
     { owner: owner!, repo: repo! },
     Number(num),
-    { dryRun },
+    { dryRun, round },
   );
 
   if (dryRun) {

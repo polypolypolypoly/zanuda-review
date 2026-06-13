@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mergeRepoConfig, type Config } from "../src/config.ts";
 import { parseReviewResult, extractJson } from "../src/review/engine.ts";
 import { truncate } from "../src/review/prompt.ts";
+import { findUnrepliedMentions, formatDiscussion, type PRComment } from "../src/github/comments.ts";
 
 const baseConfig: Config = {
   provider: "anthropic",
@@ -160,4 +161,74 @@ test("mergeRepoConfig: does not mutate the base config", () => {
 test("mergeRepoConfig: explicit preprompt fully replaces base preprompt", () => {
   const merged = mergeRepoConfig(baseConfig, { preprompt: "Brand new." });
   assert.equal(merged.preprompt, "Brand new.");
+});
+
+// ── findUnrepliedMentions ─────────────────────────────────────────────────────────────────────────
+
+const makeComment = (overrides: Partial<PRComment>): PRComment => ({
+  id: 1,
+  type: "issue",
+  author: "alice",
+  body: "hello",
+  createdAt: "2024-01-01T00:00:00Z",
+  ...overrides,
+});
+
+test("findUnrepliedMentions: returns comments mentioning the bot", () => {
+  const comments = [
+    makeComment({ id: 1, body: "hey @ZlayaZanuda is this ok?" }),
+    makeComment({ id: 2, body: "no mention here" }),
+  ];
+  const result = findUnrepliedMentions(comments, "ZlayaZanuda", new Set());
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.id, 1);
+});
+
+test("findUnrepliedMentions: skips already-replied comment IDs", () => {
+  const comments = [makeComment({ id: 1, body: "@ZlayaZanuda hello" })];
+  const result = findUnrepliedMentions(comments, "ZlayaZanuda", new Set([1]));
+  assert.equal(result.length, 0);
+});
+
+test("findUnrepliedMentions: skips the bot's own comments", () => {
+  const comments = [
+    makeComment({ id: 1, author: "ZlayaZanuda", body: "@ZlayaZanuda self-mention" }),
+  ];
+  const result = findUnrepliedMentions(comments, "ZlayaZanuda", new Set());
+  assert.equal(result.length, 0);
+});
+
+test("findUnrepliedMentions: mention matching is case-insensitive", () => {
+  const comments = [makeComment({ id: 1, body: "@zlayazanuda pls look" })];
+  const result = findUnrepliedMentions(comments, "ZlayaZanuda", new Set());
+  assert.equal(result.length, 1);
+});
+
+// ── formatDiscussion ────────────────────────────────────────────────────────────────────────────
+
+test("formatDiscussion: empty list returns placeholder", () => {
+  assert.equal(formatDiscussion([]), "(No discussion found.)");
+});
+
+test("formatDiscussion: includes author and body", () => {
+  const comments = [makeComment({ id: 1, author: "alice", body: "looks good" })];
+  const text = formatDiscussion(comments);
+  assert.ok(text.includes("alice"));
+  assert.ok(text.includes("looks good"));
+});
+
+test("formatDiscussion: includes file location for review comments", () => {
+  const comments = [
+    makeComment({ id: 1, type: "review", path: "src/foo.ts", line: 10, body: "bad" }),
+  ];
+  const text = formatDiscussion(comments);
+  assert.ok(text.includes("src/foo.ts:10"));
+});
+
+test("formatDiscussion: truncates to maxComments and notes omitted count", () => {
+  const comments = Array.from({ length: 10 }, (_, i) =>
+    makeComment({ id: i, body: `comment ${i}`, createdAt: `2024-01-0${(i % 9) + 1}T00:00:00Z` }),
+  );
+  const text = formatDiscussion(comments, 3);
+  assert.ok(text.includes("7 earlier comment(s) omitted"));
 });

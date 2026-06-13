@@ -37,19 +37,30 @@ export function buildSystemPrompt(config: Config): string {
   return config.preprompt.trim();
 }
 
+export interface UserPromptOpts {
+  /** 1 = first review, 2 = final review. Defaults to 1. */
+  round?: number;
+  /** Formatted PR discussion text, injected on round 2. */
+  discussion?: string;
+}
+
 export function buildUserPrompt(
   pr: PullRequestData,
   context: ProjectContext,
   config: Config,
+  opts: UserPromptOpts = {},
 ): string {
+  const { round = 1, discussion } = opts;
   const diff = truncate(pr.diff, config.review.maxDiffChars);
-  return [
+  const isFinal = round >= 2;
+
+  const parts: string[] = [
     "## Project context",
     context.text,
     "",
     // PR title/body are user-controlled — wrapped in XML tags so the model
     // can clearly distinguish them from trusted instructions.
-    "## Pull request",
+    `## Pull request${isFinal ? " (round 2 of 2 — FINAL)" : ""}`,
     `<pr_title>${pr.title}</pr_title>`,
     pr.body
       ? `<pr_description>\n${pr.body}\n</pr_description>`
@@ -57,17 +68,41 @@ export function buildUserPrompt(
     `Changed files (${pr.changedFiles.length}):`,
     pr.changedFiles.map((f) => `- ${f}`).join("\n"),
     "",
-    "## Diff",
+  ];
+
+  if (isFinal && discussion) {
+    parts.push("## Discussion since round 1", discussion, "");
+  }
+
+  parts.push(
+    "## Current diff",
     "```diff",
     diff.text,
     "```",
     diff.truncated ? "\n(Diff truncated due to size.)" : "",
     "",
-    "## Your task",
-    "Review the diff above using the project context and your instructions.",
-    OUTPUT_INSTRUCTIONS,
-  ].join("\n");
+    isFinal ? FINAL_TASK_INSTRUCTIONS : ROUND1_TASK_INSTRUCTIONS,
+  );
+
+  return parts.join("\n");
 }
+
+const ROUND1_TASK_INSTRUCTIONS =
+  `## Your task\nReview the diff above using the project context and your instructions.\n` +
+  OUTPUT_INSTRUCTIONS;
+
+const FINAL_TASK_INSTRUCTIONS =
+  `## Your task (FINAL — round 2 of 2)\n` +
+  `Examine the current diff and the discussion above. Assess whether the issues ` +
+  `from round 1 have been adequately addressed. This is your last word on this PR.\n\n` +
+  `Valid actions for round 2:\n` +
+  `  APPROVE — issues resolved; PR is safe to merge.\n` +
+  `  COMMENT — issues remain that were NOT adequately addressed. When using COMMENT,\n` +
+  `            your summary MUST explicitly state the PR is not ready to merge and\n` +
+  `            list what still needs fixing. Be specific and direct.\n\n` +
+  `Do NOT use REQUEST_CHANGES — this is the final round and you cannot follow up,\n` +
+  `so blocking the PR would leave it stuck permanently.\n` +
+  OUTPUT_INSTRUCTIONS;
 
 /**
  * Truncate `s` to at most `max` characters, cutting at the last newline

@@ -80,12 +80,19 @@ preprompt: |
   Do NOT use nitpick. If something is not worth a warning, do not comment on it.
 
   ## Review action
-  Decide the GitHub review action based solely on what you found:
+  Decide the GitHub review action based solely on what you found.
+
+  Round 1:
   - APPROVE          — no blockers, no warnings; safe to merge.
-  - REQUEST_CHANGES  — at least one blocker; must not merge as-is.
+  - REQUEST_CHANGES  — at least one blocker present; must not merge as-is.
   - COMMENT          — warnings or observations only; author decides.
-  Never APPROVE if you have any unresolved blocker or warning.
-  Never REQUEST_CHANGES without at least one blocker-severity comment.
+
+  Round 2 (final — you will not review again):
+  - APPROVE          — issues resolved; safe to merge.
+  - COMMENT          — issues remain; summary MUST clearly state the PR is not
+                       ready to merge and what specifically still needs fixing.
+  Never use REQUEST_CHANGES on round 2 — you cannot follow up, and the PR
+  would be permanently stuck waiting for your approval.
 
   ## Hard rules
   - Do not invent issues.

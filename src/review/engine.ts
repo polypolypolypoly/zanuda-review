@@ -2,6 +2,7 @@ import type { Octokit } from "@octokit/rest";
 import { mergeRepoConfig, type Config } from "../config.js";
 import { buildContext } from "../context/builder.js";
 import { fetchRepoConfig } from "../context/repoConfig.js";
+import { fetchPRDiscussion, formatDiscussion } from "../github/comments.js";
 import type { RepoRef } from "../github/client.js";
 import { postReview } from "../github/postReview.js";
 import { fetchPullRequest } from "../github/pullRequest.js";
@@ -25,10 +26,11 @@ export async function reviewPullRequest(
   deps: ReviewDeps,
   ref: RepoRef,
   number: number,
-  opts: { dryRun?: boolean } = {},
+  opts: { dryRun?: boolean; round?: number } = {},
 ): Promise<ReviewResult> {
   const { octokit } = deps;
-  const log = logger.child({ repo: `${ref.owner}/${ref.repo}`, pr: number });
+  const round = opts.round ?? 1;
+  const log = logger.child({ repo: `${ref.owner}/${ref.repo}`, pr: number, round });
 
   const pr = await fetchPullRequest(octokit, ref, number);
   log.info({ files: pr.changedFiles.length }, "Fetched PR");
@@ -43,10 +45,19 @@ export async function reviewPullRequest(
 
   const context = await buildContext(octokit, ref, pr.baseSha, config);
 
+  // On round 2, include the full PR discussion so the model can judge whether
+  // issues from round 1 were addressed.
+  let discussion: string | undefined;
+  if (round >= 2) {
+    const comments = await fetchPRDiscussion(octokit, ref, number);
+    discussion = formatDiscussion(comments);
+    log.info({ commentCount: comments.length }, "Fetched PR discussion for round 2");
+  }
+
   const provider: LLMProvider = createProvider(config.provider);
   const completion = await provider.complete({
     system: buildSystemPrompt(config),
-    user: buildUserPrompt(pr, context, config),
+    user: buildUserPrompt(pr, context, config, { round, discussion }),
     model: config.models[config.provider],
     temperature: config.generation.temperature,
     maxTokens: config.generation.maxTokens,
@@ -58,6 +69,15 @@ export async function reviewPullRequest(
   // the model returns. Belt-and-suspenders: the preprompt and output schema
   // already tell it not to, but models can be stubborn.
   result.comments = result.comments.filter((c) => c.severity !== "nitpick");
+
+  // Round 2 is the final review. REQUEST_CHANGES must never be used here:
+  // Zanuda won't do a round 3, so the PR would get stuck waiting for her
+  // approval indefinitely. Coerce it to COMMENT so the PR stays unblocked
+  // while the summary still makes it clear issues remain.
+  if (round >= 2 && result.action === "REQUEST_CHANGES") {
+    result.action = "COMMENT";
+    log.info("Round 2: coerced REQUEST_CHANGES → COMMENT to avoid blocking PR");
+  }
 
   if (!opts.dryRun) {
     await postReview(octokit, pr, result, config);
