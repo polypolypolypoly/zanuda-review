@@ -39,7 +39,7 @@ Create a dedicated GitHub account and a Personal Access Token — classic with `
 
 ```bash
 cp .env.example .env
-# Set GITHUB_TOKEN, GITHUB_BOT_LOGIN, and your LLM provider key
+# Set GITHUB_TOKEN and your LLM provider key
 ```
 
 ### 3. Local config
