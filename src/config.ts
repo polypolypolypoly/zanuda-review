@@ -80,17 +80,32 @@ export const RepoConfigSchema = ConfigSchema.partial().extend({
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 
 export function loadConfig(path?: string): Config {
-  const configPath = resolve(
-    path ?? process.env.ZANUDA_CONFIG ?? "config/default.yaml",
-  );
-  const raw = parseYaml(readFileSync(configPath, "utf8"));
-  const parsed = ConfigSchema.safeParse(raw);
-  if (!parsed.success) {
+  // Always load config/default.yaml (or explicit path) as the full base config.
+  const basePath = resolve(path ?? "config/default.yaml");
+  const baseRaw = parseYaml(readFileSync(basePath, "utf8"));
+  const baseParsed = ConfigSchema.safeParse(baseRaw);
+  if (!baseParsed.success) {
     throw new Error(
-      `Invalid config at ${configPath}:\n${z.prettifyError(parsed.error)}`,
+      `Invalid config at ${basePath}:\n${z.prettifyError(baseParsed.error)}`,
     );
   }
-  return applyEnvOverrides(parsed.data);
+  let config = baseParsed.data;
+
+  // If ZANUDA_CONFIG is set, load it as a partial overlay and merge it.
+  // This file only needs to contain the keys you want to override.
+  const overlayPath = process.env.ZANUDA_CONFIG;
+  if (overlayPath) {
+    const overlayRaw = parseYaml(readFileSync(resolve(overlayPath), "utf8"));
+    const overlayParsed = RepoConfigSchema.safeParse(overlayRaw);
+    if (!overlayParsed.success) {
+      throw new Error(
+        `Invalid overlay config at ${overlayPath}:\n${z.prettifyError(overlayParsed.error)}`,
+      );
+    }
+    config = mergeRepoConfig(config, overlayParsed.data);
+  }
+
+  return applyEnvOverrides(config);
 }
 
 /** Env vars take precedence over the YAML file for a few hot settings. */
