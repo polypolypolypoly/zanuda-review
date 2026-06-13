@@ -151,11 +151,21 @@ Committed to the base branch only — PR authors cannot influence it.
 
 ## Manual reviews
 
+**Remote PR:**
 ```bash
 npm run review -- owner/repo#123            # post the review
 npm run review -- owner/repo#123 --dry-run  # print JSON, don't post
 npm run review -- owner/repo#123 --round=2  # run as round 2
 ```
+
+**Local** (no GitHub account needed):
+```bash
+npm run review -- --local                        # review staged changes
+npm run review -- --local --diff main            # diff against main
+npm run review -- --local --diff HEAD~3          # last 3 commits
+npm run review -- --local --output review.md     # write to file
+```
+Zanuda reads your local diff and `.zanuda/` config, sends it to the configured LLM, and prints the review to stdout (or a file).
 
 ## Models
 

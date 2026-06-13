@@ -1,21 +1,84 @@
 import "dotenv/config";
 import { loadConfig } from "./config.js";
-import { createConnector } from "./platform/index.js";
+import { createConnector, LocalConnector } from "./platform/index.js";
 import { reviewPullRequest } from "./review/engine.js";
 
 /**
- * Manual / local review without webhooks. Useful for testing the pipeline and
- * for one-off reviews.
+ * Manual / local review runner.
  *
- *   npm run review -- owner/repo#123          # post the review
- *   npm run review -- owner/repo#123 --dry-run # print JSON, post nothing
+ * Remote PR review:
+ *   zanuda owner/repo#123
+ *   zanuda owner/repo#123 --dry-run
+ *   zanuda owner/repo#123 --round=2
+ *
+ * Local review (no GitHub account needed):
+ *   zanuda --local                        # review staged changes
+ *   zanuda --local --diff main            # review diff against main
+ *   zanuda --local --diff HEAD~3          # review last 3 commits
+ *   zanuda --local --output review.md     # write to file instead of stdout
  */
 async function main(): Promise<void> {
-  const [target, ...flags] = process.argv.slice(2);
+  const args = process.argv.slice(2);
+
+  if (args.includes("--local")) {
+    await runLocalReview(args);
+  } else {
+    await runRemoteReview(args);
+  }
+}
+
+async function runLocalReview(args: string[]): Promise<void> {
+  const diffFlag =
+    args.find((a) => a.startsWith("--diff="))?.split("=")[1] ??
+    (args[args.indexOf("--diff") + 1]?.startsWith("-") === false
+      ? args[args.indexOf("--diff") + 1]
+      : undefined);
+
+  const outputFlag =
+    args.find((a) => a.startsWith("--output="))?.split("=")[1] ??
+    (args[args.indexOf("--output") + 1]?.startsWith("-") === false
+      ? args[args.indexOf("--output") + 1]
+      : undefined);
+
+  const dryRun = args.includes("--dry-run");
+
+  const connector = new LocalConnector({
+    diffRef: diffFlag ?? "staged",
+    outputFile: outputFlag ?? null,
+  });
+
+  const botLogin = await connector.getBotLogin();
+  const ref = {
+    owner: "local",
+    repo: process.cwd().split("/").pop() ?? "repo",
+  };
+
+  const result = await reviewPullRequest(
+    { connector, baseConfig: loadConfig() },
+    ref,
+    0,
+    { dryRun },
+  );
+
+  if (dryRun) {
+    process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  } else {
+    process.stderr.write(
+      `Review complete — ${result.comments.length} inline comment(s).\n`,
+    );
+  }
+
+  void botLogin; // used by engine internally
+}
+
+async function runRemoteReview(args: string[]): Promise<void> {
+  const [target, ...flags] = args;
   const match = target?.match(/^([^/]+)\/([^#]+)#(\d+)$/);
   if (!match) {
     console.error(
-      "Usage: zanuda <owner>/<repo>#<pr-number> [--dry-run] [--round=1|2]",
+      "Usage:\n" +
+        "  zanuda owner/repo#123 [--dry-run] [--round=1|2]   # remote PR review\n" +
+        "  zanuda --local [--diff <ref>] [--output <file>]   # local review",
     );
     process.exit(2);
   }

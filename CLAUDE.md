@@ -43,6 +43,8 @@ platform/
   index.ts            connector factory (reads PLATFORM env var)
   github/
     connector.ts      GitHubConnector — reference implementation
+  local/
+    connector.ts      LocalConnector — reviews staged git changes, no GitHub needed
   stub/
     connector.ts      annotated skeleton for new platform implementers
 github/
