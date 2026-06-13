@@ -21,9 +21,9 @@ No webhook or public endpoint needed — the bot reaches out to GitHub, not the 
 
 ## Using a hosted instance
 
-If someone is running Zanuda and has given you access:
+The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If you've been given access:
 
-1. Add the bot account as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
+1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
 2. Optionally commit `.zanuda.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
 3. Open a PR and request a review from the bot. That's it.
 
