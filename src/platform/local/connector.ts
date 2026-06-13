@@ -15,6 +15,7 @@ import { basename, resolve } from "node:path";
 import type { Config } from "../../config.js";
 import type { ReviewResult } from "../../review/types.js";
 import type {
+  FileChange,
   FileTree,
   PendingReview,
   PullRequest,
@@ -74,6 +75,7 @@ export class LocalConnector implements SCMConnector {
     const diff = this.getDiff();
     const changedFiles = this.getChangedFiles();
     const { title, body } = this.getCommitInfo();
+    const files = parseUnifiedDiffFiles(diff, changedFiles);
 
     return {
       ref: { owner: "local", repo: basename(this.repoPath) },
@@ -86,6 +88,7 @@ export class LocalConnector implements SCMConnector {
       headSha: "WORKING_TREE",
       diff,
       changedFiles,
+      files,
       state: "open", // local reviews are always treated as open
     };
   }
@@ -132,6 +135,10 @@ export class LocalConnector implements SCMConnector {
     _pr: PullRequest,
     result: ReviewResult,
     _config: Config,
+    _opts?: {
+      summaryPostedElsewhere?: boolean;
+      visibleFilePaths?: Set<string>;
+    },
   ): Promise<void> {
     const output = renderReview(result);
     if (this.outputFile) {
@@ -254,6 +261,42 @@ function renderReview(result: ReviewResult): string {
   }
 
   return lines.join("\n") + "\n";
+}
+
+// ── Unified diff parser ──────────────────────────────────────────────────────
+
+/**
+ * Split a unified diff into per-file sections so the review engine can
+ * assemble a budget-aware diff rather than truncating mid-file.
+ *
+ * Counts additions/deletions from the diff hunk headers rather than running
+ * additional git calls.
+ */
+function parseUnifiedDiffFiles(
+  unifiedDiff: string,
+  filenames: string[],
+): FileChange[] {
+  // Split on "diff --git" headers, keeping each header with its content.
+  const sections = unifiedDiff.split(/(?=^diff --git )/m).filter(Boolean);
+
+  const byFile = new Map<string, string>();
+  for (const section of sections) {
+    // Extract the b/ path (new file name) from the header.
+    const match = section.match(/^diff --git a\/.*? b\/(.+)$/m);
+    if (match) byFile.set(match[1]!, section);
+  }
+
+  return filenames.map((filename) => {
+    const patch = byFile.get(filename);
+    if (!patch) return { filename, additions: 0, deletions: 0 };
+    let additions = 0;
+    let deletions = 0;
+    for (const line of patch.split("\n")) {
+      if (line.startsWith("+") && !line.startsWith("+++")) additions++;
+      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
+    }
+    return { filename, additions, deletions, patch };
+  });
 }
 
 // ── Git helper ────────────────────────────────────────────────────────────────

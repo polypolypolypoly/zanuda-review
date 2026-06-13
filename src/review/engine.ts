@@ -17,6 +17,7 @@ import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
+import { buildPromptDiff, includedPaths } from "./diff.js";
 import { ReviewResultSchema, type ReviewResult } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 
@@ -182,6 +183,20 @@ export async function reviewPullRequest(
       );
     }
 
+    // Build a budget-aware diff from per-file patches so the model always
+    // receives complete file diffs rather than an arbitrary truncated blob.
+    const promptDiff = buildPromptDiff(pr.files, config.review.maxDiffChars);
+    if (promptDiff.truncated) {
+      log.info(
+        {
+          included: promptDiff.includedFiles.length,
+          excluded: promptDiff.excludedFiles.length,
+          total: pr.files.length,
+        },
+        "Large PR: diff assembled from per-file patches (some files excluded)",
+      );
+    }
+
     const completion = await completeWithRetry(provider, {
       system: buildSystemPrompt(config),
       user: buildUserPrompt(pr, context, config, {
@@ -189,6 +204,7 @@ export async function reviewPullRequest(
         discussion,
         repoMemory: repoMemory ?? undefined,
         instructions,
+        promptDiff,
       }),
       model: config.models[config.provider],
       temperature: config.generation.temperature,
@@ -200,7 +216,7 @@ export async function reviewPullRequest(
     );
 
     const result = parseReviewResult(completion.text);
-    const diffTruncated = pr.diff.length > config.review.maxDiffChars;
+    const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
     // The LLM call can take 30-60 s. If the author pushed new commits in that
@@ -277,8 +293,11 @@ export async function reviewPullRequest(
       // Post the review. If the progress comment wasn't updated (either because
       // it never existed or the edit failed), postReview will include the summary
       // in the review body as a fallback.
+      // Pass the set of file paths whose diff was visible so the connector can
+      // strip comments on unseen files before anchoring, preventing 422s.
       await connector.postReview(pr, result, config, {
         summaryPostedElsewhere: progressCommentUpdated,
+        visibleFilePaths: includedPaths(promptDiff),
       });
       log.info(
         {

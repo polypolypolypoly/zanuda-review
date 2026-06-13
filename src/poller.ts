@@ -17,6 +17,13 @@ const MAX_REVIEW_ROUNDS = 2;
 /** Maximum number of @mention replies per PR before going silent. */
 const MAX_MENTION_REPLIES = 5;
 
+/**
+ * After this many consecutive failures on the same PR Zanuda gives up and
+ * posts a permanent notice. Prevents infinite retry loops on PRs that always
+ * fail (e.g. consistently truncated JSON output from an oversized diff).
+ */
+const MAX_CONSECUTIVE_FAILURES = 3;
+
 export async function startPoller(opts: {
   config: Config;
   reviewerLogin: string;
@@ -138,9 +145,8 @@ async function pollReviewRequests(opts: {
 
     // ── Hard stop: max rounds reached ─────────────────────────────────────────
     if (completedRounds >= MAX_REVIEW_ROUNDS) {
-      // state must exist here: completedRounds >= 2 means rounds were written
-      // to the store by a previous cycle. Guard explicitly so TypeScript — and
-      // future readers — don't have to reason about the invariant.
+      // state must exist here: completedRounds ≥ 2 means rounds were written
+      // to the store by a previous cycle. Guard explicitly.
       if (!state) {
         logger.warn(
           { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
@@ -159,7 +165,18 @@ async function pollReviewRequests(opts: {
           .catch((err: unknown) =>
             logger.warn({ err }, "Failed to post max-rounds notification"),
           );
-        store.set(item.platformId, { ...state, maxRoundsNotified: true });
+        // state is guaranteed non-null here (guarded above);
+        // spread then override only the changed fields.
+        store.set(item.platformId, {
+          ref: state.ref,
+          number: state.number,
+          rounds: state.rounds,
+          mentionReplies: state.mentionReplies,
+          repliedCommentIds: state.repliedCommentIds,
+          progressCommentId: state.progressCommentId,
+          consecutiveFailures: state.consecutiveFailures,
+          maxRoundsNotified: true,
+        });
       }
       continue;
     }
@@ -200,8 +217,10 @@ async function pollReviewRequests(opts: {
                 mentionReplies: 0,
                 repliedCommentIds: new Set(),
                 maxRoundsNotified: false,
+                consecutiveFailures: 0,
               }),
               progressCommentId: result.progressCommentId,
+              consecutiveFailures: 0, // stale is not a failure
             });
           }
           logger.info(
@@ -225,6 +244,7 @@ async function pollReviewRequests(opts: {
           maxRoundsNotified: false,
           progressCommentId:
             result.progressCommentId ?? state?.progressCommentId ?? null,
+          consecutiveFailures: 0, // success — reset the failure counter
         });
         logger.info(
           {
@@ -236,16 +256,54 @@ async function pollReviewRequests(opts: {
         );
         inProgress.delete(item.platformId);
       })
-      .catch((err) => {
+      .catch(async (err) => {
+        const failures = (state?.consecutiveFailures ?? 0) + 1;
         logger.error(
           {
             err,
             repo: `${item.ref.owner}/${item.ref.repo}`,
             pr: item.number,
             round: nextRound,
+            consecutiveFailures: failures,
           },
-          "Review failed — will retry next poll",
+          failures >= MAX_CONSECUTIVE_FAILURES
+            ? "Review permanently failed — giving up on this PR"
+            : "Review failed — will retry next poll",
         );
+
+        if (failures >= MAX_CONSECUTIVE_FAILURES) {
+          // Post a notice and stop retrying by advancing rounds to the cap.
+          await connector
+            .postComment(
+              item.ref,
+              item.number,
+              `⚠️ **Zanuda cannot complete this review** — the last ${MAX_CONSECUTIVE_FAILURES} attempts failed. ` +
+                `This is usually caused by a PR that is too large to process. ` +
+                `Please request a human reviewer.`,
+            )
+            .catch(() => undefined);
+          store.set(item.platformId, {
+            ref: item.ref,
+            number: item.number,
+            rounds: MAX_REVIEW_ROUNDS, // treat as exhausted so it won't retry
+            mentionReplies: state?.mentionReplies ?? 0,
+            repliedCommentIds: state?.repliedCommentIds ?? new Set(),
+            maxRoundsNotified: true,
+            progressCommentId: state?.progressCommentId ?? null,
+            consecutiveFailures: failures,
+          });
+        } else {
+          store.set(item.platformId, {
+            ref: item.ref,
+            number: item.number,
+            rounds: state?.rounds ?? 0,
+            mentionReplies: state?.mentionReplies ?? 0,
+            repliedCommentIds: state?.repliedCommentIds ?? new Set(),
+            maxRoundsNotified: state?.maxRoundsNotified ?? false,
+            progressCommentId: state?.progressCommentId ?? null,
+            consecutiveFailures: failures,
+          });
+        }
         inProgress.delete(item.platformId);
       });
   }
