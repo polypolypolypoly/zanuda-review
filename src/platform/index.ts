@@ -7,8 +7,10 @@
 
 import { createOctokit } from "../github/client.js";
 import { GitHubConnector } from "./github/connector.js";
+import { LocalConnector } from "./local/connector.js";
 import type { SCMConnector } from "./types.js";
 
+export { LocalConnector } from "./local/connector.js";
 export type { SCMConnector } from "./types.js";
 export type {
   FileTree,
@@ -24,6 +26,9 @@ export function createConnector(): SCMConnector {
   switch (platform) {
     case "github":
       return new GitHubConnector(createOctokit());
+
+    case "local":
+      return new LocalConnector();
 
     // Add new platforms here:
     // case "gitlab":
