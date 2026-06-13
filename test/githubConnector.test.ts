@@ -65,6 +65,16 @@ describe("GitHubConnector.pollPendingReviews", () => {
   });
 });
 
+// resolveReviewThreads was removed: Zanuda never approves via GitHub,
+// so there are no threads to auto-resolve. Tests deleted accordingly.
+
+describe("_placeholder_resolveReviewThreads_removed", () => {
+  it("placeholder — resolveReviewThreads no longer exists", () => {
+    // method removed from SCMConnector; nothing to test here
+  });
+});
+
+/* original resolveReviewThreads tests removed
 describe("GitHubConnector.resolveReviewThreads", () => {
   it("resolves only unresolved Zanuda-authored threads", async () => {
     const mutationCalls: string[] = [];
@@ -152,6 +162,8 @@ describe("GitHubConnector.resolveReviewThreads", () => {
     );
   });
 });
+
+*/
 
 describe("replyToComment: thread root ID resolution", () => {
   it("uses inReplyToId (root) when replying to a thread reply", async () => {

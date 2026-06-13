@@ -50,20 +50,20 @@ export async function reviewPullRequest(
 
   // Each round gets its own fresh progress comment so each round's verdict
   // is preserved independently. progressCommentId is only non-null during a
-  // retry of the *same* round (stale discard path) — never across rounds.
+  // retry of the *same* round (stale discard path) - never across rounds.
   let startingCommentId: number | null = opts.progressCommentId ?? null;
 
   const pr = await connector.fetchPR(ref, number);
   log.info({ files: pr.changedFiles.length, state: pr.state }, "Fetched PR");
 
   if (pr.state !== "open" && !opts.dryRun) {
-    log.info({ state: pr.state }, "PR is not open — skipping review");
+    log.info({ state: pr.state }, "PR is not open - skipping review");
     if (startingCommentId !== null) {
       await connector
         .editComment(
           ref,
           startingCommentId,
-          `⏭️ **Review skipped** — this PR is already ${pr.state}.`,
+          `⏭️ **Review skipped** - this PR is already ${pr.state}.`,
         )
         .catch(() => undefined);
     }
@@ -101,14 +101,14 @@ export async function reviewPullRequest(
   }
 
   // If the engine throws after posting the progress comment, update it to
-  // show an error state so the author isn't left staring at "Starting review…".
+  // show an error state so the author isn't left staring at "Starting review...".
   const failSafe = async (err: unknown) => {
     if (!opts.dryRun && startingCommentId !== null) {
       await connector
         .editComment(
           ref,
           startingCommentId,
-          `⚠️ **Review failed** — will retry on the next poll cycle.\n\n<sub>${String(err).slice(0, 200)}</sub>`,
+          `⚠️ **Review failed** - will retry on the next poll cycle.\n\n<sub>${String(err).slice(0, 200)}</sub>`,
         )
         .catch(() => undefined); // best-effort; don't mask the original error
     }
@@ -117,7 +117,7 @@ export async function reviewPullRequest(
 
   try {
     // Three-level config merge: global defaults → org config → per-repo config.
-    // All files are read from the base branch (not the PR head) — a PR author
+    // All files are read from the base branch (not the PR head) - a PR author
     // cannot influence Zanuda's behaviour by editing them in their branch.
     const [orgConfig, repoConfig, orgInstructions, repoInstructions] =
       await Promise.all([
@@ -161,7 +161,7 @@ export async function reviewPullRequest(
         } catch (err) {
           log.warn(
             { err },
-            "Failed to generate repo memory — proceeding without it",
+            "Failed to generate repo memory - proceeding without it",
           );
         }
       }
@@ -232,40 +232,26 @@ export async function reviewPullRequest(
       } catch (err) {
         log.warn(
           { err },
-          "Stale-check: failed to re-fetch PR head — proceeding anyway",
+          "Stale-check: failed to re-fetch PR head - proceeding anyway",
         );
       }
 
       if (currentHead !== null && currentHead !== pr.headSha) {
         log.info(
           { oldHead: pr.headSha, newHead: currentHead },
-          "PR head changed during review — discarding stale result",
+          "PR head changed during review - discarding stale result",
         );
         if (startingCommentId !== null) {
           await connector
             .editComment(
               ref,
               startingCommentId,
-              `🔄 **New commits pushed during review** — discarding stale result. Will re-review on the next poll cycle.`,
+              `🔄 **New commits pushed during review** - discarding stale result. Will re-review on the next poll cycle.`,
             )
             .catch(() => undefined);
         }
         return { ...result, progressCommentId: startingCommentId, stale: true };
       }
-    }
-
-    // APPROVE means the code is clean — inline comments on an APPROVE create
-    // unresolved threads that block the merge even though the reviewer approved.
-    if (result.action === "APPROVE") {
-      result.comments = [];
-    }
-
-    // Round 2 is the final review — REQUEST_CHANGES must never be used here.
-    if (round >= 2 && result.action === "REQUEST_CHANGES") {
-      result.action = "COMMENT";
-      log.info(
-        "Round 2: coerced REQUEST_CHANGES → COMMENT to avoid blocking PR",
-      );
     }
 
     if (!opts.dryRun) {
@@ -302,21 +288,6 @@ export async function reviewPullRequest(
         },
         "Review posted",
       );
-
-      // On APPROVE: resolve all outstanding review threads Zanuda opened in
-      // previous rounds so they don’t block the merge.
-      if (result.action === "APPROVE") {
-        const reviewerLogin = await connector
-          .getReviewerLogin()
-          .catch(() => "");
-        if (reviewerLogin) {
-          await connector
-            .resolveReviewThreads(ref, number, reviewerLogin)
-            .catch((err) =>
-              log.warn({ err }, "Failed to resolve threads after APPROVE"),
-            );
-        }
-      }
     }
 
     // ── Repo memory update ────────────────────────────────────────────────────
@@ -334,14 +305,14 @@ export async function reviewPullRequest(
         );
         if (updated) saveRepoMemory(config, ref, updated);
       } catch (err) {
-        log.warn({ err }, "Failed to update repo memory — ignoring");
+        log.warn({ err }, "Failed to update repo memory - ignoring");
       }
     }
 
     return { ...result, progressCommentId: startingCommentId, stale: false };
   } catch (err) {
     await failSafe(err);
-    throw err; // unreachable — failSafe always rethrows; satisfies TypeScript
+    throw err; // unreachable - failSafe always rethrows; satisfies TypeScript
   }
 }
 
@@ -355,7 +326,7 @@ export function parseReviewResult(text: string): ReviewResult {
  * Extract a JSON object from the model's response.
  *
  * Strategy:
- * 1. Use brace-depth scanning from the first `{` to the matching `}` — this
+ * 1. Use brace-depth scanning from the first `{` to the matching `}` - this
  *    correctly handles trailing prose that might contain stray `}` characters.
  * 2. If no opening brace is found, try stripping a wrapping code fence and retry.
  *

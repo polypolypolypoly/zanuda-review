@@ -29,10 +29,10 @@ const SEVERITY_EMOJI: Record<string, string> = {
   warning: "⚠️",
 };
 
-const ACTION_ICON: Record<string, string> = {
-  APPROVE: "✅",
-  REQUEST_CHANGES: "🛑",
-  COMMENT: "💬",
+const VERDICT_DISPLAY: Record<string, { icon: string; label: string }> = {
+  APPROVE: { icon: "✅", label: "recommend merging" },
+  REQUEST_CHANGES: { icon: "🛑", label: "address issues" },
+  COMMENT: { icon: "💬", label: "observations" },
 };
 
 export class LocalConnector implements SCMConnector {
@@ -171,10 +171,6 @@ export class LocalConnector implements SCMConnector {
     // No-op — no discussion in local mode.
   }
 
-  async resolveReviewThreads(): Promise<void> {
-    // No-op — local mode has no remote threads.
-  }
-
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   private getDiff(): string {
@@ -230,8 +226,10 @@ export class LocalConnector implements SCMConnector {
 // ── Output renderer ───────────────────────────────────────────────────────────
 
 function renderReview(result: ReviewResult): string {
-  const icon = ACTION_ICON[result.action] ?? "💬";
-  const label = result.action.replace("_", " ").toLowerCase();
+  const { icon, label } = VERDICT_DISPLAY[result.action] ?? {
+    icon: "💬",
+    label: "observations",
+  };
   const reviewed = result.filesSummary.length;
   const inlineCount = result.comments.length;
 

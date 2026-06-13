@@ -535,20 +535,20 @@ describe("buildReviewCommentBody", () => {
     filesSummary: [{ path: "src/foo.ts", description: "updated logic" }],
   });
 
-  it("formats APPROVE with correct icon, label and summary", () => {
+  it("formats APPROVE with correct icon and recommendation label", () => {
     const text = buildReviewCommentBody(makeResult("APPROVE", "Ship it."), 1);
     assert.ok(text.includes("✅"));
-    assert.ok(text.includes("approve"));
+    assert.ok(text.includes("recommend merging"));
     assert.ok(text.includes("Ship it."));
   });
 
-  it("formats REQUEST_CHANGES with correct icon and label", () => {
+  it("formats REQUEST_CHANGES with correct icon and recommendation label", () => {
     const text = buildReviewCommentBody(
       makeResult("REQUEST_CHANGES", "Fix these."),
       2,
     );
     assert.ok(text.includes("🛑"));
-    assert.ok(text.includes("request changes"));
+    assert.ok(text.includes("address issues"));
   });
 
   it("includes checked files scope", () => {

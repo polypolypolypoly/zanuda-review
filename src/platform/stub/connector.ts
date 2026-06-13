@@ -127,10 +127,10 @@ export class StubConnector implements SCMConnector {
   /**
    * Post the review result back to the platform.
    *
-   * The `result.action` field maps to platform verdicts:
-   *   "APPROVE"          → GitHub: APPROVE event   / GitLab: approved state
-   *   "REQUEST_CHANGES"  → GitHub: REQUEST_CHANGES / GitLab: unapproved + thread
-   *   "COMMENT"          → GitHub: COMMENT event   / GitLab: plain note
+   * The `result.action` field is a recommendation (APPROVE / REQUEST_CHANGES /
+   * COMMENT) expressed verbally in the review body. The GitHub review event is
+   * always COMMENT — Zanuda never blocks or approves via the platform API.
+   * Map to a plain comment event on all platforms.
    *
    * `result.comments` are inline comments anchored to specific lines.
    * If the platform rejects an inline anchor (line not in diff), fall back
@@ -198,20 +198,5 @@ export class StubConnector implements SCMConnector {
     _body: string,
   ): Promise<void> {
     throw new Error("StubConnector.replyToComment: not implemented");
-  }
-
-  /**
-   * Resolve all open review threads started by Zanuda.
-   * Called after APPROVE so outstanding threads don't block the merge.
-   *
-   * GitHub reference: GraphQL resolveReviewThread mutation
-   * GitLab equivalent: resolve discussion via PUT .../notes/:id (set resolved=true)
-   */
-  async resolveReviewThreads(
-    _ref: RepoRef,
-    _number: number,
-    _reviewerLogin: string,
-  ): Promise<void> {
-    throw new Error("StubConnector.resolveReviewThreads: not implemented");
   }
 }
