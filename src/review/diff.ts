@@ -48,6 +48,10 @@ export function buildPromptDiff(
   const excluded: FileChange[] = [];
   let budget = maxChars;
 
+  // Greedy allocation: try to include each file in descending-volume order.
+  // If a large file doesn't fit, smaller files later can still be included.
+  // This means the final set isn't necessarily a prefix of sorted[] — it's
+  // best-fit by priority. A file can be excluded while smaller files are shown.
   for (const file of sorted) {
     if (!file.patch) {
       // No patch available (binary, too large for platform to inline, etc.)

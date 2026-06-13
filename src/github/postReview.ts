@@ -125,6 +125,9 @@ export async function postReview(
   }
 
   // Final fallback: dump all comments as plain text in the review body.
+  // commit_id is omitted here — inline anchors require a commit SHA, but when
+  // we have no inline comments (everything is in the body), pinning to a SHA
+  // is unnecessary and GitHub's convention is to omit it.
   const inlineFallback = result.comments
     .map(
       (c) =>
