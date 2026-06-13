@@ -7,24 +7,24 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
 ```
 [every 60 s] poller polls GitHub search API
   → finds open PRs with review-requested:ZlayaZanuda
+  → post "Starting review…" comment (edited with verdict when done)
   → fetch PR diff + repo config + project context files
   → load or generate persistent repo memory (architecture, style, invariants)
   → build prompt (preprompt + memory + context + diff)
   → LLM provider (Anthropic | OpenAI | OpenRouter | Ollama)
   → parse structured JSON result
-  → post review comments via Octokit
+  → post review via SCMConnector (inline comments + event; progress comment updated)
   → (async) maybe update repo memory based on what the PR revealed
 ```
 
-**No webhook / no public endpoint required.** The entrypoint (`index.ts`) runs only the poller. The Fastify webhook server (`server.ts`) exists in the codebase but is not used in production.
+**No webhook / no public endpoint required.** The entrypoint (`index.ts`) runs only the poller.
 
 ## Tech stack
 
 | Layer        | Tech                                          |
 |--------------|-----------------------------------------------|
 | Runtime      | Node.js ≥ 20, TypeScript (ESM)                |
-| Web server   | Fastify v5 (unused in prod)                   |
-| GitHub API   | `@octokit/rest` + `@octokit/webhooks`         |
+| GitHub API   | `@octokit/rest`                               |
 | LLM backends | Anthropic SDK, OpenAI SDK (also OpenRouter/Ollama via base URL override) |
 | Validation   | Zod v4                                        |
 | Config       | YAML (`config/default.yaml`) + dotenv         |
@@ -93,6 +93,7 @@ npm test              # node --test
 | Var                    | Purpose                                      |
 |------------------------|----------------------------------------------|
 | `GITHUB_TOKEN`         | Zanuda's PAT — login is resolved from it automatically |
+| `PLATFORM`             | Source control platform (default: `github`)  |
 | `LLM_PROVIDER`         | `anthropic` \| `openai` \| `openrouter` \| `ollama` |
 | `ANTHROPIC_API_KEY`    | For Anthropic provider                       |
 | `OPENAI_API_KEY`       | For OpenAI provider                          |
@@ -148,8 +149,8 @@ This repo ships its own `.zanuda/instructions.md` — it serves as both the live
 
 **Their side (once per org/repo):**
 2. Add `ZlayaZanuda` as a collaborator on the repo (Read is enough; needed to be requestable as a reviewer). For orgs: adding her as an org member covers all repos at once.
-3. _(Optional)_ Commit `.zanuda.yml` to the org's `.github` repo for org-wide defaults.
-4. _(Optional)_ Commit `.zanuda.yml` to individual repos to override org defaults.
+3. _(Optional)_ Commit `.zanuda/config.yml` to the org's `.github` repo for org-wide defaults.
+4. _(Optional)_ Commit `.zanuda/config.yml` to individual repos to override org defaults.
 
 **Then forever, zero setup per PR:**
 5. Open a PR → request review from `ZlayaZanuda` → review appears within 60 s.
@@ -158,7 +159,7 @@ This repo ships its own `.zanuda/instructions.md` — it serves as both the live
 
 - Runs as a **systemd service** under the dedicated `zanuda` service account.
 - **CI/CD via GitHub Actions self-hosted runner** on the homeserver.
-  - On push to `main`: pull → `npm ci` → `npm run build` → `systemctl restart zanuda`.
+  - On push to `main`: pull → `npm ci` → `npm run build` → `systemctl restart review-helper`.
   - Deploy job has `concurrency: group: deploy` to prevent parallel deploys.
 - Persistent data lives in `/mnt/data/apps/review-helper/` (state file + repo memory).
 - Homeserver-specific config (allowlist, paths) lives in `/mnt/data/apps/review-helper/config.yaml` — **not committed**. Loaded via `ZANUDA_CONFIG` env var in the systemd unit.
