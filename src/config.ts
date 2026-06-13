@@ -26,6 +26,21 @@ export const ConfigSchema = z.object({
     includeFileTree: z.boolean(),
     maxTreeEntries: z.number().int().positive(),
   }),
+  access: z.object({
+    /**
+     * Allowlist of owners or owner/repo slugs that may request reviews.
+     * Empty = accept everyone. Entries may be:
+     *   "octocat"          — allow any repo owned by octocat
+     *   "octocat/hello"    — allow only that specific repo
+     */
+    allowlist: z.array(z.string()),
+  }),
+  limits: z.object({
+    /** Max LLM reviews running in parallel at any time. */
+    maxConcurrentReviews: z.number().int().positive(),
+    /** Max new PRs picked up per poll cycle (caps burst from a flooded queue). */
+    maxNewPrsPerCycle: z.number().int().positive(),
+  }),
   memory: z.object({
     /** Toggle the whole feature on/off. */
     enabled: z.boolean(),

@@ -89,7 +89,27 @@ async function pollReviewRequests(opts: {
     return;
   }
 
-  for (const item of pending) {
+  // Apply concurrency cap: don't start more reviews than the global limit allows.
+  const slots = config.limits.maxConcurrentReviews - inProgress.size;
+  if (slots <= 0) {
+    logger.warn(
+      { inProgress: inProgress.size, cap: config.limits.maxConcurrentReviews },
+      "Concurrency cap reached — deferring new reviews to next cycle",
+    );
+    return;
+  }
+
+  // Cap how many *new* PRs we start per cycle to avoid thundering-herd after a
+  // restart when many PRs may be queued at once.
+  const newThisCycle = pending.slice(0, Math.min(slots, config.limits.maxNewPrsPerCycle));
+  if (newThisCycle.length < pending.length) {
+    logger.info(
+      { processing: newThisCycle.length, deferred: pending.length - newThisCycle.length },
+      "Per-cycle cap applied — deferred PRs will be picked up in later cycles",
+    );
+  }
+
+  for (const item of newThisCycle) {
     const state = prStates.get(item.id);
     const completedRounds = state?.rounds ?? 0;
 
@@ -116,6 +136,15 @@ async function pollReviewRequests(opts: {
     const ref = parseRepoRef(item.repository_url);
     if (!ref) {
       logger.warn({ url: item.repository_url }, "Could not parse repo URL — skipping");
+      continue;
+    }
+
+    // ── Allowlist check ───────────────────────────────────────────────────────────
+    if (!isAllowed(ref, config.access.allowlist)) {
+      logger.warn(
+        { repo: `${ref.owner}/${ref.repo}` },
+        "Review request from unlisted repo — ignoring (not in access.allowlist)",
+      );
       continue;
     }
 
@@ -225,4 +254,23 @@ function parseRepoRef(repositoryUrl: string): { owner: string; repo: string } | 
   const match = repositoryUrl.match(/\/repos\/([^/]+)\/([^/]+)$/);
   if (!match) return null;
   return { owner: match[1]!, repo: match[2]! };
+}
+
+/**
+ * Returns true if the repo is permitted by the allowlist.
+ * An empty allowlist means "allow everyone".
+ * Entries can be:
+ *   "owner"        — matches any repo under that owner
+ *   "owner/repo"   — matches only that specific repo
+ */
+function isAllowed(
+  ref: { owner: string; repo: string },
+  allowlist: string[],
+): boolean {
+  if (allowlist.length === 0) return true;
+  const full = `${ref.owner}/${ref.repo}`.toLowerCase();
+  return allowlist.some((entry) => {
+    const e = entry.toLowerCase();
+    return e === ref.owner.toLowerCase() || e === full;
+  });
 }
