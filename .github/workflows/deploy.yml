@@ -29,10 +29,9 @@ jobs:
     # REPO_PATH     — absolute path where the repo is checked out on the server
     # SERVICE_NAME  — systemd service name (matches your .service file)
     env:
-      SERVICE_USER: <SERVICE_USER>
-      REPO_PATH: <REPO_PATH>
+      SERVICE_USER: zanuda
+      REPO_PATH: /mnt/data/projects/review-helper
       SERVICE_NAME: review-helper
-    # ────────────────────────────────────────────────────────────────────
     steps:
       - name: Pull latest code
         run: sudo -u $SERVICE_USER bash -c "git -C $REPO_PATH pull --ff-only origin main"
