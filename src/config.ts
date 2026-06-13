@@ -29,7 +29,8 @@ export const ConfigSchema = z.object({
   review: z.object({
     maxDiffChars: z.number().int().positive(),
     inlineComments: z.boolean(),
-    event: z.enum(["COMMENT", "REQUEST_CHANGES", "APPROVE"]),
+    // null = model decides; set to a value to hard-override per repo.
+    event: z.enum(["COMMENT", "REQUEST_CHANGES", "APPROVE"]).nullable(),
   }),
 });
 

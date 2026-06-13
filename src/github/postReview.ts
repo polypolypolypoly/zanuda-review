@@ -21,12 +21,15 @@ export async function postReview(
   config: Config,
 ): Promise<void> {
   const header = buildHeader(result);
+  // config.review.event acts as a hard per-repo override (e.g. always COMMENT).
+  // When null the model's own reasoning drives the action.
+  const event = config.review.event ?? result.action;
 
   if (!config.review.inlineComments || result.comments.length === 0) {
     await octokit.pulls.createReview({
       ...pr.ref,
       pull_number: pr.number,
-      event: config.review.event,
+      event,
       body: renderSummaryBody(header, result),
     });
     return;
@@ -44,7 +47,7 @@ export async function postReview(
       ...pr.ref,
       pull_number: pr.number,
       commit_id: pr.headSha,
-      event: config.review.event,
+      event,
       body: header,
       comments,
     });
@@ -56,7 +59,7 @@ export async function postReview(
     await octokit.pulls.createReview({
       ...pr.ref,
       pull_number: pr.number,
-      event: config.review.event,
+      event,
       body: `${renderSummaryBody(header, result)}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`,
     });
   }

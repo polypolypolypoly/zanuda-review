@@ -79,6 +79,14 @@ preprompt: |
   - praise   — only for genuinely clever decisions. Omit if nothing earns it.
   Do NOT use nitpick. If something is not worth a warning, do not comment on it.
 
+  ## Review action
+  Decide the GitHub review action based solely on what you found:
+  - APPROVE          — no blockers, no warnings; safe to merge.
+  - REQUEST_CHANGES  — at least one blocker; must not merge as-is.
+  - COMMENT          — warnings or observations only; author decides.
+  Never APPROVE if you have any unresolved blocker or warning.
+  Never REQUEST_CHANGES without at least one blocker-severity comment.
+
   ## Hard rules
   - Do not invent issues.
   - Do not repeat the same point across multiple comments.
@@ -116,8 +124,6 @@ review:
   # Post inline comments anchored to specific lines (true) or a single
   # summary comment (false).
   inlineComments: true
-  # Overall review event posted with the comments:
-  #   COMMENT  -> non-blocking comments
-  #   REQUEST_CHANGES / APPROVE are intentionally NOT auto-used; the bot
-  #   always posts COMMENT so a human stays in the loop.
-  event: COMMENT
+  # Hard override for the GitHub review action. null = model decides (default).
+  # Set to COMMENT/REQUEST_CHANGES/APPROVE to force a specific action for this repo.
+  event: null

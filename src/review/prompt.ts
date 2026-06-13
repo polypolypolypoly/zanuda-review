@@ -7,6 +7,7 @@ const OUTPUT_INSTRUCTIONS = `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
   "summary": "string — overall assessment, 1-4 sentences",
+  "action": "APPROVE|REQUEST_CHANGES|COMMENT",
   "filesSummary": [
     {
       "path": "repo-relative file path",
@@ -22,6 +23,12 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
     }
   ]
 }
+
+action rules:
+  APPROVE          — no blockers, no warnings; the code is solid and safe to merge.
+  REQUEST_CHANGES  — one or more blocker-severity issues; must not merge as-is.
+  COMMENT          — warnings or observations only; author can decide whether to act.
+
 Include one entry in filesSummary for every changed file.
 Only comment on lines that appear in the diff. If there is nothing to flag,
 return an empty "comments" array and say so in the summary.`;

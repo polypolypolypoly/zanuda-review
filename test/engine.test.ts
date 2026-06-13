@@ -16,15 +16,17 @@ const baseConfig: Config = {
 // ── parseReviewResult ────────────────────────────────────────────────────────
 
 test("parseReviewResult: plain JSON", () => {
-  const r = parseReviewResult('{"summary":"ok","filesSummary":[],"comments":[]}');
+  const r = parseReviewResult('{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[]}');
   assert.equal(r.summary, "ok");
+  assert.equal(r.action, "COMMENT");
   assert.equal(r.comments.length, 0);
   assert.equal(r.filesSummary.length, 0);
 });
 
 test("parseReviewResult: fenced JSON with prose", () => {
-  const text = 'Here you go:\n```json\n{"summary":"s","filesSummary":[{"path":"a.ts","description":"updated logic"}],"comments":[{"path":"a.ts","line":3,"severity":"warning","body":"x"}]}\n```';
+  const text = 'Here you go:\n```json\n{"summary":"s","action":"REQUEST_CHANGES","filesSummary":[{"path":"a.ts","description":"updated logic"}],"comments":[{"path":"a.ts","line":3,"severity":"warning","body":"x"}]}\n```';
   const r = parseReviewResult(text);
+  assert.equal(r.action, "REQUEST_CHANGES");
   assert.equal(r.comments[0]?.path, "a.ts");
   assert.equal(r.comments[0]?.severity, "warning");
   assert.equal(r.filesSummary[0]?.description, "updated logic");
@@ -34,14 +36,14 @@ test("parseReviewResult: code block inside comment body does not confuse extract
   // The model embedded a ```python fence inside a JSON string value (escaped
   // as \n in the JSON, as Claude actually outputs it). The old regex matched
   // the *inner* fence and returned raw code; the brace heuristic is immune.
-  const json = '{"summary":"ok","filesSummary":[],"comments":[{"path":"a.py","line":1,"severity":"nitpick","body":"Consider:\\n```python\\nif x:\\n    pass\\n```"}]}';
+  const json = '{"summary":"ok","action":"COMMENT","filesSummary":[],"comments":[{"path":"a.py","line":1,"severity":"warning","body":"Consider:\\n```python\\nif x:\\n    pass\\n```"}]}';
   const r = parseReviewResult(json);
   assert.equal(r.comments[0]?.path, "a.py");
 });
 
 test("parseReviewResult: JSON wrapped in code fence with nested snippet", () => {
   const body = "Use `sorted()` instead.";
-  const json = `{"summary":"fine","filesSummary":[{"path":"f.py","description":"d"}],"comments":[{"path":"f.py","line":5,"severity":"warning","body":"${body}"}]}`;
+  const json = `{"summary":"fine","action":"COMMENT","filesSummary":[{"path":"f.py","description":"d"}],"comments":[{"path":"f.py","line":5,"severity":"warning","body":"${body}"}]}`;
   const text = `Here is my review:\n\`\`\`json\n${json}\n\`\`\``;
   const r = parseReviewResult(text);
   assert.equal(r.comments[0]?.severity, "warning");
@@ -49,6 +51,20 @@ test("parseReviewResult: JSON wrapped in code fence with nested snippet", () => 
 
 test("parseReviewResult: throws on garbage", () => {
   assert.throws(() => parseReviewResult("no json here"));
+});
+
+test("parseReviewResult: action field — APPROVE", () => {
+  const r = parseReviewResult('{"summary":"lgtm","action":"APPROVE","filesSummary":[],"comments":[]}');
+  assert.equal(r.action, "APPROVE");
+});
+
+test("parseReviewResult: action field — REQUEST_CHANGES", () => {
+  const r = parseReviewResult('{"summary":"bad","action":"REQUEST_CHANGES","filesSummary":[],"comments":[{"path":"x.ts","line":1,"severity":"blocker","body":"vuln"}]}');
+  assert.equal(r.action, "REQUEST_CHANGES");
+});
+
+test("parseReviewResult: throws on invalid action value", () => {
+  assert.throws(() => parseReviewResult('{"summary":"x","action":"NITPICK","filesSummary":[],"comments":[]}'));
 });
 
 // ── extractJson ──────────────────────────────────────────────────────────────
