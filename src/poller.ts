@@ -177,6 +177,31 @@ async function pollReviewRequests(opts: {
       },
     )
       .then((result) => {
+        if (result.stale) {
+          // New commits arrived during the LLM call. The round was discarded —
+          // do not increment rounds so the next poll starts a fresh review on
+          // the updated HEAD. Only update the progressCommentId if we have one.
+          if (result.progressCommentId !== null) {
+            store.set(item.platformId, {
+              ...(state ?? {
+                ref: item.ref,
+                number: item.number,
+                rounds: 0,
+                mentionReplies: 0,
+                repliedCommentIds: new Set(),
+                maxRoundsNotified: false,
+              }),
+              progressCommentId: result.progressCommentId,
+            });
+          }
+          logger.info(
+            { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
+            "Stale review discarded — round counter not incremented",
+          );
+          inProgress.delete(item.platformId);
+          return;
+        }
+
         // Persist the completed round BEFORE removing from inProgress.
         // A concurrent poll tick arriving between delete() and set() would
         // see rounds=0 and start a duplicate review. Writing first means any

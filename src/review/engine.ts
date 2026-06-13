@@ -35,7 +35,9 @@ export async function reviewPullRequest(
   ref: RepoRef,
   number: number,
   opts: { dryRun?: boolean; round?: number; progressCommentId?: number } = {},
-): Promise<ReviewResult & { progressCommentId: number | null }> {
+): Promise<
+  ReviewResult & { progressCommentId: number | null; stale: boolean }
+> {
   const { connector } = deps;
   const round = opts.round ?? 1;
   const log = logger.child({
@@ -68,6 +70,7 @@ export async function reviewPullRequest(
       filesSummary: [],
       comments: [],
       progressCommentId: startingCommentId,
+      stale: false,
     };
   }
   if (!opts.dryRun) {
@@ -204,6 +207,46 @@ export async function reviewPullRequest(
     const result = parseReviewResult(completion.text);
     const diffTruncated = pr.diff.length > config.review.maxDiffChars;
 
+    // ── Stale-commit guard ──────────────────────────────────────────────────
+    // The LLM call can take 30-60 s. If the author pushed new commits in that
+    // window, pr.headSha is now outdated. Posting a review anchored to the old
+    // SHA would immediately mark every inline comment as "outdated" and burn a
+    // review round on code that no longer exists.
+    //
+    // Fix: re-fetch the current head SHA before posting. If it changed, discard
+    // the result, update the progress comment, and return stale=true so the
+    // poller does NOT increment the round counter. The next poll will start a
+    // fresh review on the new HEAD.
+    if (!opts.dryRun) {
+      let currentHead: string | null = null;
+      try {
+        const fresh = await connector.fetchPR(ref, number);
+        currentHead = fresh.headSha;
+      } catch (err) {
+        log.warn(
+          { err },
+          "Stale-check: failed to re-fetch PR head — proceeding anyway",
+        );
+      }
+
+      if (currentHead !== null && currentHead !== pr.headSha) {
+        log.info(
+          { oldHead: pr.headSha, newHead: currentHead },
+          "PR head changed during review — discarding stale result",
+        );
+        if (startingCommentId !== null) {
+          await connector
+            .editComment(
+              ref,
+              startingCommentId,
+              `🔄 **New commits pushed during review** — discarding stale result. Will re-review on the next poll cycle.`,
+            )
+            .catch(() => undefined);
+        }
+        return { ...result, progressCommentId: startingCommentId, stale: true };
+      }
+    }
+
     // APPROVE means the code is clean — inline comments on an APPROVE create
     // unresolved threads that block the merge even though the reviewer approved.
     if (result.action === "APPROVE") {
@@ -283,7 +326,7 @@ export async function reviewPullRequest(
       }
     }
 
-    return { ...result, progressCommentId: startingCommentId };
+    return { ...result, progressCommentId: startingCommentId, stale: false };
   } catch (err) {
     await failSafe(err);
     throw err; // unreachable — failSafe always rethrows; satisfies TypeScript
