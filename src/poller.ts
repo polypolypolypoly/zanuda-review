@@ -271,40 +271,43 @@ async function pollReviewRequests(opts: {
             : "Review failed — will retry next poll",
         );
 
-        if (failures >= MAX_CONSECUTIVE_FAILURES) {
-          // Post a notice and stop retrying by advancing rounds to the cap.
-          await connector
-            .postComment(
-              item.ref,
-              item.number,
-              `⚠️ **Zanuda cannot complete this review** — the last ${MAX_CONSECUTIVE_FAILURES} attempts failed. ` +
-                `This is usually caused by a PR that is too large to process. ` +
-                `Please request a human reviewer.`,
-            )
-            .catch(() => undefined);
-          store.set(item.platformId, {
-            ref: item.ref,
-            number: item.number,
-            rounds: MAX_REVIEW_ROUNDS, // treat as exhausted so it won't retry
-            mentionReplies: state?.mentionReplies ?? 0,
-            repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-            maxRoundsNotified: true,
-            progressCommentId: state?.progressCommentId ?? null,
-            consecutiveFailures: failures,
-          });
-        } else {
-          store.set(item.platformId, {
-            ref: item.ref,
-            number: item.number,
-            rounds: state?.rounds ?? 0,
-            mentionReplies: state?.mentionReplies ?? 0,
-            repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-            maxRoundsNotified: state?.maxRoundsNotified ?? false,
-            progressCommentId: state?.progressCommentId ?? null,
-            consecutiveFailures: failures,
-          });
+        try {
+          if (failures >= MAX_CONSECUTIVE_FAILURES) {
+            // Post a notice and stop retrying by advancing rounds to the cap.
+            await connector
+              .postComment(
+                item.ref,
+                item.number,
+                `⚠️ **Zanuda cannot complete this review** — the last ${MAX_CONSECUTIVE_FAILURES} attempts failed. ` +
+                  `This is usually caused by a PR that is too large to process. ` +
+                  `Please request a human reviewer.`,
+              )
+              .catch(() => undefined);
+            store.set(item.platformId, {
+              ref: item.ref,
+              number: item.number,
+              rounds: MAX_REVIEW_ROUNDS, // treat as exhausted so it won't retry
+              mentionReplies: state?.mentionReplies ?? 0,
+              repliedCommentIds: state?.repliedCommentIds ?? new Set(),
+              maxRoundsNotified: true,
+              progressCommentId: state?.progressCommentId ?? null,
+              consecutiveFailures: failures,
+            });
+          } else {
+            store.set(item.platformId, {
+              ref: item.ref,
+              number: item.number,
+              rounds: state?.rounds ?? 0,
+              mentionReplies: state?.mentionReplies ?? 0,
+              repliedCommentIds: state?.repliedCommentIds ?? new Set(),
+              maxRoundsNotified: state?.maxRoundsNotified ?? false,
+              progressCommentId: state?.progressCommentId ?? null,
+              consecutiveFailures: failures,
+            });
+          }
+        } finally {
+          inProgress.delete(item.platformId);
         }
-        inProgress.delete(item.platformId);
       });
   }
 }
