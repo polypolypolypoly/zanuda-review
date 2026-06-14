@@ -271,4 +271,43 @@ describe("PRStateStore: new PRState fields", () => {
     const store = new PRStateStore(filePath);
     assert.equal(store.get(7)?.failedAwaitingRetry, false);
   });
+
+  it("persists maxRoundsNotified: true across reload (final round threshold)", () => {
+    // Regression guard: maxRoundsNotified must survive a store roundtrip as
+    // true. Before the fix this would silently reset to false after the final
+    // round completed, causing the notification to fire on every poll tick.
+    const filePath = join(dir, "maxrounds.json");
+    const store1 = new PRStateStore(filePath);
+    store1.set(
+      42,
+      makeState({
+        rounds: 2,
+        maxRoundsNotified: true,
+      }),
+    );
+    const store2 = new PRStateStore(filePath);
+    const state = store2.get(42);
+    assert.ok(state, "state should be loaded from disk");
+    assert.equal(state.rounds, 2);
+    assert.equal(state.maxRoundsNotified, true);
+  });
+
+  it("persists maxRoundsNotified: false after intermediate round", () => {
+    // Companion to the test above: after round 1 (intermediate), the flag
+    // should still be false since we haven't hit MAX_REVIEW_ROUNDS yet.
+    const filePath = join(dir, "maxrounds-false.json");
+    const store1 = new PRStateStore(filePath);
+    store1.set(
+      42,
+      makeState({
+        rounds: 1,
+        maxRoundsNotified: false,
+      }),
+    );
+    const store2 = new PRStateStore(filePath);
+    const state = store2.get(42);
+    assert.ok(state);
+    assert.equal(state.rounds, 1);
+    assert.equal(state.maxRoundsNotified, false);
+  });
 });
