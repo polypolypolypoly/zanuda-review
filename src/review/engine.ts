@@ -12,6 +12,14 @@ import {
   maybeUpdateRepoMemory,
   saveRepoMemory,
 } from "../context/repoMemory.js";
+import {
+  appendEntry,
+  classifyOutcomes,
+  formatReviewHistory,
+  loadReviewHistory,
+  saveReviewHistory,
+  type ReviewHistory,
+} from "../context/reviewHistory.js";
 import { formatDiscussion, buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
@@ -171,6 +179,10 @@ export async function reviewPullRequest(
       }
     }
 
+    const reviewHistory: ReviewHistory | null = config.memory.enabled
+      ? loadReviewHistory(config, ref)
+      : null;
+
     // On round 2, include the full PR discussion so the model can judge whether
     // issues from round 1 were addressed.
     let discussion: string | undefined;
@@ -203,6 +215,9 @@ export async function reviewPullRequest(
         round,
         discussion,
         repoMemory: repoMemory ?? undefined,
+        reviewHistory: reviewHistory
+          ? formatReviewHistory(reviewHistory)
+          : undefined,
         instructions,
         promptDiff,
         // Signal to the prompt builder that output instructions can be omitted
@@ -336,6 +351,39 @@ export async function reviewPullRequest(
         if (updated) saveRepoMemory(config, ref, updated);
       } catch (err) {
         log.warn({ err }, "Failed to update repo memory - ignoring");
+      }
+    }
+
+    // ── Review history update (round 2 only) ─────────────────────────────────
+    // Classify how each round-1 inline comment was resolved, then append a new
+    // history entry. Runs after the review is posted so a classification failure
+    // never prevents the review from going through.
+    if (config.memory.enabled && discussion !== undefined && round >= 2) {
+      try {
+        const outcomes = await classifyOutcomes(
+          number,
+          pr.title,
+          discussion,
+          config,
+          provider,
+        );
+        const entry = {
+          prNumber: number,
+          prTitle: pr.title,
+          date: new Date().toISOString().slice(0, 10),
+          finalAction: result.action,
+          outcomes,
+        };
+        const history = reviewHistory ?? { entries: [] };
+        const updated = appendEntry(
+          history,
+          entry,
+          config.memory.maxHistoryEntries,
+        );
+        saveReviewHistory(config, ref, updated);
+        log.info({ outcomes: outcomes.length }, "Review history updated");
+      } catch (err) {
+        log.warn({ err }, "Failed to update review history - ignoring");
       }
     }
 
