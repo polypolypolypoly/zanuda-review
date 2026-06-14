@@ -176,12 +176,41 @@ async function pollReviewRequests(opts: {
           progressCommentId: state.progressCommentId,
           consecutiveFailures: state.consecutiveFailures,
           maxRoundsNotified: true,
+          lastReviewedHeadSha: state.lastReviewedHeadSha,
         });
       }
       continue;
     }
 
     const nextRound = completedRounds + 1;
+
+    // ── Round-2 gate: require new commits since the last review ──────────────
+    // Round 2 is only useful if the author has pushed fixes. Without this
+    // guard, round 2 fires on the very next poll tick after round 1 with
+    // no code changes, producing a redundant and inconsistent second review.
+    if (nextRound >= 2 && state?.lastReviewedHeadSha) {
+      let currentHeadSha: string | null = null;
+      try {
+        const pr = await connector.fetchPR(item.ref, item.number);
+        currentHeadSha = pr.headSha;
+      } catch (err) {
+        logger.warn(
+          { err, repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
+          "Round-2 gate: could not fetch current head SHA — proceeding anyway",
+        );
+      }
+      if (
+        currentHeadSha !== null &&
+        currentHeadSha === state.lastReviewedHeadSha
+      ) {
+        logger.debug(
+          { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
+          "Round 2 withheld — no new commits since round 1",
+        );
+        continue;
+      }
+    }
+
     logger.info(
       {
         repo: `${item.ref.owner}/${item.ref.repo}`,
@@ -218,9 +247,15 @@ async function pollReviewRequests(opts: {
                 repliedCommentIds: new Set(),
                 maxRoundsNotified: false,
                 consecutiveFailures: 0,
+                lastReviewedHeadSha: null,
               }),
               progressCommentId: result.progressCommentId,
-              consecutiveFailures: 0, // stale is not a failure
+              consecutiveFailures: 0,
+              // Stale: new commits arrived during the review. Update
+              // lastReviewedHeadSha so the round-2 gate sees the correct
+              // baseline if round 1 eventually completes on the new head.
+              lastReviewedHeadSha:
+                result.headSha || state?.lastReviewedHeadSha || null,
             });
           }
           logger.info(
@@ -242,12 +277,11 @@ async function pollReviewRequests(opts: {
           mentionReplies: state?.mentionReplies ?? 0,
           repliedCommentIds: state?.repliedCommentIds ?? new Set(),
           maxRoundsNotified: false,
-          // Clear progressCommentId after each completed round so the next
-          // round always opens a fresh comment. Each round should stand alone
-          // as its own record; editing round 1's comment with round 2's verdict
-          // destroys the round 1 history.
           progressCommentId: null,
-          consecutiveFailures: 0, // success — reset the failure counter
+          consecutiveFailures: 0,
+          // Record the head SHA reviewed so the round-2 gate can detect
+          // whether new commits have been pushed before firing round 2.
+          lastReviewedHeadSha: result.headSha,
         });
         logger.info(
           {
@@ -295,6 +329,7 @@ async function pollReviewRequests(opts: {
               maxRoundsNotified: true,
               progressCommentId: state?.progressCommentId ?? null,
               consecutiveFailures: failures,
+              lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
             });
           } else {
             store.set(item.platformId, {
@@ -306,6 +341,7 @@ async function pollReviewRequests(opts: {
               maxRoundsNotified: state?.maxRoundsNotified ?? false,
               progressCommentId: state?.progressCommentId ?? null,
               consecutiveFailures: failures,
+              lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
             });
           }
         } finally {

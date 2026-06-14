@@ -22,6 +22,8 @@ function makeState(
     repliedCommentIds: new Set<number>(),
     maxRoundsNotified: false,
     progressCommentId: null,
+    consecutiveFailures: 0,
+    lastReviewedHeadSha: null,
     ...overrides,
   };
 }
@@ -169,5 +171,50 @@ describe("PRStateStore: corrupt/unknown file handling", () => {
     writeFileSync(filePath, JSON.stringify({ version: 99, prs: {} }));
     const store = new PRStateStore(filePath);
     assert.deepEqual([...store.entries()], []);
+  });
+});
+
+// ── lastReviewedHeadSha ───────────────────────────────────────────────────────
+
+describe("PRStateStore: lastReviewedHeadSha", () => {
+  let dir: string;
+  before(() => {
+    dir = makeTmpDir();
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("persists and reloads lastReviewedHeadSha", () => {
+    const filePath = join(dir, "sha.json");
+    const store1 = new PRStateStore(filePath);
+    store1.set(1, makeState({ lastReviewedHeadSha: "abc123" }));
+
+    const store2 = new PRStateStore(filePath);
+    assert.equal(store2.get(1)?.lastReviewedHeadSha, "abc123");
+  });
+
+  it("defaults missing lastReviewedHeadSha to null for old state files", () => {
+    const filePath = join(dir, "old-sha.json");
+    writeFileSync(
+      filePath,
+      JSON.stringify({
+        version: 1,
+        prs: {
+          "5": {
+            ref: { owner: "a", repo: "b" },
+            number: 5,
+            rounds: 1,
+            mentionReplies: 0,
+            repliedCommentIds: [],
+            maxRoundsNotified: false,
+            progressCommentId: null,
+            consecutiveFailures: 0,
+            lastUpdatedAt: new Date().toISOString(),
+            // lastReviewedHeadSha intentionally absent
+          },
+        },
+      }),
+    );
+    const store = new PRStateStore(filePath);
+    assert.equal(store.get(5)?.lastReviewedHeadSha, null);
   });
 });
