@@ -75,7 +75,14 @@ const userStringArb = fc.string({ minLength: 0, maxLength: 300 });
  */
 const xmlSafeStringArb = fc
   .string({ minLength: 1, maxLength: 200 })
-  .filter((s) => !s.includes("<") && !s.includes(">") && !s.includes("&"));
+  .filter(
+    (s) =>
+      !s.includes("<") &&
+      !s.includes(">") &&
+      !s.includes("&") &&
+      !s.includes('"') &&
+      !s.includes("'"),
+  );
 
 /**
  * Adversarial strings: instruction-injection attempts and XML-breaking
@@ -179,10 +186,20 @@ describe("buildUserPrompt: XML sandboxing — adversarial inputs", () => {
     fc.assert(
       fc.property(adversarialStringArb, (title) => {
         const out = buildUserPrompt(makePR({ title }), ctx, baseConfig);
-        assert.ok(out.includes("<pr_title>"));
-        assert.ok(out.includes("</pr_title>"));
-        // The title content appears somewhere in the output (may be inside or spanning tags)
-        assert.ok(out.includes(title));
+        const openIdx = out.indexOf("<pr_title>");
+        const closeIdx = out.indexOf("</pr_title>", openIdx);
+        assert.ok(openIdx !== -1, "opening <pr_title> tag missing");
+        assert.ok(closeIdx !== -1, "closing </pr_title> tag missing");
+        assert.ok(
+          closeIdx > openIdx + "<pr_title>".length,
+          "closing tag appears before or immediately after opening tag",
+        );
+        // The XML structure must not be broken: no additional </pr_title> before the real one
+        const between = out.slice(openIdx + "<pr_title>".length, closeIdx);
+        assert.ok(
+          !between.includes("</pr_title>"),
+          "XML structure broken: closing tag found inside content",
+        );
       }),
     );
   });
@@ -294,11 +311,15 @@ describe("buildUserPrompt: structural invariants", () => {
           out.includes(reviewHistory),
           "reviewHistory content missing from output",
         );
-        // Trusted content — should NOT be wrapped in any XML tags
+        // Trusted content — should NOT be wrapped in XML-sandboxing tags
         const idx = out.indexOf(reviewHistory);
-        const before = out.slice(Math.max(0, idx - 1), idx);
+        // Check that no <review_history> or similar sandboxing tags enclose it
+        const before = out.slice(0, idx);
+        const after = out.slice(idx + reviewHistory.length);
+        const suspectOpen = /<\w+>\s*$/.test(before);
+        const suspectClose = /^\s*<\/\w+>/.test(after);
         assert.ok(
-          before !== ">",
+          !(suspectOpen && suspectClose),
           "reviewHistory appears to be XML-sandboxed (should not be)",
         );
       }),

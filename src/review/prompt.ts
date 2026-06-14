@@ -3,6 +3,21 @@ import type { ProjectContext } from "../context/builder.js";
 import type { PullRequestData } from "../github/pullRequest.js";
 import type { PromptDiff } from "./diff.js";
 
+// ── XML escaping ──────────────────────────────────────────────────────────────
+
+/**
+ * Escape XML special characters to prevent user content from breaking out of
+ * XML sandbox tags.
+ */
+function escapeXml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
 // ── Output schema instructions ────────────────────────────────────────────────
 
 function outputInstructions(forAllFiles: boolean): string {
@@ -104,7 +119,7 @@ export function buildUserPrompt(
     parts.push(
       "## Repo memory (persistent knowledge about this codebase)",
       "<repo_memory>",
-      opts.repoMemory,
+      escapeXml(opts.repoMemory),
       "</repo_memory>",
       "",
     );
@@ -133,9 +148,9 @@ export function buildUserPrompt(
     // PR title/body are user-controlled — wrapped in XML tags so the model
     // can clearly distinguish them from trusted instructions.
     `## Pull request${isFinal ? " (round 2 of 2 — FINAL)" : ""}`,
-    `<pr_title>${pr.title}</pr_title>`,
+    `<pr_title>${escapeXml(pr.title)}</pr_title>`,
     pr.body
-      ? `<pr_description>\n${pr.body}\n</pr_description>`
+      ? `<pr_description>\n${escapeXml(pr.body)}\n</pr_description>`
       : "<pr_description>(none)</pr_description>",
     `Changed files (${pr.changedFiles.length}):`,
     pr.changedFiles.map((f) => `- ${f}`).join("\n"),
@@ -148,7 +163,7 @@ export function buildUserPrompt(
       // Wrap in XML — discussion contains user-controlled comment bodies and
       // must not be mistaken for trusted instructions by the model.
       "<discussion>",
-      discussion,
+      escapeXml(discussion),
       "</discussion>",
       "",
     );
