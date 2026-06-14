@@ -36,6 +36,8 @@ import { completeWithRetry } from "../llm/retry.js";
 export interface ReviewDeps {
   connector: SCMConnector;
   baseConfig: Config;
+  /** Used in the failure message so the author knows the exact command to retry. */
+  reviewerLogin?: string;
 }
 
 /**
@@ -121,11 +123,14 @@ export async function reviewPullRequest(
   // show an error state so the author isn't left staring at "Starting review...".
   const failSafe = async (err: unknown) => {
     if (!opts.dryRun && startingCommentId !== null) {
+      const retryHint = deps.reviewerLogin
+        ? ` Comment \`@${deps.reviewerLogin} retry\` to try again.`
+        : "";
       await connector
         .editComment(
           ref,
           startingCommentId,
-          `⚠️ **Review failed** - will retry on the next poll cycle.\n\n<sub>${String(err).slice(0, 200)}</sub>`,
+          `⚠️ **Review failed.**${retryHint}\n\n<sub>${String(err).slice(0, 200)}</sub>`,
         )
         .catch(() => undefined); // best-effort; don't mask the original error
     }

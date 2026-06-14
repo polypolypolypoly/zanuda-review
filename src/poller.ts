@@ -17,13 +17,6 @@ const MAX_REVIEW_ROUNDS = 2;
 /** Maximum number of @mention replies per PR before going silent. */
 const MAX_MENTION_REPLIES = 5;
 
-/**
- * After this many consecutive failures on the same PR Zanuda gives up and
- * posts a permanent notice. Prevents infinite retry loops on PRs that always
- * fail (e.g. consistently truncated JSON output from an oversized diff).
- */
-const MAX_CONSECUTIVE_FAILURES = 3;
-
 export async function startPoller(opts: {
   config: Config;
   reviewerLogin: string;
@@ -143,6 +136,13 @@ async function pollReviewRequests(opts: {
       continue;
     }
 
+    // ── Waiting for manual retry ──────────────────────────────────────────────
+    // A previous attempt failed. We don't retry automatically — we wait for
+    // an @mention retry command which clears this flag.
+    if (state?.failedAwaitingRetry) {
+      continue;
+    }
+
     // ── Hard stop: max rounds reached ─────────────────────────────────────────
     if (completedRounds >= MAX_REVIEW_ROUNDS) {
       // state must exist here: completedRounds ≥ 2 means rounds were written
@@ -177,6 +177,7 @@ async function pollReviewRequests(opts: {
           consecutiveFailures: state.consecutiveFailures,
           maxRoundsNotified: true,
           lastReviewedHeadSha: state.lastReviewedHeadSha,
+          failedAwaitingRetry: false,
         });
       }
       continue;
@@ -224,7 +225,7 @@ async function pollReviewRequests(opts: {
     inProgress.add(item.platformId);
 
     reviewPullRequest(
-      { connector, baseConfig: config },
+      { connector, baseConfig: config, reviewerLogin },
       item.ref,
       item.number,
       {
@@ -248,14 +249,13 @@ async function pollReviewRequests(opts: {
                 maxRoundsNotified: false,
                 consecutiveFailures: 0,
                 lastReviewedHeadSha: null,
+                failedAwaitingRetry: false,
               }),
               progressCommentId: result.progressCommentId,
               consecutiveFailures: 0,
-              // Stale: new commits arrived during the review. Update
-              // lastReviewedHeadSha so the round-2 gate sees the correct
-              // baseline if round 1 eventually completes on the new head.
               lastReviewedHeadSha:
                 result.headSha || state?.lastReviewedHeadSha || null,
+              failedAwaitingRetry: false,
             });
           }
           logger.info(
@@ -279,9 +279,8 @@ async function pollReviewRequests(opts: {
           maxRoundsNotified: false,
           progressCommentId: null,
           consecutiveFailures: 0,
-          // Record the head SHA reviewed so the round-2 gate can detect
-          // whether new commits have been pushed before firing round 2.
           lastReviewedHeadSha: result.headSha,
+          failedAwaitingRetry: false,
         });
         logger.info(
           {
@@ -303,47 +302,23 @@ async function pollReviewRequests(opts: {
             round: nextRound,
             consecutiveFailures: failures,
           },
-          failures >= MAX_CONSECUTIVE_FAILURES
-            ? "Review permanently failed — giving up on this PR"
-            : "Review failed — will retry next poll",
+          "Review failed — waiting for @mention retry command",
         );
-
         try {
-          if (failures >= MAX_CONSECUTIVE_FAILURES) {
-            // Post a notice and stop retrying by advancing rounds to the cap.
-            await connector
-              .postComment(
-                item.ref,
-                item.number,
-                `⚠️ **Zanuda cannot complete this review** — the last ${MAX_CONSECUTIVE_FAILURES} attempts failed. ` +
-                  `This is usually caused by a PR that is too large to process. ` +
-                  `Please request a human reviewer.`,
-              )
-              .catch(() => undefined);
-            store.set(item.platformId, {
-              ref: item.ref,
-              number: item.number,
-              rounds: MAX_REVIEW_ROUNDS, // treat as exhausted so it won't retry
-              mentionReplies: state?.mentionReplies ?? 0,
-              repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-              maxRoundsNotified: true,
-              progressCommentId: state?.progressCommentId ?? null,
-              consecutiveFailures: failures,
-              lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
-            });
-          } else {
-            store.set(item.platformId, {
-              ref: item.ref,
-              number: item.number,
-              rounds: state?.rounds ?? 0,
-              mentionReplies: state?.mentionReplies ?? 0,
-              repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-              maxRoundsNotified: state?.maxRoundsNotified ?? false,
-              progressCommentId: state?.progressCommentId ?? null,
-              consecutiveFailures: failures,
-              lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
-            });
-          }
+          // The engine's failSafe already updated the progress comment with
+          // the error and the retry hint. Just record the failure in state.
+          store.set(item.platformId, {
+            ref: item.ref,
+            number: item.number,
+            rounds: state?.rounds ?? 0,
+            mentionReplies: state?.mentionReplies ?? 0,
+            repliedCommentIds: state?.repliedCommentIds ?? new Set(),
+            maxRoundsNotified: state?.maxRoundsNotified ?? false,
+            progressCommentId: null,
+            consecutiveFailures: failures,
+            failedAwaitingRetry: true,
+            lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
+          });
         } finally {
           inProgress.delete(item.platformId);
         }
@@ -372,8 +347,14 @@ async function pollMentions(opts: {
   const cutoff = new Date(Date.now() - MENTION_SCAN_WINDOW_MS);
 
   for (const [id, state] of store.entries()) {
-    if (state.rounds === 0) continue;
-    if (state.mentionReplies >= MAX_MENTION_REPLIES) continue;
+    // Scan PRs that have at least one completed round OR are waiting for a
+    // retry command (failedAwaitingRetry=true, rounds may still be 0).
+    if (state.rounds === 0 && !state.failedAwaitingRetry) continue;
+    if (
+      state.mentionReplies >= MAX_MENTION_REPLIES &&
+      !state.failedAwaitingRetry
+    )
+      continue;
     // Skip PRs that haven't been touched recently — avoids a GitHub API call
     // for every stored PR on every tick.
     if (new Date(state.lastUpdatedAt) < cutoff) continue;
@@ -419,7 +400,42 @@ async function pollMentions(opts: {
       // Re-read from the store each iteration so the cap check sees the
       // count that was actually persisted, not a stale local copy.
       const current = store.get(id);
-      if (!current || current.mentionReplies >= MAX_MENTION_REPLIES) {
+      if (!current) break;
+
+      // ── Retry command ──────────────────────────────────────────────────────
+      // Detected when the mention body contains the word "retry" and the PR
+      // is currently in the failed-awaiting-retry state. We clear the flag and
+      // acknowledge — the next pollReviewRequests tick picks the PR up again
+      // because the review request is still open on the platform.
+      if (current.failedAwaitingRetry && /\bretry\b/i.test(mention.body)) {
+        logger.info(
+          { repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
+          "Retry command received — resetting failed state",
+        );
+        try {
+          await connector.replyToComment(
+            state.ref,
+            state.number,
+            mention,
+            `Starting a new review.`,
+          );
+        } catch (err) {
+          logger.warn({ err }, "Failed to post retry acknowledgement");
+        }
+        store.set(id, {
+          ...current,
+          failedAwaitingRetry: false,
+          consecutiveFailures: 0,
+          repliedCommentIds: new Set([
+            ...current.repliedCommentIds,
+            mention.id,
+          ]),
+        });
+        continue;
+      }
+
+      // ── Regular mention reply ───────────────────────────────────────────────
+      if (current.mentionReplies >= MAX_MENTION_REPLIES) {
         logger.info(
           { repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
           `Mention reply cap (${MAX_MENTION_REPLIES}) reached — going silent on this PR`,
@@ -436,8 +452,6 @@ async function pollMentions(opts: {
           prTitle,
           discussion,
         );
-        // All state mutations go through store.set() — no direct field mutation.
-        // store.set automatically updates lastUpdatedAt to 'now'.
         store.set(id, {
           ...current,
           repliedCommentIds: new Set([
