@@ -11,7 +11,7 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
   → fetch PR diff + repo config + project context files
   → load or generate persistent repo memory (architecture, style, invariants)
   → build prompt (preprompt + memory + context + diff)
-  → LLM provider (Anthropic | OpenAI | OpenRouter | Ollama)
+  → LLM provider (Anthropic | OpenAI | OpenRouter | Ollama | DeepSeek | Gemini)
   → parse structured JSON result
   → post review via SCMConnector (inline comments + COMMENT event; progress comment updated with recommendation)
   → (async) maybe update repo memory based on what the PR revealed
@@ -25,7 +25,7 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
 |--------------|-----------------------------------------------|
 | Runtime      | Node.js ≥ 20, TypeScript (ESM)                |
 | GitHub API   | `@octokit/rest`                               |
-| LLM backends | Anthropic SDK, OpenAI SDK (also OpenRouter/Ollama via base URL override) |
+| LLM backends | Anthropic SDK, OpenAI SDK (also OpenRouter, Ollama, DeepSeek, Gemini via base URL override) |
 | Validation   | Zod v4                                        |
 | Config       | YAML (`config/default.yaml`) + dotenv         |
 | Logging      | Pino + pino-pretty                            |
@@ -57,7 +57,7 @@ llm/
   types.ts            LLMProvider interface
   index.ts            provider factory (reads LLM_PROVIDER env)
   anthropic.ts        Anthropic Claude implementation
-  openaiCompatible.ts OpenAI / OpenRouter / Ollama implementation
+  openaiCompatible.ts OpenAI / OpenRouter / Ollama / DeepSeek / Gemini implementation
   stub.ts             annotated skeleton for new provider implementers
 context/
   repoConfig.ts       fetch & merge per-repo .zanuda/config.yml
@@ -86,7 +86,8 @@ state/
 npm run dev           # tsx watch (dev)
 npm run build         # tsc compile → dist/
 npm start             # node dist/index.js (prod)
-npm run review -- owner/repo#123 [--dry-run] [--round=2]  # manual one-shot review
+npm run review -- owner/repo#123 [--dry-run] [--round=2]  # remote PR review
+npm run review -- --local [--diff <ref>] [--casual] [--no-memory] [--model <id>]  # local review
 npm test              # node --test
 ```
 
@@ -96,11 +97,14 @@ npm test              # node --test
 |------------------------|----------------------------------------------|
 | `GITHUB_TOKEN`         | Zanuda's PAT — login is resolved from it automatically |
 | `PLATFORM`             | Source control platform (default: `github`)  |
-| `LLM_PROVIDER`         | `anthropic` \| `openai` \| `openrouter` \| `ollama` |
+| `LLM_PROVIDER`         | `anthropic` \| `openai` \| `openrouter` \| `ollama` \| `deepseek` \| `gemini` |
 | `ANTHROPIC_API_KEY`    | For Anthropic provider                       |
 | `OPENAI_API_KEY`       | For OpenAI provider                          |
 | `OPENROUTER_API_KEY`   | For OpenRouter provider                      |
 | `OLLAMA_BASE_URL`      | For local Ollama (default: http://localhost:11434) |
+| `DEEPSEEK_API_KEY`     | For DeepSeek provider                        |
+| `DEEPSEEK_BASE_URL`    | Custom DeepSeek endpoint (optional)          |
+| `GEMINI_API_KEY`       | For Gemini provider                          |
 | `POLL_INTERVAL_SECS`   | Polling interval in seconds (default: 60)    |
 
 ## Per-repo and per-org files
