@@ -32,7 +32,7 @@ export const ReviewResultSchema = z.object({
   filesSummary: z
     .array(FileSummarySchema)
     .describe("One entry per changed file."),
-  comments: z.array(ReviewCommentSchema),
+  comments: z.array(ReviewCommentSchema).default([]),
 });
 
 export type FileSummary = z.infer<typeof FileSummarySchema>;
