@@ -120,12 +120,13 @@ describe("parseReviewResult", () => {
     assert.equal(r.action, "REQUEST_CHANGES");
   });
 
-  it("throws on invalid action value", () => {
-    assert.throws(() =>
-      parseReviewResult(
-        '{"summary":"x","action":"NITPICK","filesSummary":[],"comments":[]}',
-      ),
+  it("falls back to COMMENT on invalid action value", () => {
+    // .catch("COMMENT") makes the schema resilient — unrecognised values
+    // fall back to the safest action rather than crashing the review.
+    const r = parseReviewResult(
+      '{"summary":"x","action":"NITPICK","filesSummary":[],"comments":[]}',
     );
+    assert.equal(r.action, "COMMENT");
   });
 
   it("rejects nitpick severity — schema does not allow it", () => {

@@ -22,15 +22,30 @@ const FileSummarySchema = z.object({
     .describe("One-line description of what changed in this file."),
 });
 
+// claude-opus-4-8 occasionally returns a tool_use response that omits or
+// mis-names one or more top-level fields. Rather than treating every such
+// response as a hard failure (and burning a retry + eventually giving up on
+// the PR), we apply safe fallbacks so the review can still be posted:
+//
+//   summary       — .catch("") — empty string renders as a blank summary line;
+//                    the inline comments and verdict are still useful.
+//   action        — .catch("COMMENT") — safest / least-impactful action.
+//   filesSummary  — .default([]) — omitted section, not a hard error.
+//   comments      — .default([]) — no inline anchors when absent.
+//
+// When a fallback fires we log a warning in parseReviewResult so the
+// occurrence is visible in the log without crashing the review.
 export const ReviewResultSchema = z.object({
-  summary: z.string().describe("Overall assessment, 1-4 sentences."),
+  summary: z.string().catch("").describe("Overall assessment, 1-4 sentences."),
   action: z
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
+    .catch("COMMENT")
     .describe(
       "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings or observations.",
     ),
   filesSummary: z
     .array(FileSummarySchema)
+    .default([])
     .describe("One entry per changed file."),
   comments: z.array(ReviewCommentSchema).default([]),
 });

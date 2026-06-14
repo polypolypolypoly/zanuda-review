@@ -424,12 +424,34 @@ export function parseReviewResult(
   text: string,
   opts: { structured?: boolean } = {},
 ): ReviewResult {
+  let parsed: ReviewResult;
   if (opts.structured) {
     // Response is guaranteed JSON from the provider — parse directly.
-    return ReviewResultSchema.parse(JSON.parse(text));
+    parsed = ReviewResultSchema.parse(JSON.parse(text));
+  } else {
+    const json = extractJson(text);
+    parsed = ReviewResultSchema.parse(JSON.parse(json));
   }
-  const json = extractJson(text);
-  return ReviewResultSchema.parse(JSON.parse(json));
+
+  // Warn when any field fell back to its catch/default value so the
+  // occurrence is visible in logs without crashing the review.
+  const fallbacks: string[] = [];
+  if (parsed.summary === "") fallbacks.push("summary");
+  if (parsed.action === "COMMENT" && !text.includes("COMMENT"))
+    fallbacks.push("action");
+  if (
+    parsed.filesSummary.length === 0 &&
+    text.includes("filesSummary") === false
+  )
+    fallbacks.push("filesSummary");
+  if (fallbacks.length > 0) {
+    logger.warn(
+      { fallbacks, rawResponse: text.slice(0, 300) },
+      "Model returned malformed structured output — fallback values applied",
+    );
+  }
+
+  return parsed;
 }
 
 /**
