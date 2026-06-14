@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -89,8 +91,23 @@ export const RepoConfigSchema = ConfigSchema.partial().extend({
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 
 export function loadConfig(path?: string): Config {
-  // Always load config/default.yaml (or explicit path) as the full base config.
-  const basePath = resolve(path ?? "config/default.yaml");
+  // Resolve the default config. Prefer the explicit path, then CWD, then
+  // the package directory (for globally installed npm packages).
+  let basePath: string;
+  if (path) {
+    basePath = resolve(path);
+  } else {
+    const cwdPath = resolve("config/default.yaml");
+    if (existsSync(cwdPath)) {
+      basePath = cwdPath;
+    } else {
+      // Running from a globally installed package — resolve relative to
+      // this module's location in node_modules.
+      const moduleDir = dirname(fileURLToPath(import.meta.url));
+      // config.ts is in dist/ → go up one level to find config/default.yaml.
+      basePath = join(moduleDir, "..", "config", "default.yaml");
+    }
+  }
   const baseRaw = parseYaml(readFileSync(basePath, "utf8"));
   const baseParsed = ConfigSchema.safeParse(baseRaw);
   if (!baseParsed.success) {
@@ -99,6 +116,19 @@ export function loadConfig(path?: string): Config {
     );
   }
   let config = baseParsed.data;
+
+  // Load ~/.zanuda/config.yaml as a global user-level overlay.
+  // Lets users set provider/model once and never touch env vars.
+  const userConfigPath = join(homedir(), ".zanuda", "config.yaml");
+  if (existsSync(userConfigPath)) {
+    const userRaw = parseYaml(readFileSync(userConfigPath, "utf8"));
+    const userParsed = RepoConfigSchema.safeParse(userRaw);
+    if (userParsed.success) {
+      config = mergeRepoConfig(config, userParsed.data);
+    }
+    // Silently ignore invalid user config — don't crash a working setup
+    // because of a typo in an optional file.
+  }
 
   // If ZANUDA_CONFIG is set, load it as a partial overlay and merge it.
   // This file only needs to contain the keys you want to override.
