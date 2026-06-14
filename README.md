@@ -11,7 +11,7 @@ Zanuda polls GitHub every 60 s for PRs with a pending review request, then:
 3. Sends everything to the configured LLM and parses the structured result
 4. Posts inline review comments via the GitHub API
 
-No webhook or public endpoint needed - Zanuda reaches out to GitHub, not the other way around.
+No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the other way around.
 
 **Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. If the author pushes fixes and re-requests, round 2 is the final verdict. It also replies to `@mentions` in the PR discussion (up to 5 per PR).
 
