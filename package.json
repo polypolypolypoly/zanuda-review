@@ -17,7 +17,7 @@
     "build": "tsc -p tsconfig.json",
     "review": "tsx src/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
-    "test": "node --test --import tsx ./test/*.test.ts",
+    "test": "node --experimental-test-module-mocks --test --import tsx ./test/*.test.ts",
     "lint": "eslint src test",
     "lint:fix": "eslint src test --fix",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\" \".github/workflows/*.yml\" \"config/**/*.yaml\"",
