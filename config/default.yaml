@@ -116,7 +116,7 @@ persistence:
 # Allowlist of owners or owner/repo slugs that may request reviews.
 #
 # WARNING: an empty list means Zanuda will review PRs from ANY repo that
-# adds her as a collaborator. Always set this in your local config overlay
+# adds Zanuda as a collaborator. Always set this in your local config overlay
 # before exposing Zanuda to the internet.
 #
 # Entries:
@@ -142,7 +142,7 @@ limits:
 # ─── Repo memory ────────────────────────────────────────────────────
 # Persistent per-repo knowledge files. On first review of a repo Zanuda
 # does a high-level scan and writes a structured memory document. On every
-# subsequent review she checks whether the memory needs updating.
+# subsequent review Zanuda checks whether the memory needs updating.
 memory:
   enabled: true
   # Absolute path for memory storage. Empty = ~/.zanuda/memory

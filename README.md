@@ -1,6 +1,6 @@
 # Zanuda the Reviewer
 
-An AI code reviewer that runs as its own GitHub account. Add her to a PR and she posts inline comments and a clear recommendation — with a consistent voice, codebase memory, and security-first judgment. She never blocks or approves merges; that’s the humans’ call.
+An AI code reviewer that runs as its own GitHub account. Add Zanuda to a PR and they post inline comments and a clear recommendation — with a consistent voice, codebase memory, and security-first judgment. Zanuda never blocks or approves merges; that's the humans' call.
 
 ## How it works
 
@@ -28,8 +28,8 @@ The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If y
 3. Open a PR and request a review from Zanuda. That's it.
 
 **Want reviews requested automatically on every PR?** Pick one:
-- **CODEOWNERS** — add `* @YourReviewerAccount` to `.github/CODEOWNERS`. GitHub requests a review on every opened PR automatically.
-- **GitHub Actions** — copy `deploy/auto-review.yml.example` to `.github/workflows/zanuda-review.yml`. Skips drafts; triggers when a PR is marked ready for review.
+- **CODEOWNERS** - add `* @YourReviewerAccount` to `.github/CODEOWNERS`. GitHub requests a review on every opened PR automatically.
+- **GitHub Actions** - copy `deploy/auto-review.yml.example` to `.github/workflows/zanuda-review.yml`. Skips drafts; triggers when a PR is marked ready for review.
 
 ---
 
@@ -37,7 +37,7 @@ The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If y
 
 ### 1. Reviewer account
 
-Create a dedicated GitHub account for Zanuda and a Personal Access Token — classic with `repo` scope, or fine-grained with *Pull requests* read/write and *Contents* read on the target repos.
+Create a dedicated GitHub account for Zanuda and a Personal Access Token - classic with `repo` scope, or fine-grained with *Pull requests* read/write and *Contents* read on the target repos.
 
 ### 2. Secrets
 
@@ -115,7 +115,7 @@ All Zanuda files live under `.zanuda/` in the repo root (or in the org's `.githu
   instructions.md     # free-form reviewer guidelines
 ```
 
-Settings merge in order — each layer overrides only what it sets:
+Settings merge in order - each layer overrides only what it sets:
 
 ```
 global defaults  →  {owner}/.github/.zanuda/config.yml  →  repo/.zanuda/config.yml
@@ -141,11 +141,11 @@ Full list of options: see `config/default.yaml`.
 
 ### `.zanuda/instructions.md`
 
-Free-form markdown injected into every review as reviewer guidelines. Use it to tell Zanuda what matters for your specific codebase — naming conventions, invariants, things to always flag, things to ignore.
+Free-form markdown injected into every review as reviewer guidelines. Use it to tell Zanuda what matters for your specific codebase - naming conventions, invariants, things to always flag, things to ignore.
 
 This repo ships its own `.zanuda/instructions.md` as a working example. Copy it and adapt to your project.
 
-Committed to the base branch only — PR authors cannot influence it.
+Committed to the base branch only - PR authors cannot influence it.
 
 ---
 
@@ -174,7 +174,7 @@ Zanuda reads your local diff and `.zanuda/` config, sends it to the configured L
 | `anthropic`  | `ANTHROPIC_API_KEY`  | Claude                              |
 | `openai`     | `OPENAI_API_KEY`     | GPT and compatible                  |
 | `openrouter` | `OPENROUTER_API_KEY` | 200+ models                         |
-| `ollama`     | —                    | Local; set `OLLAMA_BASE_URL`        |
+| `ollama`     | -                    | Local; set `OLLAMA_BASE_URL`        |
 
 ## Tests
 
@@ -188,46 +188,46 @@ Zanuda's LLM layer is a single-method interface. Adding Gemini, Mistral, Cohere,
 
 **Four wiring points:**
 
-1. **Copy the stub** — `src/llm/stub.ts` is an annotated skeleton with JSDoc explaining every field.
+1. **Copy the stub** - `src/llm/stub.ts` is an annotated skeleton with JSDoc explaining every field.
 
    ```bash
    cp src/llm/stub.ts src/llm/<name>.ts
    ```
 
-2. **Implement `complete()`** — one method: takes a system prompt + user message, returns a text string. See `src/llm/types.ts` for the full contract.
+2. **Implement `complete()`** - one method: takes a system prompt + user message, returns a text string. See `src/llm/types.ts` for the full contract.
 
-3. **Register in the factory** — add one `case` to `src/llm/index.ts` and add the provider name to the enum in `src/config.ts`.
+3. **Register in the factory** - add one `case` to `src/llm/index.ts` and add the provider name to the enum in `src/config.ts`.
 
-4. **Wire up config** — add a default model ID to `config/default.yaml` and an API key entry to `.env.example`.
+4. **Wire up config** - add a default model ID to `config/default.yaml` and an API key entry to `.env.example`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide including notes on temperature handling, streaming, and error propagation.
 
-## Adding a new platform (GitLab, Bitbucket, …)
+## Adding a new platform (GitLab, Bitbucket, ...)
 
 Zanuda's GitHub integration is one connector behind a clean interface. The review engine, LLM layer, config system, and state store are all platform-agnostic and require zero changes to support a new platform.
 
 **Five steps:**
 
-1. **Copy the stub** — `src/platform/stub/connector.ts` is a fully annotated skeleton with JSDoc explaining what each method needs to do, plus GitLab/Bitbucket API equivalents for every call.
+1. **Copy the stub** - `src/platform/stub/connector.ts` is a fully annotated skeleton with JSDoc explaining what each method needs to do, plus GitLab/Bitbucket API equivalents for every call.
 
    ```bash
    cp src/platform/stub/connector.ts src/platform/<name>/connector.ts
    ```
 
-2. **Implement the interface** — 10 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, edit comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
+2. **Implement the interface** - 10 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, edit comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
 
-3. **Register in the factory** — add one `case` to `src/platform/index.ts`:
+3. **Register in the factory** - add one `case` to `src/platform/index.ts`:
 
    ```typescript
    case "gitlab":
      return new GitLabConnector({ token: requireEnv("GITLAB_TOKEN") });
    ```
 
-4. **Wire up config** — add the new token/URL env vars to `.env.example` under the platform section.
+4. **Wire up config** - add the new token/URL env vars to `.env.example` under the platform section.
 
-5. **Test** — run `npm test` and add connector-specific tests in `test/`. See `test/githubConnector.test.ts` for the pattern.
+5. **Test** - run `npm test` and add connector-specific tests in `test/`. See `test/githubConnector.test.ts` for the pattern.
 
-Set `PLATFORM=<name>` in `.env` to activate your connector. Everything else — reviews, memory, config merging, rate limits — works unchanged.
+Set `PLATFORM=<name>` in `.env` to activate your connector. Everything else - reviews, memory, config merging, rate limits - works unchanged.
 
 ## Contributing
 
