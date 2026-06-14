@@ -8,12 +8,13 @@ import { z } from "zod";
  * in ZANUDA_CONFIG) and overridable per-repo via `.zanuda.yml`.
  */
 const ConfigSchema = z.object({
-  provider: z.enum(["anthropic", "openai", "openrouter", "ollama"]),
+  provider: z.enum(["anthropic", "openai", "openrouter", "ollama", "deepseek"]),
   models: z.object({
     anthropic: z.string(),
     openai: z.string(),
     openrouter: z.string(),
     ollama: z.string(),
+    deepseek: z.string(),
   }),
   generation: z.object({
     temperature: z.number().min(0).max(2),

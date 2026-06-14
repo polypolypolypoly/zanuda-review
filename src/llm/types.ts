@@ -32,5 +32,15 @@ export interface CompletionResult {
 
 export interface LLMProvider {
   readonly name: string;
+  /**
+   * Whether this provider can enforce JSON Schema at the API level
+   * (Anthropic tool_use, OpenAI json_schema strict mode).
+   *
+   * When false the engine falls back to including full output-format
+   * instructions in the user prompt and uses extractJson to parse the
+   * response. The provider may still use json_object mode to guarantee
+   * valid JSON without schema enforcement.
+   */
+  readonly supportsStructuredOutput: boolean;
   complete(req: CompletionRequest): Promise<CompletionResult>;
 }

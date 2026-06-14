@@ -231,9 +231,12 @@ export async function reviewPullRequest(
           : undefined,
         instructions,
         promptDiff,
-        // Signal to the prompt builder that output instructions can be omitted
-        // — the schema is enforced at the API level instead.
-        structuredOutput: true,
+        // When the provider enforces the schema at the API level
+        // (tool_use / json_schema strict mode), output instructions can
+        // be omitted from the prompt. When it only guarantees valid JSON
+        // (json_object mode), the prompt must carry the format instructions
+        // so the model knows the expected shape.
+        structuredOutput: provider.supportsStructuredOutput,
       }),
       model: config.models[config.provider],
       temperature: config.generation.temperature,
@@ -248,7 +251,9 @@ export async function reviewPullRequest(
       "Model responded",
     );
 
-    const result = parseReviewResult(completion.text, { structured: true });
+    const result = parseReviewResult(completion.text, {
+      structured: provider.supportsStructuredOutput,
+    });
     const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────

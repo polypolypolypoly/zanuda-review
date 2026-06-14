@@ -144,6 +144,54 @@ describe("parseReviewResult", () => {
     );
     assert.deepEqual(r.comments, []);
   });
+
+  it("handles json_object output with extra JSON fields (non-strict)", () => {
+    // DeepSeek in json_object mode may add extra fields not in the schema.
+    // The parser silently ignores them and parses what it can.
+    const r = parseReviewResult(
+      JSON.stringify({
+        summary: "Solid refactor.",
+        action: "APPROVE",
+        filesSummary: [
+          { path: "src/utils.ts", description: "extracted helpers" },
+        ],
+        comments: [],
+        reasoning_steps: ["step 1", "step 2"], // extra field — ignored
+        confidence: 0.95, // extra field — ignored
+      }),
+    );
+    assert.equal(r.summary, "Solid refactor.");
+    assert.equal(r.action, "APPROVE");
+    assert.equal(r.filesSummary.length, 1);
+  });
+
+  it("handles json_object output with non-JSON trailing prose", () => {
+    // Simulating a json_object response where the model added reasoning after
+    // the JSON object. extractJson must isolate just the JSON.
+    const r = parseReviewResult(
+      `{"summary":"done","action":"REQUEST_CHANGES","filesSummary":[],"comments":[{"path":"a.ts","line":2,"severity":"blocker","body":"unsafe"}]} Here is my reasoning: the code has a serious vulnerability.`,
+    );
+    assert.equal(r.action, "REQUEST_CHANGES");
+    assert.equal(r.comments[0]?.severity, "blocker");
+  });
+
+  it("handles valid JSON that does not match the ReviewResult shape (json_object fallback)", () => {
+    // The model returned structurally valid JSON but with fields that don't
+    // match ReviewResultSchema — no "summary", wrong action enum, etc.
+    // Zod's .catch/default fallbacks produce a safe degraded result rather
+    // than crashing the entire review.
+    const r = parseReviewResult(
+      JSON.stringify({
+        verdict: "looks good", // wrong key — not summary
+        action: "MERGE", // invalid enum value
+        // filesSummary and comments are missing entirely
+      }),
+    );
+    assert.equal(r.summary, "");
+    assert.equal(r.action, "COMMENT");
+    assert.deepEqual(r.filesSummary, []);
+    assert.deepEqual(r.comments, []);
+  });
 });
 
 // ─── extractJson ──────────────────────────────────────────────────────────────
