@@ -24,6 +24,7 @@ function makeState(
     progressCommentId: null,
     consecutiveFailures: 0,
     lastReviewedHeadSha: null,
+    failedAwaitingRetry: false,
     ...overrides,
   };
 }
@@ -174,47 +175,78 @@ describe("PRStateStore: corrupt/unknown file handling", () => {
   });
 });
 
-// ── lastReviewedHeadSha ───────────────────────────────────────────────────────
+// ── new PRState fields: lastReviewedHeadSha + failedAwaitingRetry ─────────────
 
-describe("PRStateStore: lastReviewedHeadSha", () => {
+describe("PRStateStore: new PRState fields", () => {
   let dir: string;
-  before(() => {
-    dir = makeTmpDir();
-  });
+  before(() => { dir = makeTmpDir(); });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
   it("persists and reloads lastReviewedHeadSha", () => {
     const filePath = join(dir, "sha.json");
     const store1 = new PRStateStore(filePath);
     store1.set(1, makeState({ lastReviewedHeadSha: "abc123" }));
-
     const store2 = new PRStateStore(filePath);
     assert.equal(store2.get(1)?.lastReviewedHeadSha, "abc123");
   });
 
   it("defaults missing lastReviewedHeadSha to null for old state files", () => {
     const filePath = join(dir, "old-sha.json");
-    writeFileSync(
-      filePath,
-      JSON.stringify({
-        version: 1,
-        prs: {
-          "5": {
-            ref: { owner: "a", repo: "b" },
-            number: 5,
-            rounds: 1,
-            mentionReplies: 0,
-            repliedCommentIds: [],
-            maxRoundsNotified: false,
-            progressCommentId: null,
-            consecutiveFailures: 0,
-            lastUpdatedAt: new Date().toISOString(),
-            // lastReviewedHeadSha intentionally absent
-          },
+    writeFileSync(filePath, JSON.stringify({
+      version: 1,
+      prs: {
+        "5": {
+          ref: { owner: "a", repo: "b" },
+          number: 5,
+          rounds: 1,
+          mentionReplies: 0,
+          repliedCommentIds: [],
+          maxRoundsNotified: false,
+          progressCommentId: null,
+          consecutiveFailures: 0,
+          lastUpdatedAt: new Date().toISOString(),
+          // lastReviewedHeadSha intentionally absent
         },
-      }),
-    );
+      },
+    }));
     const store = new PRStateStore(filePath);
     assert.equal(store.get(5)?.lastReviewedHeadSha, null);
+  });
+
+  it("defaults failedAwaitingRetry to false on fresh state", () => {
+    const store = new PRStateStore(join(dir, "state.json"));
+    store.set(1, makeState({ rounds: 0, consecutiveFailures: 0, failedAwaitingRetry: false }));
+    assert.equal(store.get(1)?.failedAwaitingRetry, false);
+  });
+
+  it("persists failedAwaitingRetry: true across reload", () => {
+    const filePath = join(dir, "retry.json");
+    const store1 = new PRStateStore(filePath);
+    store1.set(99, makeState({ failedAwaitingRetry: true, consecutiveFailures: 1, rounds: 0 }));
+    const store2 = new PRStateStore(filePath);
+    assert.equal(store2.get(99)?.failedAwaitingRetry, true);
+  });
+
+  it("defaults missing failedAwaitingRetry to false for old state files", () => {
+    const filePath = join(dir, "old.json");
+    writeFileSync(filePath, JSON.stringify({
+      version: 1,
+      prs: {
+        "7": {
+          ref: { owner: "a", repo: "b" },
+          number: 7,
+          rounds: 1,
+          mentionReplies: 0,
+          repliedCommentIds: [],
+          maxRoundsNotified: false,
+          progressCommentId: null,
+          consecutiveFailures: 2,
+          lastUpdatedAt: new Date().toISOString(),
+          // failedAwaitingRetry intentionally absent
+        },
+      },
+    }));
+    const store = new PRStateStore(filePath);
+    assert.equal(store.get(7)?.failedAwaitingRetry, false);
   });
 });

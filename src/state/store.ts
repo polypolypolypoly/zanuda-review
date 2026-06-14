@@ -27,8 +27,8 @@ export interface PRState {
    * Passed to round 2 so it can update in place instead of creating a second comment. */
   progressCommentId: number | null;
   /**
-   * Consecutive review failures. Reset to 0 on success. Used to detect
-   * permanently failing PRs (e.g. always produces truncated JSON output).
+   * Consecutive review failures. Reset to 0 on success.
+   * Kept for diagnostics — no longer used to drive automatic retry logic.
    */
   consecutiveFailures: number;
   /**
@@ -37,6 +37,12 @@ export interface PRState {
    * value — i.e. until the author pushes new commits.
    */
   lastReviewedHeadSha: string | null;
+  /**
+   * Set to true after a review attempt fails. Poller will not retry
+   * automatically; it waits for an @reviewer retry comment to clear this flag
+   * and let the next poll tick pick the PR up again.
+   */
+  failedAwaitingRetry: boolean;
   /** Wall-clock time of last write; used to prune stale entries on load. */
   lastUpdatedAt: string;
 }
@@ -174,10 +180,11 @@ export class PRStateStore {
       map.set(Number(key), {
         ...s,
         repliedCommentIds: new Set(s.repliedCommentIds),
-        // Default for existing state files that predate this field.
+        // Defaults for fields added after initial release.
         progressCommentId: s.progressCommentId ?? null,
         consecutiveFailures: s.consecutiveFailures ?? 0,
         lastReviewedHeadSha: s.lastReviewedHeadSha ?? null,
+        failedAwaitingRetry: s.failedAwaitingRetry ?? false,
       });
     }
 
