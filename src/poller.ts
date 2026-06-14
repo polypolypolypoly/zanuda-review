@@ -276,7 +276,7 @@ async function pollReviewRequests(opts: {
           rounds: nextRound,
           mentionReplies: state?.mentionReplies ?? 0,
           repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-          maxRoundsNotified: false,
+          maxRoundsNotified: nextRound >= MAX_REVIEW_ROUNDS,
           progressCommentId: null,
           consecutiveFailures: 0,
           lastReviewedHeadSha: result.headSha,
