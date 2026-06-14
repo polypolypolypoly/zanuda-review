@@ -26,13 +26,14 @@ export const ReviewResultSchema = z.object({
   summary: z.string().describe("Overall assessment, 1-4 sentences."),
   action: z
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
+    .catch("COMMENT") // model occasionally returns a non-enum value; fall back to the safest action
     .describe(
       "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings or observations.",
     ),
   filesSummary: z
     .array(FileSummarySchema)
     .describe("One entry per changed file."),
-  comments: z.array(ReviewCommentSchema),
+  comments: z.array(ReviewCommentSchema).default([]),
 });
 
 export type FileSummary = z.infer<typeof FileSummarySchema>;
