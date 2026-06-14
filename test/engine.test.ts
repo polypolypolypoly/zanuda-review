@@ -724,17 +724,17 @@ describe("buildReviewCommentBody", () => {
     assert.ok(!text.includes("What this PR does"));
   });
 
-  it("includes a horizontal rule separator between verdict and prSummary", () => {
+  it("prSummary section has subheader above it", () => {
     const result = {
       ...makeResult("COMMENT", "Observations."),
       prSummary: "Refactors the auth middleware.",
     };
     const text = buildReviewCommentBody(result, 1);
-    // The separator must appear between the verdict and prSummary
+    // The subheader must appear between verdict and prSummary content
     const verdictIdx = text.indexOf("💬");
-    const hrIdx = text.indexOf("---");
+    const subheaderIdx = text.indexOf("What this PR does");
     const summaryIdx = text.indexOf("Refactors the auth");
-    assert.ok(hrIdx > verdictIdx, "separator should follow verdict");
-    assert.ok(summaryIdx > hrIdx, "prSummary should follow separator");
+    assert.ok(subheaderIdx > verdictIdx, "subheader should follow verdict");
+    assert.ok(summaryIdx > subheaderIdx, "prSummary should follow subheader");
   });
 });
