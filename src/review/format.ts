@@ -73,13 +73,19 @@ export function buildReviewCommentBody(
     ? " · ⚠️ diff truncated (PR too large — review may be incomplete)"
     : "";
 
-  const parts: string[] = [
+  const parts: string[] = [];
+
+  if (result.prSummary) {
+    parts.push(`**What this PR does**`, ``, result.prSummary, ``, `---`, ``);
+  }
+
+  parts.push(
     `${icon} **Review complete** · ${label}`,
     ``,
     result.summary,
     ``,
     `<sub>${scope}${inlineCount > 0 ? ` · ${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}` : ""}${truncationNote}</sub>`,
-  ];
+  );
 
   if (result.filesSummary.length > 0) {
     parts.push(

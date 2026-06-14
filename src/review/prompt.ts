@@ -14,6 +14,7 @@ function outputInstructions(forAllFiles: boolean): string {
   return `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
+  "prSummary": "string — short neutral description of what this PR does (round 1 only; empty string in round 2)",
   "summary": "string — overall assessment, 1-4 sentences",
   "action": "APPROVE|REQUEST_CHANGES|COMMENT",   // your recommendation to human reviewers
   "filesSummary": [
@@ -227,7 +228,11 @@ function round1TaskInstructions(
   structured = false,
 ): string {
   return (
-    `## Your task\nReview the diff above using the project context and your instructions.\n` +
+    `## Your task\n` +
+    `Review the diff above using the project context and your instructions.\n\n` +
+    `Also fill in \`prSummary\`: 1\u20133 sentences describing what this PR does in plain English — ` +
+    `not a review, just a neutral description of the change from the author's perspective. ` +
+    `Derive it from the diff, PR title, and description.\n` +
     (structured ? "" : outputInstructions(forAllFiles))
   );
 }
@@ -245,7 +250,8 @@ function finalTaskInstructions(
     `  REQUEST_CHANGES  — unresolved blockers remain; you recommend not merging yet.\n` +
     `  COMMENT          — observations only or minor issues; author decides.\n\n` +
     `When using REQUEST_CHANGES or COMMENT, your summary must clearly state what\n` +
-    `still needs fixing and why. Be specific and direct.\n` +
+    `still needs fixing and why. Be specific and direct.\n\n` +
+    `Set \`prSummary\` to an empty string — it is not needed for round 2.\n` +
     (structured ? "" : outputInstructions(forAllFiles))
   );
 }
