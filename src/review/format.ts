@@ -74,16 +74,16 @@ export function buildReviewCommentBody(
     : "";
 
   const parts: string[] = [
-    `${icon} **Review complete** · ${label}`,
-    ``,
-    result.summary,
-    ``,
     `<sub>${scope}${inlineCount > 0 ? ` · ${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}` : ""}${truncationNote}</sub>`,
+    "",
+    `${icon} **Review complete** · ${label}`,
   ];
 
   if (result.prSummary) {
-    parts.push(``, `---`, ``, `**What this PR does**`, ``, result.prSummary);
+    parts.push("", `**What this PR does**`, "", result.prSummary);
   }
+
+  parts.push("", `**Observations**`, "", result.summary);
 
   if (result.filesSummary.length > 0) {
     parts.push(
