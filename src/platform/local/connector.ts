@@ -173,7 +173,11 @@ export class LocalConnector implements SCMConnector {
 
   // ── Private helpers ──────────────────────────────────────────────────────────
 
+  /** Cache for stdin read — getDiff and getChangedFiles both call it. */
+  private _stdinDiff: string | undefined;
+
   private getDiff(): string {
+    if (this.diffRef === "-") return this._readStdin();
     if (this.diffRef === "staged") {
       const staged = git(this.repoPath, ["diff", "--cached", "--unified=5"]);
       if (staged.trim()) return staged;
@@ -187,6 +191,9 @@ export class LocalConnector implements SCMConnector {
   }
 
   private getChangedFiles(): string[] {
+    if (this.diffRef === "-") {
+      return parseStdinFilenames(this._readStdin());
+    }
     if (this.diffRef === "staged") {
       const out = git(this.repoPath, ["diff", "--cached", "--name-only"]);
       if (out.trim()) return out.split("\n").filter(Boolean);
@@ -200,6 +207,9 @@ export class LocalConnector implements SCMConnector {
   }
 
   private getCommitInfo(): { title: string; body: string } {
+    if (this.diffRef === "-") {
+      return { title: "Diff from stdin", body: "" };
+    }
     if (this.diffRef === "staged") {
       return {
         title: "Staged changes",
@@ -220,6 +230,14 @@ export class LocalConnector implements SCMConnector {
     } catch {
       return { title: `Changes since ${this.diffRef}`, body: "" };
     }
+  }
+
+  /** Read stdin once and cache — getDiff and getChangedFiles both call this. */
+  private _readStdin(): string {
+    if (this._stdinDiff === undefined) {
+      this._stdinDiff = readFileSync("/dev/stdin", "utf8");
+    }
+    return this._stdinDiff;
   }
 }
 
@@ -294,6 +312,20 @@ function parseUnifiedDiffFiles(
     }
     return { filename, additions, deletions, patch };
   });
+}
+
+// ── Stdin helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Extract filenames from a unified diff read from stdin.
+ * Matches "diff --git a/path b/path" headers.
+ */
+function parseStdinFilenames(diff: string): string[] {
+  const matches = [...diff.matchAll(/^diff --git a\/.+? b\/(.+)$/gm)];
+  if (matches.length > 0) return matches.map((m) => m[1]!);
+  // No recognized file headers — return a synthetic entry so the review
+  // doesn't break.
+  return ["stdin"];
 }
 
 // ── Git helper ────────────────────────────────────────────────────────────────

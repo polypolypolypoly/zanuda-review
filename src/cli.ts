@@ -27,6 +27,9 @@ async function main(): Promise<void> {
       diff: { type: "string" },
       output: { type: "string" },
       round: { type: "string" },
+      "no-memory": { type: "boolean", default: false },
+      model: { type: "string" },
+      casual: { type: "boolean", default: false },
     },
     allowPositionals: true,
     strict: true,
@@ -43,9 +46,22 @@ async function runLocalReview(
   values: Record<string, string | boolean | undefined>,
 ): Promise<void> {
   const dryRun = values["dry-run"] === true;
+  const noMemory = values["no-memory"] === true;
+  const casual = values["casual"] === true;
   const diffFlag = typeof values.diff === "string" ? values.diff : undefined;
   const outputFlag =
     typeof values.output === "string" ? values.output : undefined;
+  const modelOverride =
+    typeof values.model === "string" ? values.model : undefined;
+
+  const config = loadConfig();
+  if (noMemory) config.memory.enabled = false;
+  if (modelOverride) config.models[config.provider] = modelOverride;
+  if (casual) {
+    config.preprompt =
+      config.preprompt +
+      `\n\n## Casual mode\nThis is a quick sanity check, not a formal review. Be concise — focus on:\n- Obvious bugs, logic errors, or typos\n- Things that would definitely break\n- One sentence per issue is enough\nSkip stylistic opinions, minor best-practice nits, and suggestions for tests\nunless something is actually broken.`;
+  }
 
   const connector = new LocalConnector({
     diffRef: diffFlag ?? "staged",
@@ -58,7 +74,7 @@ async function runLocalReview(
   };
 
   const result = await reviewPullRequest(
-    { connector, baseConfig: loadConfig() },
+    { connector, baseConfig: config },
     ref,
     0,
     { dryRun },
@@ -83,7 +99,7 @@ async function runRemoteReview(
     console.error(
       "Usage:\n" +
         "  zanuda owner/repo#123 [--dry-run] [--round=1|2]   # remote PR review\n" +
-        "  zanuda --local [--diff <ref>] [--output <file>]   # local review",
+        "  zanuda --local [--diff <ref>] [--output <file>] [--model <id>] [--no-memory] [--casual]",
     );
     process.exit(2);
   }
