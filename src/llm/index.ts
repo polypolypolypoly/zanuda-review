@@ -2,6 +2,7 @@ import type { Config } from "../config.js";
 import { AnthropicProvider } from "./anthropic.js";
 import {
   deepseekProvider,
+  geminiProvider,
   ollamaProvider,
   openAIProvider,
   openRouterProvider,
@@ -46,6 +47,8 @@ function _buildProvider(provider: Config["provider"]): LLMProvider {
       return ollamaProvider();
     case "deepseek":
       return deepseekProvider();
+    case "gemini":
+      return geminiProvider();
 
     // ── Add new providers here ────────────────────────────────────────────
     // 1. Copy src/llm/stub.ts → src/llm/<name>.ts and implement complete().
