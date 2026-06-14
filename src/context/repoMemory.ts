@@ -90,8 +90,15 @@ must keep in mind to avoid false positives or missing real bugs.
 ## Entry points & flow
 Main entry files, how the app starts, key data/execution flows.
 
+## Reviewer calibration
+Code patterns, decisions, or conventions that may look like bugs or
+anti-patterns to a reviewer but are intentional — things NOT to flag.
+Each entry: one sentence describing the pattern + why it exists.
+Leave this section empty on initial generation; entries are added over time
+as review discussions confirm intentional patterns.
+
 Rules:
-- 3-8 bullet points or short paragraphs per section.
+- 3-8 bullet points or short paragraphs per section (calibration may be empty).
 - Be specific: name actual files, functions, types where relevant.
 - No filler sentences. Start with "## Architecture" directly.`;
 
@@ -177,23 +184,40 @@ const UPDATE_SYSTEM = `\
 You are maintaining a knowledge document for an AI code reviewer.
 A PR was just reviewed. Decide whether the memory document needs updating.
 
-Update if — and only if — the PR reveals something genuinely NEW:
+The document has two categories of content that may need updating:
+
+## CATEGORY 1 — Codebase knowledge (driven by the diff)
+Update if the PR reveals something genuinely new:
   - New modules, layers, or significant architectural change
   - New or removed dependencies that affect how the project works
   - New code style patterns or conventions introduced by this PR
-  - New invariants or gotchas uncovered by the review (e.g. a bug was found
-    that reveals a wrong assumption baked into the architecture)
+  - New invariants or gotchas uncovered by the review
 
 Do NOT update for:
   - Routine feature additions that fit existing patterns
   - Bugfixes that don't change how the project is structured
   - Anything already captured in the current memory
 
+## CATEGORY 2 — Reviewer calibration (driven by the discussion)
+Update the "Reviewer calibration" section when the discussion shows the reviewer
+flagged something that was intentional — i.e. the developer replied with an
+explanation rather than a code fix.
+
+For each such dismissed comment add one bullet:
+  - What the pattern is, why it is intentional, and a PR reference.
+  - Example: "Do not flag bare \`except\` in worker.py — intentional to keep the
+    supervisor loop alive on unexpected errors (PR #47)."
+
+Only add entries for DISMISSED comments (developer explained, no code change).
+Do NOT add entries for comments that were addressed with a code fix.
+If no discussion is provided, skip Category 2 entirely.
+
 Respond with a JSON object — nothing else, no markdown fences:
   { "update": false }
-    — if no update is needed.
+    — if no update is needed in either category.
   { "update": true, "content": "<complete updated memory document>" }
-    — if an update is needed. Keep all sections; update the "Updated:" date line.`;
+    — if an update is needed. Keep ALL existing sections intact;
+      update the "Updated:" date line.`;
 
 /**
  * After a review, ask the model whether the PR revealed anything worth
@@ -203,9 +227,11 @@ export async function maybeUpdateRepoMemory(
   ref: RepoRef,
   currentMemory: string,
   prTitle: string,
+  prNumber: number,
   changedFiles: string[],
   reviewSummary: string,
   diff: string,
+  discussion: string | undefined,
   config: Config,
   provider: LLMProvider,
 ): Promise<string | null> {
@@ -213,7 +239,7 @@ export async function maybeUpdateRepoMemory(
 
   const log = logger.child({ repo: `${ref.owner}/${ref.repo}` });
 
-  const user = [
+  const parts = [
     `Repository: ${ref.owner}/${ref.repo}`,
     "",
     "## Current memory document",
@@ -221,12 +247,26 @@ export async function maybeUpdateRepoMemory(
     "",
     "## PR just reviewed",
     `Title: ${prTitle}`,
+    `Number: #${prNumber}`,
     `Changed files: ${changedFiles.join(", ")}`,
     `Review summary: ${reviewSummary}`,
     "",
     "## Diff (first 4 000 chars)",
     diff.slice(0, 4000),
-  ].join("\n");
+  ];
+
+  if (discussion) {
+    // ZlayaZanuda = the reviewer; other authors = the developer.
+    // Dismissed comments appear as: reviewer flags something, developer
+    // replies with an explanation, no subsequent code fix.
+    parts.push(
+      "",
+      "## Review discussion (ZlayaZanuda = reviewer; other authors = developer)",
+      discussion,
+    );
+  }
+
+  const user = parts.join("\n");
 
   const completion = await completeWithRetry(provider, {
     system: UPDATE_SYSTEM,

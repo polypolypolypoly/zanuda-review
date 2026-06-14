@@ -310,20 +310,26 @@ export async function reviewPullRequest(
       (sum, f) => sum + f.additions + f.deletions,
       0,
     );
+    // Always run the update check when we have a round-2 discussion — even a
+    // tiny PR can yield calibration notes if the developer pushed back on a
+    // comment. For round-1 reviews with no discussion, keep the line threshold
+    // to avoid a pointless LLM call that almost always returns {update: false}.
     const MEMORY_UPDATE_MIN_LINES = 100;
     if (
       config.memory.enabled &&
       repoMemory &&
-      totalChangedLines >= MEMORY_UPDATE_MIN_LINES
+      (discussion !== undefined || totalChangedLines >= MEMORY_UPDATE_MIN_LINES)
     ) {
       try {
         const updated = await maybeUpdateRepoMemory(
           ref,
           repoMemory,
           pr.title,
+          number,
           pr.changedFiles,
           result.summary,
           pr.diff,
+          discussion,
           config,
           provider,
         );
