@@ -119,17 +119,3 @@ export function deepseekProvider(): LLMProvider {
     jsonMode: "json_object",
   });
 }
-
-export function geminiProvider(): LLMProvider {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
-  // Gemini's OpenAI-compatible endpoint supports json_object mode.
-  // json_schema strict mode availability varies — use json_object
-  // and let the prompt carry the format instructions.
-  return new OpenAICompatibleProvider({
-    name: "gemini",
-    apiKey,
-    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
-    jsonMode: "json_object",
-  });
-}

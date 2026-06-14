@@ -8,7 +8,7 @@
 # ─────────────────────────────────────────────────────────────────────
 
 # Which model-agnostic provider to use. Overridable via LLM_PROVIDER env.
-#   anthropic | openai | openrouter | ollama | deepseek | gemini
+#   anthropic | openai | openrouter | ollama | deepseek
 provider: anthropic
 
 # Per-provider model id. The active provider's entry is used unless the
@@ -19,7 +19,6 @@ models:
   openrouter: anthropic/claude-opus-4-8
   ollama: qwen2.5:3b
   deepseek: deepseek-chat
-  gemini: gemini-2.5-flash
 
 # Generation parameters passed to every provider.
 generation:
