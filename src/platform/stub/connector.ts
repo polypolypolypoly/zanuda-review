@@ -51,7 +51,8 @@ export class StubConnector implements SCMConnector {
    * lifetime of the PR — it is used as the key for round and mention tracking.
    *
    * Implementation hints:
-   * - GitHub: search API with `is:pr is:open review-requested:<reviewerLogin>`
+   * - GitHub: search API with `is:pr is:open is:unmerged -is:draft review-requested:<reviewerLogin>`
+   *   (draft PRs are intentionally excluded — review only triggers once a PR is ready)
    * - GitLab: GET /api/v4/merge_requests?reviewer_username=<reviewerLogin>&state=opened
    * - Bitbucket: GET /2.0/pullrequests/<workspace>?q=reviewers.nickname="<reviewerLogin>"
    *

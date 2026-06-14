@@ -63,6 +63,27 @@ describe("GitHubConnector.pollPendingReviews", () => {
       },
     ]);
   });
+
+  it("excludes draft PRs from search query", async () => {
+    let capturedQuery: string | undefined;
+    const octokit = {
+      rest: {
+        search: {
+          issuesAndPullRequests: async (params: { q: string }) => {
+            capturedQuery = params.q;
+            return { data: { items: [] } };
+          },
+        },
+      },
+    } as unknown as Octokit;
+
+    await new GitHubConnector(octokit).pollPendingReviews("zanuda-bot");
+
+    assert.ok(
+      capturedQuery?.includes("-is:draft"),
+      "query must exclude draft PRs to prevent wasted review cycles",
+    );
+  });
 });
 
 describe("replyToComment: thread root ID resolution", () => {

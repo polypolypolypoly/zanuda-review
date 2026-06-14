@@ -27,9 +27,10 @@ The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If y
 2. Optionally commit `.zanuda/config.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
 3. Open a PR and request a review from Zanuda. That's it.
 
-**Want reviews requested automatically on every PR?** Pick one:
-- **CODEOWNERS** - add `* @YourReviewerAccount` to `.github/CODEOWNERS`. GitHub requests a review on every opened PR automatically.
-- **GitHub Actions** - copy `deploy/auto-review.yml.example` to `.github/workflows/zanuda-review.yml`. Skips drafts; triggers when a PR is marked ready for review.
+**Automatic review requests.** Zanuda skips draft PRs regardless of how the review was requested — it only picks up non-draft, open PRs. Two common setups:
+
+- **GitHub Actions** (recommended) — copy `deploy/auto-review.yml.example` to `.github/workflows/zanuda-review.yml`. Requests Zanuda only when a PR is opened or marked ready, never on drafts.
+- **CODEOWNERS** — add `* @ZlayaZanuda` to `.github/CODEOWNERS`. GitHub auto-requests on every PR including drafts; Zanuda won't act until the PR is marked ready, at which point a review fires automatically with no further human action. Useful for agent-driven or high-throughput repos — be aware that every non-draft PR will trigger a review without anyone explicitly asking for one.
 
 ---
 

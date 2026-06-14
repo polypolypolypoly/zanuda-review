@@ -26,7 +26,7 @@ export class GitHubConnector implements SCMConnector {
 
   async pollPendingReviews(reviewerLogin: string): Promise<PendingReview[]> {
     const { data } = await this.octokit.rest.search.issuesAndPullRequests({
-      q: `is:pr is:open review-requested:${reviewerLogin}`,
+      q: `is:pr is:open is:unmerged -is:draft review-requested:${reviewerLogin}`,
       per_page: 50,
     });
     return data.items.flatMap((item) => {
