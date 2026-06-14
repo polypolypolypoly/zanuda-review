@@ -9,7 +9,7 @@ import type { PromptDiff } from "./diff.js";
  * Escape XML special characters to prevent user content from breaking out of
  * XML sandbox tags.
  */
-function escapeXml(str: string): string {
+export function escapeXml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
