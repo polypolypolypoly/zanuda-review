@@ -123,10 +123,13 @@ export function deepseekProvider(): LLMProvider {
 export function geminiProvider(): LLMProvider {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+  const baseURL =
+    process.env.GEMINI_BASE_URL ??
+    "https://generativelanguage.googleapis.com/v1beta/openai/";
   return new OpenAICompatibleProvider({
     name: "gemini",
     apiKey,
-    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    baseURL,
     jsonMode: "json_object",
   });
 }
