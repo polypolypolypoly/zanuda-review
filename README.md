@@ -15,7 +15,7 @@ No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the o
 
 **Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. If the author pushes fixes and re-requests, round 2 is the final verdict. It also replies to `@mentions` in the PR discussion (up to 5 per PR).
 
-**Providers.** Anthropic, OpenAI, OpenRouter (200+ models), and Ollama for local models. Switch with `LLM_PROVIDER` in `.env`; nothing else changes.
+**Providers.** Anthropic, OpenAI, OpenRouter (200+ models), Ollama (local), DeepSeek, and Gemini. Switch with `LLM_PROVIDER` in `.env`; nothing else changes.
 
 ---
 
@@ -164,18 +164,24 @@ npm run review -- owner/repo#123 --round=2  # run as round 2
 npm run review -- --local                        # review staged changes
 npm run review -- --local --diff main            # diff against main
 npm run review -- --local --diff HEAD~3          # last 3 commits
+npm run review -- --local --diff -               # read diff from stdin
 npm run review -- --local --output review.md     # write to file
+npm run review -- --local --casual               # lighter, concise review
+npm run review -- --local --no-memory            # skip repo memory gen
+npm run review -- --local --model gemini-2.5-flash  # override model
 ```
 Zanuda reads your local diff and `.zanuda/` config, sends it to the configured LLM, and prints the review to stdout (or a file).
 
 ## Models
 
-| Provider     | Env var              | Notes                               |
-| ------------ | -------------------- | ------------------------------------|
-| `anthropic`  | `ANTHROPIC_API_KEY`  | Claude                              |
-| `openai`     | `OPENAI_API_KEY`     | GPT and compatible                  |
-| `openrouter` | `OPENROUTER_API_KEY` | 200+ models                         |
-| `ollama`     | -                    | Local; set `OLLAMA_BASE_URL`        |
+| Provider     | Env var              | Notes                                    |
+| ------------ | -------------------- | -----------------------------------------|
+| `anthropic`  | `ANTHROPIC_API_KEY`  | Claude                                   |
+| `openai`     | `OPENAI_API_KEY`     | GPT and compatible                       |
+| `openrouter` | `OPENROUTER_API_KEY` | 200+ models                              |
+| `ollama`     | -                    | Local; set `OLLAMA_BASE_URL`             |
+| `deepseek`   | `DEEPSEEK_API_KEY`   | DeepSeek-V3, R1; `DEEPSEEK_BASE_URL` opt |
+| `gemini`     | `GEMINI_API_KEY`     | Gemini 2.5 Flash/Pro                     |
 
 ## Tests
 
