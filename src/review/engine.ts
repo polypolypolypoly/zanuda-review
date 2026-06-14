@@ -50,7 +50,11 @@ export async function reviewPullRequest(
   number: number,
   opts: { dryRun?: boolean; round?: number; progressCommentId?: number } = {},
 ): Promise<
-  ReviewResult & { progressCommentId: number | null; stale: boolean }
+  ReviewResult & {
+    progressCommentId: number | null;
+    stale: boolean;
+    headSha: string;
+  }
 > {
   const { connector } = deps;
   const round = opts.round ?? 1;
@@ -86,6 +90,7 @@ export async function reviewPullRequest(
       comments: [],
       progressCommentId: startingCommentId,
       stale: false,
+      headSha: "",
     };
   }
   if (!opts.dryRun) {
@@ -276,7 +281,12 @@ export async function reviewPullRequest(
             )
             .catch(() => undefined);
         }
-        return { ...result, progressCommentId: startingCommentId, stale: true };
+        return {
+          ...result,
+          progressCommentId: startingCommentId,
+          stale: true,
+          headSha: pr.headSha,
+        };
       }
     }
 
@@ -387,7 +397,12 @@ export async function reviewPullRequest(
       }
     }
 
-    return { ...result, progressCommentId: startingCommentId, stale: false };
+    return {
+      ...result,
+      progressCommentId: startingCommentId,
+      stale: false,
+      headSha: pr.headSha,
+    };
   } catch (err) {
     await failSafe(err);
     throw err; // unreachable - failSafe always rethrows; satisfies TypeScript

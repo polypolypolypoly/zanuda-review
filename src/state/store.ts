@@ -31,6 +31,12 @@ export interface PRState {
    * permanently failing PRs (e.g. always produces truncated JSON output).
    */
   consecutiveFailures: number;
+  /**
+   * Head SHA of the PR as it was when the last review round completed.
+   * Round 2 is withheld until the PR's current head SHA differs from this
+   * value — i.e. until the author pushes new commits.
+   */
+  lastReviewedHeadSha: string | null;
   /** Wall-clock time of last write; used to prune stale entries on load. */
   lastUpdatedAt: string;
 }
@@ -170,8 +176,8 @@ export class PRStateStore {
         repliedCommentIds: new Set(s.repliedCommentIds),
         // Default for existing state files that predate this field.
         progressCommentId: s.progressCommentId ?? null,
-        // Default to 0 for existing state files that predate this field.
         consecutiveFailures: s.consecutiveFailures ?? 0,
+        lastReviewedHeadSha: s.lastReviewedHeadSha ?? null,
       });
     }
 
