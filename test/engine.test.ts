@@ -560,6 +560,23 @@ describe("buildUserPrompt: .zanuda/instructions.md injection", () => {
     assert.ok(!prompt.includes("## Repo-specific reviewer guidelines"));
   });
 
+  it("round 1 prompt asks for prSummary", () => {
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
+      round: 1,
+    });
+    assert.ok(prompt.includes("prSummary"));
+  });
+
+  it("round 2 prompt does not ask for prSummary", () => {
+    const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
+      round: 2,
+      discussion: "some discussion",
+    });
+    // Round 2 instructions should tell the model to set prSummary to empty
+    assert.ok(prompt.includes("prSummary"));
+    assert.ok(prompt.includes("empty string"));
+  });
+
   it("appears before project context and task sections", () => {
     const prompt = buildUserPrompt(makePR(), makeContext(), baseConfig, {
       instructions: "My guideline.",
@@ -629,5 +646,47 @@ describe("buildReviewCommentBody", () => {
     const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 1);
     assert.ok(text.includes("<details>"));
     assert.ok(text.includes("src/foo.ts"));
+  });
+
+  // ── prSummary section ───────────────────────────────────────────────────────────
+
+  it("renders prSummary section after the verdict when non-empty", () => {
+    const result = {
+      ...makeResult("APPROVE", "Clean implementation."),
+      prSummary: "Adds a /tr command with persistent language pair storage.",
+    };
+    const text = buildReviewCommentBody(result, 1);
+    assert.ok(text.includes("What this PR does"));
+    assert.ok(text.includes("Adds a /tr command"));
+    // prSummary must appear AFTER the verdict line
+    const summaryIdx = text.indexOf("What this PR does");
+    const verdictIdx = text.indexOf("✅");
+    assert.ok(summaryIdx > verdictIdx, "prSummary should follow the verdict");
+  });
+
+  it("omits prSummary section when prSummary is empty string", () => {
+    const result = { ...makeResult("APPROVE", "ok"), prSummary: "" };
+    const text = buildReviewCommentBody(result, 1);
+    assert.ok(!text.includes("What this PR does"));
+  });
+
+  it("omits prSummary section when prSummary is absent", () => {
+    // makeResult does not include prSummary — simulates round-2 model output
+    const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 1);
+    assert.ok(!text.includes("What this PR does"));
+  });
+
+  it("includes a horizontal rule separator between verdict and prSummary", () => {
+    const result = {
+      ...makeResult("COMMENT", "Observations."),
+      prSummary: "Refactors the auth middleware.",
+    };
+    const text = buildReviewCommentBody(result, 1);
+    // The separator must appear between the verdict and prSummary
+    const verdictIdx = text.indexOf("💬");
+    const hrIdx = text.indexOf("---");
+    const summaryIdx = text.indexOf("Refactors the auth");
+    assert.ok(hrIdx > verdictIdx, "separator should follow verdict");
+    assert.ok(summaryIdx > hrIdx, "prSummary should follow separator");
   });
 });

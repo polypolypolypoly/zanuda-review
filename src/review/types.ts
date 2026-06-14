@@ -55,6 +55,12 @@ function filterValidItems<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
 // When any top-level fallback fires, parseReviewResult logs a warning with
 // the first 300 chars of the raw response so the occurrence is debuggable.
 export const ReviewResultSchema = z.object({
+  prSummary: z
+    .string()
+    .default("")
+    .describe(
+      "Short neutral description of what this PR does — 1-3 sentences from the author's perspective (what changed and why). Not a review assessment. Round 1 only; omit in round 2.",
+    ),
   summary: z.string().catch("").describe("Overall assessment, 1-4 sentences."),
   action: z
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
@@ -87,9 +93,11 @@ export type ReviewResult = z.infer<typeof ReviewResultSchema>;
  */
 export const REVIEW_RESULT_JSON_SCHEMA: Record<string, unknown> = {
   type: "object",
+  // prSummary is intentionally NOT in required — round 2 should omit it.
   required: ["summary", "action", "filesSummary", "comments"],
   additionalProperties: false,
   properties: {
+    prSummary: { type: "string" },
     summary: { type: "string" },
     action: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"] },
     filesSummary: {

@@ -86,6 +86,7 @@ export async function reviewPullRequest(
         .catch(() => undefined);
     }
     return {
+      prSummary: "",
       summary: `PR is ${pr.state}.`,
       action: "COMMENT",
       filesSummary: [],

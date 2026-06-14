@@ -81,6 +81,10 @@ export function buildReviewCommentBody(
     `<sub>${scope}${inlineCount > 0 ? ` · ${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}` : ""}${truncationNote}</sub>`,
   ];
 
+  if (result.prSummary) {
+    parts.push(``, `---`, ``, `**What this PR does**`, ``, result.prSummary);
+  }
+
   if (result.filesSummary.length > 0) {
     parts.push(
       ``,
