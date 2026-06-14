@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { basename } from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.js";
 import { buildContext } from "./context/builder.js";
@@ -81,7 +82,7 @@ async function runLocalReview(
 
   const ref = {
     owner: "local",
-    repo: process.cwd().split("/").pop() ?? "repo",
+    repo: basename(process.cwd()) || "repo",
   };
 
   const result = await reviewPullRequest(
@@ -100,7 +101,7 @@ async function runLocalReview(
   }
 }
 
-async function runSpawn(
+export async function runSpawn(
   values: Record<string, string | boolean | undefined>,
 ): Promise<void> {
   const modelOverride =
@@ -110,7 +111,7 @@ async function runSpawn(
   config.memory.enabled = true;
   if (modelOverride) config.models[config.provider] = modelOverride;
 
-  const repoName = process.cwd().split("/").pop() ?? "repo";
+  const repoName = basename(process.cwd()) || "repo";
   const ref = { owner: "local", repo: repoName };
 
   const connector = new LocalConnector();
@@ -125,12 +126,12 @@ async function runSpawn(
   );
 
   const memory = await generateRepoMemory(ref, context, config, provider);
-  saveRepoMemory(config, ref, memory);
+  const savedPath = saveRepoMemory(config, ref, memory);
 
   const log = logger.child({ repo: repoName });
   log.info("Repo memory generated via --spawn");
 
-  process.stderr.write(`Saved to ~/.zanuda/memory/local_${repoName}.md\n\n`);
+  process.stderr.write(`Saved to ${savedPath}\n\n`);
   process.stdout.write(memory + "\n");
 }
 

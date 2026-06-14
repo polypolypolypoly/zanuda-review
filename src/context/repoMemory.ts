@@ -45,8 +45,8 @@ export function saveRepoMemory(
   config: Config,
   ref: RepoRef,
   content: string,
-): void {
-  if (!config.memory.enabled) return;
+): string {
+  if (!config.memory.enabled) return "";
   const dir = memoryDir(config);
   mkdirSync(dir, { recursive: true });
   const path = memoryPath(config, ref);
@@ -57,6 +57,7 @@ export function saveRepoMemory(
   writeFileSync(tmp, content, "utf8");
   renameSync(tmp, path);
   logger.info({ path }, "Repo memory saved");
+  return path;
 }
 
 // ─── In-process generation lock ─────────────────────────────────────────────
