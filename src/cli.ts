@@ -1,6 +1,10 @@
 import "dotenv/config";
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.js";
+import { buildContext } from "./context/builder.js";
+import { generateRepoMemory, saveRepoMemory } from "./context/repoMemory.js";
+import { createProvider } from "./llm/index.js";
+import { logger } from "./logger.js";
 import { createConnector, LocalConnector } from "./platform/index.js";
 import { reviewPullRequest } from "./review/engine.js";
 
@@ -17,6 +21,10 @@ import { reviewPullRequest } from "./review/engine.js";
  *   zanuda --local --diff main            # review diff against main
  *   zanuda --local --diff HEAD~3          # review last 3 commits
  *   zanuda --local --output review.md     # write to file instead of stdout
+ *
+ * Repo memory scan (initial snapshot):
+ *   zanuda --spawn                        # scan repo, generate memory, print + save
+ *   zanuda --spawn --model qwen2.5:14b    # use a specific model for the scan
  */
 async function main(): Promise<void> {
   const { values, positionals } = parseArgs({
@@ -30,12 +38,15 @@ async function main(): Promise<void> {
       "no-memory": { type: "boolean", default: false },
       model: { type: "string" },
       casual: { type: "boolean", default: false },
+      spawn: { type: "boolean", default: false },
     },
     allowPositionals: true,
     strict: true,
   });
 
-  if (values.local) {
+  if (values.spawn) {
+    await runSpawn(values);
+  } else if (values.local) {
     await runLocalReview(values);
   } else {
     await runRemoteReview(positionals, values);
@@ -87,6 +98,40 @@ async function runLocalReview(
       `Review complete — ${result.comments.length} inline comment(s).\n`,
     );
   }
+}
+
+async function runSpawn(
+  values: Record<string, string | boolean | undefined>,
+): Promise<void> {
+  const modelOverride =
+    typeof values.model === "string" ? values.model : undefined;
+
+  const config = loadConfig();
+  config.memory.enabled = true;
+  if (modelOverride) config.models[config.provider] = modelOverride;
+
+  const repoName = process.cwd().split("/").pop() ?? "repo";
+  const ref = { owner: "local", repo: repoName };
+
+  const connector = new LocalConnector();
+  const provider = createProvider(config.provider);
+
+  process.stderr.write(`Scanning ${repoName}...\n`);
+  const context = await buildContext(connector, ref, "HEAD", config);
+
+  const fileCount = context.text.match(/<file path=/g)?.length ?? 0;
+  process.stderr.write(
+    `Generating memory from ${fileCount} context file(s)...\n`,
+  );
+
+  const memory = await generateRepoMemory(ref, context, config, provider);
+  saveRepoMemory(config, ref, memory);
+
+  const log = logger.child({ repo: repoName });
+  log.info("Repo memory generated via --spawn");
+
+  process.stderr.write(`Saved to ~/.zanuda/memory/local_${repoName}.md\n\n`);
+  process.stdout.write(memory + "\n");
 }
 
 async function runRemoteReview(

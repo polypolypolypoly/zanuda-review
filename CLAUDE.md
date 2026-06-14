@@ -88,6 +88,7 @@ npm run build         # tsc compile → dist/
 npm start             # node dist/index.js (prod)
 npm run review -- owner/repo#123 [--dry-run] [--round=2]  # remote PR review
 npm run review -- --local [--diff <ref>] [--casual] [--no-memory] [--model <id>]  # local review
+npm run review -- --spawn [--model <id>]                                         # initial memory scan
 npm test              # node --test
 ```
 
