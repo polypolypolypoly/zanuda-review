@@ -48,6 +48,10 @@ export async function postReview(
     : buildReviewCommentBody(result, pr.changedFiles.length);
 
   if (!config.review.inlineComments || result.comments.length === 0) {
+    // If the summary was already posted in the progress comment and there are
+    // no inline comments to anchor, there is nothing left to post — a review
+    // with an empty body and no comments is rejected by GitHub with a 422.
+    if (!body) return;
     await octokit.pulls.createReview({
       ...pr.ref,
       pull_number: pr.number,
