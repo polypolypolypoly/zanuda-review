@@ -27,7 +27,12 @@ const baseConfig: Config = {
   persistence: { stateFile: "" },
   access: { allowlist: [] },
   limits: { maxConcurrentReviews: 3, maxNewPrsPerCycle: 5 },
-  memory: { enabled: true, dir: "", updateAfterReview: true },
+  memory: {
+    enabled: true,
+    dir: "",
+    updateAfterReview: true,
+    maxHistoryEntries: 20,
+  },
   context: {
     includeFiles: ["README.md"],
     maxFileChars: 1000,

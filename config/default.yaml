@@ -149,6 +149,8 @@ memory:
   dir: ""
   # After posting a review, ask the model if the memory should be updated.
   updateAfterReview: true
+  # Maximum number of past review entries to keep in the per-repo history log.
+  maxHistoryEntries: 20
 
 # ─── Context building ────────────────────────────────────────────────
 # Controls what repository context is gathered and fed to the model

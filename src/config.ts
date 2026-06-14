@@ -55,6 +55,8 @@ const ConfigSchema = z.object({
     dir: z.string(),
     /** After every review, ask the model if the memory should be updated. */
     updateAfterReview: z.boolean(),
+    /** Maximum number of past review entries to keep in the per-repo history log. */
+    maxHistoryEntries: z.number().int().positive(),
   }),
   review: z.object({
     maxDiffChars: z.number().int().positive(),
