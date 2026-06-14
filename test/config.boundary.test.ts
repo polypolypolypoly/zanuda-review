@@ -30,6 +30,8 @@ const baseConfig: Config = {
     openai: "gpt-4o",
     openrouter: "r",
     ollama: "q",
+    deepseek: "deepseek-chat",
+    gemini: "gemini-2.5-flash",
   },
   generation: { temperature: 0.2, maxTokens: 4096 },
   preprompt: "You are a reviewer.",
@@ -191,6 +193,8 @@ describe("RepoConfigSchema: provider values", () => {
       "openai",
       "openrouter",
       "ollama",
+      "deepseek",
+      "gemini",
     ] as const) {
       const r = RepoConfigSchema.safeParse({ provider });
       assert.ok(r.success, `expected "${provider}" to be valid`);
@@ -198,7 +202,7 @@ describe("RepoConfigSchema: provider values", () => {
   });
 
   it("rejects unknown provider value", () => {
-    const r = RepoConfigSchema.safeParse({ provider: "gemini" });
+    const r = RepoConfigSchema.safeParse({ provider: "nonexistent" });
     assert.ok(!r.success);
   });
 });
@@ -257,6 +261,8 @@ describe("mergeRepoConfig: property-based", () => {
     fc.constant("openai" as const),
     fc.constant("openrouter" as const),
     fc.constant("ollama" as const),
+    fc.constant("deepseek" as const),
+    fc.constant("gemini" as const),
   );
 
   it("null overlay is always identity — for any base config shape", () => {

@@ -10,7 +10,7 @@ import type {
  * OpenAI, OpenRouter, Ollama, and DeepSeek all speak this protocol — they
  * differ only in base URL, auth, and structured-output capability.
  */
-class OpenAICompatibleProvider implements LLMProvider {
+export class OpenAICompatibleProvider implements LLMProvider {
   readonly name: string;
   readonly supportsStructuredOutput: boolean;
   private client: OpenAI;
@@ -108,12 +108,28 @@ export function ollamaProvider(): LLMProvider {
 export function deepseekProvider(): LLMProvider {
   const apiKey = process.env.DEEPSEEK_API_KEY;
   if (!apiKey) throw new Error("DEEPSEEK_API_KEY is not set");
+  const baseURL =
+    process.env.DEEPSEEK_BASE_URL ?? "https://api.deepseek.com/v1";
   // DeepSeek supports json_object mode but NOT json_schema strict mode.
   // json_object guarantees valid JSON while the prompt carries the schema.
   return new OpenAICompatibleProvider({
     name: "deepseek",
     apiKey,
-    baseURL: "https://api.deepseek.com/v1",
+    baseURL,
+    jsonMode: "json_object",
+  });
+}
+
+export function geminiProvider(): LLMProvider {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not set");
+  // Gemini's OpenAI-compatible endpoint supports json_object mode.
+  // json_schema strict mode availability varies — use json_object
+  // and let the prompt carry the format instructions.
+  return new OpenAICompatibleProvider({
+    name: "gemini",
+    apiKey,
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
     jsonMode: "json_object",
   });
 }
