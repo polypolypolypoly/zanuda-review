@@ -7,6 +7,8 @@ import type {
 
 export class AnthropicProvider implements LLMProvider {
   readonly name = "anthropic";
+  /** tool_use with input_schema provides full JSON Schema enforcement. */
+  readonly supportsStructuredOutput = true;
   private client: Anthropic;
 
   constructor(apiKey = process.env.ANTHROPIC_API_KEY) {

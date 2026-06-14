@@ -31,6 +31,14 @@ export class StubProvider implements LLMProvider {
    */
   readonly name = "stub";
 
+  /**
+   * Whether this provider can enforce JSON Schema at the API level.
+   * Set to true if your API supports tool_use, json_schema strict mode,
+   * or equivalent schema enforcement. When false the engine includes
+   * full output-format instructions in the user prompt.
+   */
+  readonly supportsStructuredOutput = false;
+
   constructor() {
     // Initialise your SDK client here.
     // Read credentials from env vars — never hardcode keys.
