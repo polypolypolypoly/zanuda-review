@@ -1,6 +1,5 @@
 # Every file in this repo requires a review from one of the owners.
-# ZlayaZanuda reviews the code; the humans merge it.
-* @polypolypolypoly @katamarinaki @ZlayaZanuda
+* @polypolypolypoly @katamarinaki
 
 # CI/CD workflows require katamarinaki specifically.
 /.github/workflows/ @katamarinaki
