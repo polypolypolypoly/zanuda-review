@@ -45,25 +45,17 @@ describe("ReviewResultSchema validation", () => {
     assert.deepEqual(result.comments, []);
   });
 
-  it("rejects invalid action enum value", () => {
-    // Invalid action values must fail parsing so we don't silently ship wrong verdicts.
+  it("falls back to COMMENT on invalid action enum value", () => {
+    // .catch("COMMENT") makes the schema resilient: unrecognised values
+    // fall back to the safest action instead of crashing the review.
     const input = {
       summary: "Some summary",
       action: "NITPICK", // not one of APPROVE | REQUEST_CHANGES | COMMENT
       filesSummary: [],
       comments: [],
     };
-    assert.throws(
-      () => ReviewResultSchema.parse(input),
-      (err: unknown) => {
-        const zodErr = err as { issues?: Array<{ path: string[] }> };
-        return (
-          zodErr.issues?.[0]?.path?.[0] === "action" ||
-          (err as Error).message.includes("action")
-        );
-      },
-      "Expected ZodError with action path",
-    );
+    const result = ReviewResultSchema.parse(input);
+    assert.equal(result.action, "COMMENT");
   });
 
   it("accepts all valid action enum values", () => {
