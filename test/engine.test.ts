@@ -129,19 +129,20 @@ describe("parseReviewResult", () => {
     assert.equal(r.action, "COMMENT");
   });
 
-  it("rejects nitpick severity — schema does not allow it", () => {
-    assert.throws(() =>
-      parseReviewResult(
-        JSON.stringify({
-          summary: "ok",
-          action: "COMMENT",
-          filesSummary: [],
-          comments: [
-            { path: "a.ts", line: 1, severity: "nitpick", body: "trivial" },
-          ],
-        }),
-      ),
+  it("drops comment with nitpick severity rather than crashing", () => {
+    // nitpick is not an allowed severity; the item is silently filtered out
+    // so one bad comment does not cause the entire review to fail.
+    const r = parseReviewResult(
+      JSON.stringify({
+        summary: "ok",
+        action: "COMMENT",
+        filesSummary: [],
+        comments: [
+          { path: "a.ts", line: 1, severity: "nitpick", body: "trivial" },
+        ],
+      }),
     );
+    assert.deepEqual(r.comments, []);
   });
 });
 
