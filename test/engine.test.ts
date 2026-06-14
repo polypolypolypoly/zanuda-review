@@ -650,7 +650,7 @@ describe("buildReviewCommentBody", () => {
 
   // ── prSummary section ───────────────────────────────────────────────────────────
 
-  it("renders prSummary section before the verdict when non-empty", () => {
+  it("renders prSummary section after the verdict when non-empty", () => {
     const result = {
       ...makeResult("APPROVE", "Clean implementation."),
       prSummary: "Adds a /tr command with persistent language pair storage.",
@@ -658,10 +658,10 @@ describe("buildReviewCommentBody", () => {
     const text = buildReviewCommentBody(result, 1);
     assert.ok(text.includes("What this PR does"));
     assert.ok(text.includes("Adds a /tr command"));
-    // prSummary must appear BEFORE the verdict line
+    // prSummary must appear AFTER the verdict line
     const summaryIdx = text.indexOf("What this PR does");
     const verdictIdx = text.indexOf("✅");
-    assert.ok(summaryIdx < verdictIdx, "prSummary should precede the verdict");
+    assert.ok(summaryIdx > verdictIdx, "prSummary should follow the verdict");
   });
 
   it("omits prSummary section when prSummary is empty string", () => {
@@ -676,17 +676,17 @@ describe("buildReviewCommentBody", () => {
     assert.ok(!text.includes("What this PR does"));
   });
 
-  it("includes a horizontal rule separator between prSummary and verdict", () => {
+  it("includes a horizontal rule separator between verdict and prSummary", () => {
     const result = {
       ...makeResult("COMMENT", "Observations."),
       prSummary: "Refactors the auth middleware.",
     };
     const text = buildReviewCommentBody(result, 1);
-    // The separator must appear between prSummary and the verdict
+    // The separator must appear between the verdict and prSummary
+    const verdictIdx = text.indexOf("💬");
+    const hrIdx = text.indexOf("---");
     const summaryIdx = text.indexOf("Refactors the auth");
-    const hrIdx = text.indexOf("---", summaryIdx);
-    const verdictIdx = text.indexOf("💬", hrIdx);
-    assert.ok(hrIdx > summaryIdx, "separator should follow prSummary");
-    assert.ok(verdictIdx > hrIdx, "verdict should follow separator");
+    assert.ok(hrIdx > verdictIdx, "separator should follow verdict");
+    assert.ok(summaryIdx > hrIdx, "prSummary should follow separator");
   });
 });
