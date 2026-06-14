@@ -8,7 +8,10 @@
 #
 # Alternatively, add the reviewer account to your .github/CODEOWNERS file:
 #   * @YourZanudaAccount
-# GitHub will then auto-request a review without needing this workflow.
+# GitHub will then auto-request a review on every PR, including drafts.
+# Zanuda skips drafts and fires automatically once the PR is marked ready —
+# no further human action needed. Be aware that every non-draft PR will
+# trigger a review without anyone explicitly requesting one.
 
 name: Request Zanuda review
 
