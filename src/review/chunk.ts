@@ -360,9 +360,12 @@ function splitOversizeSCC(
   const eigenvec = computeDominantEigenvector(laplacian);
 
   // Sort by eigenvector value and find the best capacity-respecting split.
+  // Store the original index (in `indices`) so we can look up adjacency
+  // without fragile double-indexOf round-tripping.
   const indexed = indices.map((fileIdx, i) => ({
     file: files[fileIdx]!,
     value: eigenvec[i]!,
+    origIdx: i, // position in `indices` = position in `adj`
   }));
   indexed.sort((a, b) => a.value - b.value);
 
@@ -387,10 +390,8 @@ function splitOversizeSCC(
     let cutEdges = 0;
     for (let i = 0; i < split; i++) {
       for (let j = split; j < n; j++) {
-        // Find original indices
-        const origI = indices.indexOf(files.indexOf(indexed[i]!.file));
-        const origJ = indices.indexOf(files.indexOf(indexed[j]!.file));
-        if (origI >= 0 && origJ >= 0 && adj[origI]![origJ]) {
+        // Use stored original indices (positions in `indices` = rows/cols in `adj`)
+        if (adj[indexed[i]!.origIdx]![indexed[j]!.origIdx]) {
           cutEdges++;
         }
       }

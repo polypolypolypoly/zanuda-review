@@ -1039,9 +1039,9 @@ function deduplicateFilesSummary(
 ): ReviewResult["filesSummary"] {
   const seen = new Set<string>();
   return summaries.filter((s) => {
-    const entry = s as { path?: string };
-    if (!entry.path || seen.has(entry.path)) return false;
-    seen.add(entry.path);
+    // s is FileSummary (typed by Zod), path is always a string.
+    if (!s.path || seen.has(s.path)) return false;
+    seen.add(s.path);
     return true;
   });
 }
