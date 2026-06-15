@@ -507,6 +507,7 @@ export function adjustedDiffBudget(
 
   // Task instructions + JSON schema description + round boilerplate.
   // Measured from prompt.ts outputInstructions ~= 2500 chars.
+  // Verified by test: "prompt.ts outputInstructions token budget".
   const FIXED_TASK_TOKENS = 700;
 
   const nonDiffTokens =

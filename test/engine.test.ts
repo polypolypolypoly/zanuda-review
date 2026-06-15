@@ -14,7 +14,11 @@ import {
   adjustedDiffBudget,
   parseMaxContextTokens,
 } from "../src/review/engine.ts";
-import { buildUserPrompt, truncate } from "../src/review/prompt.ts";
+import {
+  buildUserPrompt,
+  outputInstructions,
+  truncate,
+} from "../src/review/prompt.ts";
 import { buildReplyUserPrompt } from "../src/review/replyEngine.ts";
 import type { PullRequestData } from "../src/github/pullRequest.ts";
 import type { ProjectContext } from "../src/context/builder.ts";
@@ -402,6 +406,42 @@ describe("parseMaxContextTokens", () => {
     } finally {
       restore("LLM_MAX_CONTEXT_TOKENS", prev);
     }
+  });
+});
+
+// ─── prompt.ts outputInstructions token budget ────────────────────────────────
+// Regression test: FIXED_TASK_TOKENS (700) in engine.ts assumes outputInstructions
+// fits within this budget. If outputInstructions grows past this, the estimate
+// silently under-counts and the context-window pre-flight becomes ineffective.
+
+describe("prompt.ts outputInstructions token budget", () => {
+  const estimateTokens = (text: string): number => Math.ceil(text.length / 3.5);
+
+  it("outputInstructions with suggestions fits within 700 tokens", () => {
+    const text = outputInstructions(true, true, 400);
+    const tokens = estimateTokens(text);
+    assert.ok(
+      tokens <= 700,
+      `outputInstructions(with suggestions) = ${tokens} tokens, exceeds FIXED_TASK_TOKENS=700`,
+    );
+  });
+
+  it("outputInstructions without suggestions fits within 700 tokens", () => {
+    const text = outputInstructions(false, false, 400);
+    const tokens = estimateTokens(text);
+    assert.ok(
+      tokens <= 700,
+      `outputInstructions(without suggestions) = ${tokens} tokens, exceeds FIXED_TASK_TOKENS=700`,
+    );
+  });
+
+  it("outputInstructions with maxed commentChars fits within 700 tokens", () => {
+    const text = outputInstructions(true, true, 1000);
+    const tokens = estimateTokens(text);
+    assert.ok(
+      tokens <= 700,
+      `outputInstructions(maxCommentChars=1000) = ${tokens} tokens, exceeds FIXED_TASK_TOKENS=700`,
+    );
   });
 });
 
