@@ -196,13 +196,7 @@ export class LocalConnector implements SCMConnector {
     ]);
     const staged = this._getStagedDiff();
     if (!staged) return committed || "";
-    if (!committed.trim()) return staged;
-    // Concatenate: committed diff first, then a separator, then staged diff.
-    return (
-      committed.trimEnd() +
-      "\n\n# --- staged (uncommitted) changes below ---\n\n" +
-      staged.trimStart()
-    );
+    return LocalConnector.concatDiffs(committed, staged);
   }
 
   /** Return the staged diff (git diff --cached) or null if nothing is staged. */
@@ -215,6 +209,23 @@ export class LocalConnector implements SCMConnector {
       // exit 1 = there are staged changes — fetch the actual diff.
       return git(this.repoPath, ["diff", "--cached", "--unified=5"]);
     }
+  }
+
+  // ── Pure helpers (extracted for testability) ──────────────────────────────────
+
+  /** Concatenate committed and staged diffs with a separator. */
+  static concatDiffs(committed: string, staged: string): string {
+    if (!committed.trim()) return staged;
+    return (
+      committed.trimEnd() +
+      "\n\n# --- staged (uncommitted) changes below ---\n\n" +
+      staged.trimStart()
+    );
+  }
+
+  /** Deduplicated union of committed and staged file paths. */
+  static unionFiles(committed: string[], staged: string[]): string[] {
+    return [...new Set([...committed, ...staged])];
   }
 
   private getChangedFiles(): string[] {
@@ -237,7 +248,7 @@ export class LocalConnector implements SCMConnector {
       .split("\n")
       .filter(Boolean);
     const staged = this._getStagedChangedFiles();
-    return [...new Set([...committed, ...staged])];
+    return LocalConnector.unionFiles(committed, staged);
   }
 
   /** Return staged changed file paths or empty array if nothing is staged. */
@@ -269,7 +280,7 @@ export class LocalConnector implements SCMConnector {
         "--format=%s%n%b",
       ]);
       const [title, ...rest] = log.trim().split("\n");
-      const hasStaged = this._getStagedDiff() !== null;
+      const hasStaged = this._getStagedChangedFiles().length > 0;
       return {
         title:
           (title ?? `Changes since ${this.diffRef}`) +
