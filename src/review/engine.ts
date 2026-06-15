@@ -853,7 +853,6 @@ async function reviewBatched(
 
   const allComments: ReviewResult["comments"] = [];
   const allFilesSummary: ReviewResult["filesSummary"] = [];
-  let runningSummary = "";
   let finalResult: ReviewResult | null = null;
 
   // ── Token budget ─────────────────────────────────────────────────
@@ -940,7 +939,9 @@ async function reviewBatched(
         batchIndex: i + 1,
         totalBatches: effectiveBatches.length,
         isLastBatch: isLast,
-        runningSummary: runningSummary || undefined,
+        // No running summary: each batch reviews independently.
+        // Cross-batch oversight happens at verdict level (last batch
+        // sees earlier-blocker counts, not lossy text summaries).
         round,
         discussion,
         repoMemory: repoMemory ?? undefined,
@@ -995,26 +996,6 @@ async function reviewBatched(
     // Accumulate comments and file summaries
     allComments.push(...parsed.comments);
     allFilesSummary.push(...parsed.filesSummary);
-
-    // Extract batch findings for the running summary — now a first-class
-    // schema field, no regex fallback needed.
-    const findings = parsed.batchFindings;
-    if (findings) {
-      runningSummary +=
-        `\n## Findings from batch ${i + 1} (${batch.files.map((f) => `\`${f.filename}\``).join(", ")})\n` +
-        `> ⚠️ The above is the previous model's best-effort notes. Verify independently.\n` +
-        `${findings}\n`;
-
-      // Cap total running summary to prevent unbounded prompt growth across
-      // many batches. The batchFindings schema already caps each entry at 600
-      // chars; this is a safety net for the running total.
-      const MAX_RUNNING_SUMMARY_CHARS = 5000;
-      if (runningSummary.length > MAX_RUNNING_SUMMARY_CHARS) {
-        runningSummary =
-          runningSummary.slice(0, MAX_RUNNING_SUMMARY_CHARS) +
-          `\n> _(running summary truncated at ${MAX_RUNNING_SUMMARY_CHARS} chars — earlier findings omitted)_\n`;
-      }
-    }
 
     if (isLast) {
       finalResult = parsed;

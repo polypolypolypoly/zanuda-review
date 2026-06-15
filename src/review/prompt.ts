@@ -418,12 +418,7 @@ export function buildBatchUserPrompt(
     );
   }
 
-  // Running summary from previous batches
-  if (opts.runningSummary) {
-    parts.push(opts.runningSummary, "");
-  }
-
-  // Batch header
+  // Batch header (no running summary — each batch is independent)
   const batchLabel = opts.isLastBatch
     ? `Batch ${opts.batchIndex} of ${opts.totalBatches} (FINAL BATCH)`
     : `Batch ${opts.batchIndex} of ${opts.totalBatches}`;
@@ -446,37 +441,26 @@ function batchTaskInstructions(opts: BatchPromptOpts): string {
   if (isLastBatch) {
     return (
       `## Your task (batch ${batchIndex} of ${totalBatches} — FINAL)\n` +
-      `Review the files above. This is the last batch in a multi-batch review.\n` +
-      `Your findings from previous batches are included above as context.\n` +
-      `The running summary is the previous model's best-effort — verify\n` +
-      `independently, do not assume it is correct.\n\n` +
+      `Review the files above. This is the last batch in a multi-batch review.\n\n` +
       `Produce the FINAL review output:\n` +
       `- Inline comments for issues in this batch's files\n` +
-      `- A final \`action\` verdict that considers findings from ALL batches\n` +
+      `- A final \`action\` verdict that considers whether ANY batch above\n` +
+      `  found blockers (check the progress status in the system prompt)\n` +
       `- A \`summary\` that covers the full PR, not just this batch\n` +
-      `- \`prSummary\` describing what the whole PR does\n\n` +
-      `If previous batches found blockers, your action should reflect that\n` +
-      `even if this batch has none. If all previous batches found nothing and\n` +
-      `this batch is clean: APPROVE.\n` +
+      `- \`prSummary\` describing what the whole PR does\n` +
       (structuredOutput ? "" : outputInstructions(true, false, 400)) // structured output handled at API level
     );
   }
 
   return (
     `## Your task (batch ${batchIndex} of ${totalBatches})\n` +
-    `Review ONLY the files in this batch. Your findings from previous batches ` +
-    `are included above. The running summary is the previous model's\n` +
-    `best-effort — verify independently, do not assume it is correct.\n` +
-    `Do not re-flag issues already noted unless you see ` +
-    `a new manifestation. If you notice something that depends on files in other ` +
-    `batches you cannot see, note it as a question to verify.\n\n` +
+    `Review ONLY the files in this batch. You are reviewing in isolation.\n` +
+    `If you notice something that depends on files in other batches you\n` +
+    `cannot see, do not flag it — you cannot verify it.\n\n` +
     `Produce:\n` +
-    `- Inline comments for issues in these files (use the format below)\n` +
-    `- A \`batchFindings\` summary (2-4 sentences) describing key issues found\n` +
-    `  in this batch, for the next batch to read as context\n` +
+    `- Inline comments for issues you can verify in these files\n` +
     `- Set \`filesSummary\` for the files in this batch only\n` +
-    `- Set \`action\` to COMMENT (the final batch will produce the verdict)\n\n` +
-    `Your response is still valid JSON. Add a \`batchFindings\` string field.\n` +
+    `- Set \`action\` to COMMENT (the final batch produces the verdict)\n\n` +
     (structuredOutput ? "" : batchOutputInstructions())
   );
 }
@@ -485,10 +469,9 @@ function batchOutputInstructions(): string {
   return `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
-  "prSummary": "string — short neutral description (final batch only; empty otherwise)",
+  "prSummary": "string — empty for intermediate batches",
   "summary": "string — overall assessment for this batch",
   "action": "COMMENT",
-  "batchFindings": "string — 2-4 sentence summary of key issues for the next batch",
   "filesSummary": [
     {
       "path": "repo-relative file path",
