@@ -244,8 +244,12 @@ export async function reviewPullRequest(
     // import-graph analysis) and try dependency-aware batching.
     const headered = await buildHeaderedFiles(connector, ref, pr);
     // ~14K tokens per batch keeps each batch within the model's strong
-    // attention window while respecting the effective budget.
-    const batchChars = Math.min(effectiveDiffChars, 50_000);
+    // attention window. Always cap at MAX_BATCH_CHARS even for single-batch
+    // PRs — a 180K-char dump dilutes attention, defeating the purpose.
+    // If a PR exceeds this, the batch path splits it. If batchChangedFiles
+    // returns 1 batch, we still use this cap (not effectiveDiffChars directly).
+    const MAX_BATCH_CHARS = 50_000;
+    const batchChars = Math.min(effectiveDiffChars, MAX_BATCH_CHARS);
     const batches = batchChangedFiles(headered, batchChars);
 
     if (batches.length > 1) {
@@ -276,14 +280,16 @@ export async function reviewPullRequest(
     // Single batch — existing single-call path below.
     // Build a budget-aware diff from per-file patches so the model always
     // receives complete file diffs rather than an arbitrary truncated blob.
-    const promptDiff = buildPromptDiff(pr.files, effectiveDiffChars);
+    // Use batchChars (already capped at MAX_BATCH_CHARS) not effectiveDiffChars
+    // so single-batch PRs also benefit from the attention cap.
+    const promptDiff = buildPromptDiff(pr.files, batchChars);
     if (promptDiff.truncated) {
       log.info(
         {
           included: promptDiff.includedFiles.length,
           excluded: promptDiff.excludedFiles.length,
           total: pr.files.length,
-          budgetChars: effectiveDiffChars,
+          budgetChars: batchChars,
         },
         "Large PR: diff assembled from per-file patches (some files excluded)",
       );
@@ -562,12 +568,17 @@ export function adjustedDiffBudget(
 
   // Floor: always leave room for at least 2000 chars of diff so the model
   // has something to review — an empty diff is useless.
-  const effectiveDiffChars = Math.max(
-    2000,
-    Math.floor(availableDiffTokens * 3.5),
-  );
+  const computed = Math.max(2000, Math.floor(availableDiffTokens * 3.5));
+  const capped = Math.min(computed, config.review.maxDiffChars);
 
-  return Math.min(effectiveDiffChars, config.review.maxDiffChars);
+  // Safety margin: 3.5 chars/token is a conservative estimate, but real
+  // tokenizers vary (OpenAI vs Anthropic, code vs prose). A 10% margin
+  // prevents near-miss overflows where the estimate says "fits" but the
+  // actual token count is slightly higher.
+  // Apply BEFORE the 2000 floor so the floor survives the margin.
+  const SAFETY_MARGIN = 0.9;
+  const withMargin = Math.floor(capped * SAFETY_MARGIN);
+  return Math.max(2000, withMargin);
 }
 
 function estimateTokens(text: string): number {
