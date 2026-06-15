@@ -73,7 +73,7 @@ export const ReviewResultSchema = z.object({
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
     .catch("COMMENT")
     .describe(
-      "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings or observations.",
+      "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings.",
     ),
   filesSummary: z
     .array(z.unknown())
