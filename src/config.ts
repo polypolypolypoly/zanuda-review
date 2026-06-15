@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
 
@@ -93,7 +94,15 @@ export type RepoConfig = z.infer<typeof RepoConfigSchema>;
 
 export function loadConfig(path?: string): Config {
   // Always load config/default.yaml (or explicit path) as the full base config.
-  const basePath = resolve(path ?? "config/default.yaml");
+  // When no path is given, resolve relative to the Zanuda package root,
+  // not the CWD — otherwise running from another project fails.
+  const basePath = path
+    ? resolve(path)
+    : resolve(
+        dirname(fileURLToPath(import.meta.url)),
+        "..",
+        "config/default.yaml",
+      );
   const baseRaw = parseYaml(readFileSync(basePath, "utf8"));
   const baseParsed = ConfigSchema.safeParse(baseRaw);
   if (!baseParsed.success) {
