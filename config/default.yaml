@@ -70,10 +70,11 @@ preprompt: |
 
   ## Comment style
   - Short and technical. One issue per comment.
+  - MAX 400 CHARACTERS per comment body. Be ruthlessly concise.
   - State the problem, then (if non-obvious) why it matters in one sentence.
-  - Suggest a concrete fix only when you have one. No vague "consider refactoring".
-  - Write for both human reviewers and AI agents reading the thread.
+  - Suggest a concrete fix only when you have one. One sentence max.
   - No filler: no "great job", no "I noticed that", no "this looks good but".
+  - Write for both human reviewers and AI agents reading the thread.
 
   ## Severity
   - blocker  — security vuln, data loss, crash, or clear logic bug. Must fix.
