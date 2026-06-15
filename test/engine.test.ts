@@ -11,8 +11,14 @@ import {
   parseReviewResult,
   extractJson,
   adaptiveMaxTokens,
+  adjustedDiffBudget,
+  parseMaxContextTokens,
 } from "../src/review/engine.ts";
-import { buildUserPrompt, truncate } from "../src/review/prompt.ts";
+import {
+  buildUserPrompt,
+  outputInstructions,
+  truncate,
+} from "../src/review/prompt.ts";
 import { buildReplyUserPrompt } from "../src/review/replyEngine.ts";
 import type { PullRequestData } from "../src/github/pullRequest.ts";
 import type { ProjectContext } from "../src/context/builder.ts";
@@ -260,6 +266,182 @@ describe("adaptiveMaxTokens", () => {
     const tokens = adaptiveMaxTokens(5, 8192);
     assert.ok(tokens < 8192, `expected < 8192, got ${tokens}`);
     assert.ok(tokens >= 1500, `expected >= 1500, got ${tokens}`);
+  });
+});
+
+// ─── adjustedDiffBudget ──────────────────────────────────────────────────────────
+
+describe("adjustedDiffBudget", () => {
+  const cfg: Config = {
+    ...baseConfig,
+    preprompt: "Short preprompt.", // ~5 tokens
+    generation: { temperature: 0.2, maxTokens: 2048 },
+    review: {
+      maxDiffChars: 60000,
+      inlineComments: true,
+      suggestions: false,
+      maxCommentChars: 400,
+    },
+  };
+
+  it("returns full maxDiffChars when context window is huge", () => {
+    // 1M token window — no reduction needed
+    const budget = adjustedDiffBudget(cfg, "tiny context", 1, 1_000_000);
+    assert.equal(budget, 60000);
+  });
+
+  it("reduces budget when context window is small", () => {
+    // 4096 token window with moderate context — diff gets trimmed
+    const budget = adjustedDiffBudget(cfg, "some context text here", 3, 4096);
+    assert.ok(budget < 60000, `expected < 60000, got ${budget}`);
+    assert.ok(budget >= 2000, `expected >= 2000, got ${budget}`);
+  });
+
+  it("never goes below 2000 char floor", () => {
+    // 500 token window — overhead alone consumes it, floor kicks in
+    const budget = adjustedDiffBudget(cfg, "x", 1, 500);
+    assert.equal(budget, 2000);
+  });
+
+  it("more files = smaller diff budget (output budget scales up)", () => {
+    const small = adjustedDiffBudget(cfg, "ctx", 1, 4096);
+    const large = adjustedDiffBudget(cfg, "ctx", 50, 4096);
+    assert.ok(
+      large <= small,
+      `50-file budget (${large}) should be ≤ 1-file budget (${small})`,
+    );
+  });
+
+  it("more context text = smaller diff budget", () => {
+    const shortCtx = "x";
+    const longCtx = "x".repeat(10000);
+    const short = adjustedDiffBudget(cfg, shortCtx, 1, 4096);
+    const long = adjustedDiffBudget(cfg, longCtx, 1, 4096);
+    assert.ok(
+      long < short,
+      `long-context budget (${long}) should be < short-context budget (${short})`,
+    );
+  });
+
+  it("never exceeds configured maxDiffChars", () => {
+    const budget = adjustedDiffBudget(cfg, "ctx", 1, 1_000_000);
+    assert.equal(budget, cfg.review.maxDiffChars);
+  });
+});
+
+// ─── parseMaxContextTokens ─────────────────────────────────────────────────────
+
+describe("parseMaxContextTokens", () => {
+  const save = (name: string) => process.env[name];
+  const restore = (name: string, value: string | undefined) => {
+    if (value !== undefined) process.env[name] = value;
+    else delete process.env[name];
+  };
+
+  it("returns undefined when env var is not set", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    delete process.env.LLM_MAX_CONTEXT_TOKENS;
+    try {
+      assert.equal(parseMaxContextTokens(), undefined);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+
+  it("returns the number when set to a valid positive integer", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    process.env.LLM_MAX_CONTEXT_TOKENS = "4096";
+    try {
+      assert.equal(parseMaxContextTokens(), 4096);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+
+  it("returns undefined when set to empty string", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    process.env.LLM_MAX_CONTEXT_TOKENS = "";
+    try {
+      assert.equal(parseMaxContextTokens(), undefined);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+
+  it("throws on non-numeric value", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    process.env.LLM_MAX_CONTEXT_TOKENS = "abc";
+    try {
+      assert.throws(() => parseMaxContextTokens(), /positive integer/);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+
+  it("throws on zero", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    process.env.LLM_MAX_CONTEXT_TOKENS = "0";
+    try {
+      assert.throws(() => parseMaxContextTokens(), /positive integer/);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+
+  it("throws on negative", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    process.env.LLM_MAX_CONTEXT_TOKENS = "-1";
+    try {
+      assert.throws(() => parseMaxContextTokens(), /positive integer/);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+
+  it("throws on non-integer", () => {
+    const prev = save("LLM_MAX_CONTEXT_TOKENS");
+    process.env.LLM_MAX_CONTEXT_TOKENS = "3.5";
+    try {
+      assert.throws(() => parseMaxContextTokens(), /positive integer/);
+    } finally {
+      restore("LLM_MAX_CONTEXT_TOKENS", prev);
+    }
+  });
+});
+
+// ─── prompt.ts outputInstructions token budget ────────────────────────────────
+// Regression test: FIXED_TASK_TOKENS (700) in engine.ts assumes outputInstructions
+// fits within this budget. If outputInstructions grows past this, the estimate
+// silently under-counts and the context-window pre-flight becomes ineffective.
+
+describe("prompt.ts outputInstructions token budget", () => {
+  const estimateTokens = (text: string): number => Math.ceil(text.length / 3.5);
+
+  it("outputInstructions with suggestions fits within 700 tokens", () => {
+    const text = outputInstructions(true, true, 400);
+    const tokens = estimateTokens(text);
+    assert.ok(
+      tokens <= 700,
+      `outputInstructions(with suggestions) = ${tokens} tokens, exceeds FIXED_TASK_TOKENS=700`,
+    );
+  });
+
+  it("outputInstructions without suggestions fits within 700 tokens", () => {
+    const text = outputInstructions(false, false, 400);
+    const tokens = estimateTokens(text);
+    assert.ok(
+      tokens <= 700,
+      `outputInstructions(without suggestions) = ${tokens} tokens, exceeds FIXED_TASK_TOKENS=700`,
+    );
+  });
+
+  it("outputInstructions with maxed commentChars fits within 700 tokens", () => {
+    const text = outputInstructions(true, true, 1000);
+    const tokens = estimateTokens(text);
+    assert.ok(
+      tokens <= 700,
+      `outputInstructions(maxCommentChars=1000) = ${tokens} tokens, exceeds FIXED_TASK_TOKENS=700`,
+    );
   });
 });
 

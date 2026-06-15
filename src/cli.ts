@@ -1,5 +1,10 @@
-import "dotenv/config";
-import { basename } from "node:path";
+import { config as loadDotenv } from "dotenv";
+import { basename, dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+loadDotenv({
+  path: resolve(dirname(fileURLToPath(import.meta.url)), "..", ".env"),
+});
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.js";
 import { buildContext } from "./context/builder.js";

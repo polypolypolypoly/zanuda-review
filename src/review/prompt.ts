@@ -20,7 +20,7 @@ export function escapeXml(str: string): string {
 
 // ── Output schema instructions ────────────────────────────────────────────────
 
-function outputInstructions(
+export function outputInstructions(
   forAllFiles: boolean,
   suggestionsEnabled: boolean,
   maxCommentChars: number,

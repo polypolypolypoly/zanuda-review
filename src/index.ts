@@ -1,4 +1,11 @@
-import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+loadDotenv({
+  path: resolve(dirname(fileURLToPath(import.meta.url)), "..", ".env"),
+});
+
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { createConnector } from "./platform/index.js";
