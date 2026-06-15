@@ -14,6 +14,14 @@ import { logger } from "./logger.js";
 import { createConnector, LocalConnector } from "./platform/index.js";
 import { reviewPullRequest } from "./review/engine.js";
 
+function forceStrategy(
+  values: Record<string, string | boolean | undefined>,
+): "single" | "batch" | undefined {
+  if (values["force-single"] === true) return "single";
+  if (values["force-batch"] === true) return "batch";
+  return undefined;
+}
+
 /**
  * Manual / local review runner.
  *
@@ -45,6 +53,8 @@ async function main(): Promise<void> {
       model: { type: "string" },
       casual: { type: "boolean", default: false },
       spawn: { type: "boolean", default: false },
+      "force-single": { type: "boolean", default: false },
+      "force-batch": { type: "boolean", default: false },
     },
     allowPositionals: true,
     strict: true,
@@ -64,7 +74,7 @@ async function runLocalReview(
 ): Promise<void> {
   const dryRun = values["dry-run"] === true;
   const noMemory = values["no-memory"] === true;
-  const casual = values["casual"] === true;
+  const casual = values["casual"] === true || process.env.EVAL_CASUAL === "1";
   const diffFlag = typeof values.diff === "string" ? values.diff : undefined;
   const outputFlag =
     typeof values.output === "string" ? values.output : undefined;
@@ -94,7 +104,10 @@ async function runLocalReview(
     { connector, baseConfig: config },
     ref,
     0,
-    { dryRun },
+    {
+      dryRun,
+      forceStrategy: forceStrategy(values),
+    },
   );
 
   if (dryRun) {
@@ -162,7 +175,7 @@ async function runRemoteReview(
     { connector: createConnector(), baseConfig: loadConfig() },
     { owner: owner!, repo: repo! },
     Number(num),
-    { dryRun, round },
+    { dryRun, round, forceStrategy: forceStrategy(values) },
   );
 
   if (dryRun) {

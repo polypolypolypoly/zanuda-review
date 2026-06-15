@@ -61,7 +61,15 @@ export async function reviewPullRequest(
   deps: ReviewDeps,
   ref: RepoRef,
   number: number,
-  opts: { dryRun?: boolean; round?: number; progressCommentId?: number } = {},
+  opts: {
+    dryRun?: boolean;
+    round?: number;
+    progressCommentId?: number;
+    /** Force a specific review strategy for evaluation. "single" skips the
+     * batch path entirely; "batch" forces multi-batch even for small PRs.
+     * Undefined = auto-detect based on PR size. */
+    forceStrategy?: "single" | "batch";
+  } = {},
 ): Promise<
   ReviewResult & {
     progressCommentId: number | null;
@@ -244,8 +252,13 @@ export async function reviewPullRequest(
     // ~14K tokens per batch keeps each batch within the model's strong
     // attention window. Batches are capped at this size regardless of
     // the overall diff budget.
+    const forceStrategy = opts.forceStrategy;
     const MAX_BATCH_CHARS = 50_000;
-    const batchChars = Math.min(effectiveDiffChars, MAX_BATCH_CHARS);
+    // forceStrategy="batch" uses a tiny batch size to force splitting.
+    const batchChars =
+      forceStrategy === "batch"
+        ? 500
+        : Math.min(effectiveDiffChars, MAX_BATCH_CHARS);
 
     // Estimate total diff size from per-file patches to decide whether
     // we need the batch path. This is a cheap check that avoids N extra
@@ -256,7 +269,14 @@ export async function reviewPullRequest(
       0,
     );
 
-    if (totalPatchChars > batchChars) {
+    const useBatchPath =
+      forceStrategy === "single"
+        ? false
+        : forceStrategy === "batch"
+          ? true
+          : totalPatchChars > batchChars;
+
+    if (useBatchPath) {
       // Build headered files from full file contents (for file headers
       // and import-graph analysis) and try dependency-aware batching.
       const headered = await buildHeaderedFiles(connector, ref, pr);
