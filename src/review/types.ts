@@ -93,45 +93,51 @@ export type ReviewComment = z.infer<typeof ReviewCommentSchema>;
 export type ReviewResult = z.infer<typeof ReviewResultSchema>;
 
 /**
- * JSON Schema representation of ReviewResultSchema, passed to providers that
- * support native structured output (Anthropic tool_use, OpenAI json_schema).
- * Kept in sync with ReviewResultSchema manually — update both together.
+ * Build the JSON Schema for the review result, using the configured
+ * maxCommentChars as the maxLength constraint on comment bodies.
  */
-export const REVIEW_RESULT_JSON_SCHEMA: Record<string, unknown> = {
-  type: "object",
-  // prSummary is intentionally NOT in required — round 2 should omit it.
-  required: ["summary", "action", "filesSummary", "comments"],
-  additionalProperties: false,
-  properties: {
-    prSummary: { type: "string" },
-    summary: { type: "string" },
-    action: { type: "string", enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"] },
-    filesSummary: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["path", "description"],
-        additionalProperties: false,
-        properties: {
-          path: { type: "string" },
-          description: { type: "string" },
+export function buildReviewResultJsonSchema(
+  maxCommentChars: number,
+): Record<string, unknown> {
+  return {
+    type: "object",
+    // prSummary is intentionally NOT in required — round 2 should omit it.
+    required: ["summary", "action", "filesSummary", "comments"],
+    additionalProperties: false,
+    properties: {
+      prSummary: { type: "string" },
+      summary: { type: "string" },
+      action: {
+        type: "string",
+        enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
+      },
+      filesSummary: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["path", "description"],
+          additionalProperties: false,
+          properties: {
+            path: { type: "string" },
+            description: { type: "string" },
+          },
+        },
+      },
+      comments: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["path", "line", "severity", "body"],
+          additionalProperties: false,
+          properties: {
+            path: { type: "string" },
+            line: { type: "integer", minimum: 1 },
+            severity: { type: "string", enum: ["blocker", "warning"] },
+            body: { type: "string", maxLength: maxCommentChars },
+            suggestion: { type: "string" },
+          },
         },
       },
     },
-    comments: {
-      type: "array",
-      items: {
-        type: "object",
-        required: ["path", "line", "severity", "body"],
-        additionalProperties: false,
-        properties: {
-          path: { type: "string" },
-          line: { type: "integer", minimum: 1 },
-          severity: { type: "string", enum: ["blocker", "warning"] },
-          body: { type: "string", maxLength: 400 },
-          suggestion: { type: "string" },
-        },
-      },
-    },
-  },
-};
+  };
+}

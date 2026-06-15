@@ -23,6 +23,7 @@ export function escapeXml(str: string): string {
 function outputInstructions(
   forAllFiles: boolean,
   suggestionsEnabled: boolean,
+  maxCommentChars: number,
 ): string {
   const filesSummaryInstruction = forAllFiles
     ? "Include one entry in filesSummary for every changed file."
@@ -30,8 +31,7 @@ function outputInstructions(
       "Do NOT invent descriptions for files not shown in the diff.";
 
   const suggestionField = suggestionsEnabled
-    ? `
-      "suggestion": "corrected code (new lines only) — omit if no concrete replacement"`
+    ? `\n      "suggestion": "corrected code (new lines only) — omit if no concrete replacement"`
     : "";
 
   return `
@@ -51,7 +51,7 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
       "path": "repo-relative file path",
       "line": 123,                        // line in the NEW file (the '+' side of the diff)
       "severity": "blocker|warning",
-      "body": "markdown comment about this specific line (≤400 chars)"${suggestionField}
+      "body": "markdown comment about this specific line (≤${maxCommentChars} chars)"${suggestionField}
     }
   ]
 }
@@ -197,11 +197,13 @@ export function buildUserPrompt(
           diffSection.forAllFiles,
           opts.structuredOutput,
           config.review.suggestions,
+          config.review.maxCommentChars,
         )
       : round1TaskInstructions(
           diffSection.forAllFiles,
           opts.structuredOutput,
           config.review.suggestions,
+          config.review.maxCommentChars,
         ),
   );
 
@@ -270,6 +272,7 @@ function round1TaskInstructions(
   forAllFiles: boolean,
   structured = false,
   suggestions = false,
+  maxCommentChars = 400,
 ): string {
   return (
     `## Your task\n` +
@@ -277,7 +280,9 @@ function round1TaskInstructions(
     `Also fill in \`prSummary\`: 1\u20133 sentences describing what this PR does in plain English — ` +
     `not a review, just a neutral description of the change from the author's perspective. ` +
     `Derive it from the diff, PR title, and description.\n` +
-    (structured ? "" : outputInstructions(forAllFiles, suggestions))
+    (structured
+      ? ""
+      : outputInstructions(forAllFiles, suggestions, maxCommentChars))
   );
 }
 
@@ -285,6 +290,7 @@ function finalTaskInstructions(
   forAllFiles: boolean,
   structured = false,
   suggestions = false,
+  maxCommentChars = 400,
 ): string {
   return (
     `## Your task (FINAL — round 2 of 2)\n` +
@@ -297,7 +303,9 @@ function finalTaskInstructions(
     `When using REQUEST_CHANGES or COMMENT, your summary must clearly state what\n` +
     `still needs fixing and why. Be specific and direct.\n\n` +
     `Set \`prSummary\` to an empty string — it is not needed for round 2.\n` +
-    (structured ? "" : outputInstructions(forAllFiles, suggestions))
+    (structured
+      ? ""
+      : outputInstructions(forAllFiles, suggestions, maxCommentChars))
   );
 }
 

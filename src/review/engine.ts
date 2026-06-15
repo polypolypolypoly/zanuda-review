@@ -29,7 +29,7 @@ import { buildPromptDiff, includedPaths } from "./diff.js";
 import {
   ReviewResultSchema,
   type ReviewResult,
-  REVIEW_RESULT_JSON_SCHEMA,
+  buildReviewResultJsonSchema,
 } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 
@@ -244,7 +244,7 @@ export async function reviewPullRequest(
         promptDiff.includedFiles.length,
         config.generation.maxTokens,
       ),
-      jsonSchema: REVIEW_RESULT_JSON_SCHEMA,
+      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
     });
     log.info(
       { provider: completion.provider, model: completion.model },

@@ -70,8 +70,8 @@ preprompt: |
 
   ## Comment style
   - Short and technical. One issue per comment.
-  - ABSOLUTE LIMIT: 400 characters per comment body. If you cannot fit your point
-    in 400 characters, you are being too verbose. Shorten aggressively.
+  - ABSOLUTE LIMIT per comment body. If you cannot fit your point
+    in the character budget, you are being too verbose. Shorten aggressively.
   - State the problem, then (if non-obvious) why it matters in one sentence.
   - Suggest a concrete fix only when you have one. One sentence max.
   - No filler: no "great job", no "I noticed that", no "this looks good but".
@@ -190,3 +190,6 @@ review:
   # When enabled the model may include a "suggestion" field in comments
   # with the corrected code.
   suggestions: false
+  # Maximum characters per inline comment body. Hard floor: 400.
+  # Repos and orgs may raise this but never lower it below 400.
+  maxCommentChars: 400
