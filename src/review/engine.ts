@@ -466,7 +466,7 @@ export function adaptiveMaxTokens(
  * Read and validate LLM_MAX_CONTEXT_TOKENS from the environment.
  * Returns undefined when not set (no limit — cloud models).
  */
-function parseMaxContextTokens(): number | undefined {
+export function parseMaxContextTokens(): number | undefined {
   const raw = process.env.LLM_MAX_CONTEXT_TOKENS;
   if (!raw) return undefined;
   const n = Number(raw);
