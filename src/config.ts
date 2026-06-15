@@ -57,6 +57,8 @@ const ConfigSchema = z.object({
     maxConcurrentReviews: z.number().int().positive(),
     /** Max new PRs picked up per poll cycle (caps burst from a flooded queue). */
     maxNewPrsPerCycle: z.number().int().positive(),
+    /** Per-PR token budget (input + output). 0 = no limit. */
+    tokenBudgetPerPR: z.number().int().nonnegative().default(0),
   }),
   memory: z.object({
     /** Toggle the whole feature on/off. */

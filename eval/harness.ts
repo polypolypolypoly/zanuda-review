@@ -14,9 +14,10 @@
  * The harness:
  *   1. Creates a temp git repo from before/
  *   2. Copies after/ over it, stages everything
- *   3. Runs `npm run review -- --local --dry-run --force-single > result-single.json`
- *   4. Runs `npm run review -- --local --dry-run --force-batch > result-batch.json`
- *   5. Loads both results, diffs findings, reports
+ *   3. Runs --force-single review → result-single.json
+ *   4. Runs --force-batch review → result-batch.json
+ *   5. Runs --force-parallel review → result-parallel.json
+ *   6. Loads all results, diffs findings, reports
  */
 
 import { execSync } from "node:child_process";
@@ -66,12 +67,15 @@ interface ComparisonResult {
   challenge: string;
   single: ReviewOutput;
   batch: ReviewOutput;
+  parallel: ReviewOutput;
   batchOnly: Finding[];
+  parallelOnly: Finding[];
   singleOnly: Finding[];
   both: Finding[];
   knownIssues: KnownIssue[];
   singleRecall: number;
   batchRecall: number;
+  parallelRecall: number;
 }
 
 function dirname(p: string): string {
@@ -137,10 +141,15 @@ function loadConfig(challengeDir: string): ChallengeConfig {
 
 function runReview(
   tmpDir: string,
-  strategy: "single" | "batch",
+  strategy: "single" | "batch" | "parallel",
   pr: { title: string; body: string },
 ): ReviewOutput {
-  const flag = strategy === "single" ? "--force-single" : "--force-batch";
+  const flag =
+    strategy === "single"
+      ? "--force-single"
+      : strategy === "parallel"
+        ? "--force-parallel"
+        : "--force-batch";
   const env = {
     ...process.env,
     // Override PR title/body via env — the local connector doesn't use
@@ -180,6 +189,7 @@ function compareResults(
   challenge: string,
   single: ReviewOutput,
   batch: ReviewOutput,
+  parallel: ReviewOutput,
   knownIssues: KnownIssue[],
 ): ComparisonResult {
   // Normalize findings: keep unique by path + line
@@ -195,32 +205,47 @@ function compareResults(
 
   const sFindings = dedup(single.comments);
   const bFindings = dedup(batch.comments);
+  const pFindings = dedup(parallel.comments);
 
   const sKeys = new Set(sFindings.map((f) => `${f.path}:${f.line}`));
   const bKeys = new Set(bFindings.map((f) => `${f.path}:${f.line}`));
+  const pKeys = new Set(pFindings.map((f) => `${f.path}:${f.line}`));
 
   const batchOnly = bFindings.filter((f) => !sKeys.has(`${f.path}:${f.line}`));
-  const singleOnly = sFindings.filter((f) => !bKeys.has(`${f.path}:${f.line}`));
+  const parallelOnly = pFindings.filter(
+    (f) =>
+      !sKeys.has(`${f.path}:${f.line}`) && !bKeys.has(`${f.path}:${f.line}`),
+  );
+  const singleOnly = sFindings.filter(
+    (f) =>
+      !bKeys.has(`${f.path}:${f.line}`) && !pKeys.has(`${f.path}:${f.line}`),
+  );
   const both = bFindings.filter((f) => sKeys.has(`${f.path}:${f.line}`));
 
   // Recall against known issues
   let singleHits = 0;
   let batchHits = 0;
+  let parallelHits = 0;
   for (const issue of knownIssues) {
     if (sFindings.some((f) => matchFindings(f, issue))) singleHits++;
     if (bFindings.some((f) => matchFindings(f, issue))) batchHits++;
+    if (pFindings.some((f) => matchFindings(f, issue))) parallelHits++;
   }
 
   return {
     challenge,
     single,
     batch,
+    parallel,
     batchOnly,
+    parallelOnly,
     singleOnly,
     both,
     knownIssues,
     singleRecall: knownIssues.length > 0 ? singleHits / knownIssues.length : -1,
     batchRecall: knownIssues.length > 0 ? batchHits / knownIssues.length : -1,
+    parallelRecall:
+      knownIssues.length > 0 ? parallelHits / knownIssues.length : -1,
   };
 }
 
@@ -372,10 +397,27 @@ async function runAll(dirs: string[]): Promise<void> {
       `  → ${batch.comments.length} findings, action=${batch.action}`,
     );
 
+    // Reset and run parallel
+    execSync("git checkout HEAD -- . && git clean -fd", {
+      cwd: tmpDir,
+      stdio: "pipe",
+    });
+    if (existsSync(afterDir)) {
+      cpSync(afterDir, tmpDir, { recursive: true });
+    }
+    execSync("git add -A", { cwd: tmpDir, stdio: "pipe" });
+
+    console.error("  Running parallel...");
+    const parallel = runReview(tmpDir, "parallel", config);
+    console.error(
+      `  → ${parallel.comments.length} findings, action=${parallel.action}`,
+    );
+
     const comparison = compareResults(
       name,
       single,
       batch,
+      parallel,
       config.known?.issues ?? [],
     );
     results.push(comparison);

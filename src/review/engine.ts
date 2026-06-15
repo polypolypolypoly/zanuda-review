@@ -28,6 +28,7 @@ import {
   buildSystemPrompt,
   buildUserPrompt,
   buildBatchUserPrompt,
+  escapeXml,
 } from "./prompt.js";
 import {
   buildPromptDiff,
@@ -66,9 +67,10 @@ export async function reviewPullRequest(
     round?: number;
     progressCommentId?: number;
     /** Force a specific review strategy for evaluation. "single" skips the
-     * batch path entirely; "batch" forces multi-batch even for small PRs.
+     * batch path entirely; "batch" forces multi-batch even for small PRs;
+     * "parallel" reviews all batches concurrently then synthesizes.
      * Undefined = auto-detect based on PR size. */
-    forceStrategy?: "single" | "batch";
+    forceStrategy?: "single" | "batch" | "parallel";
   } = {},
 ): Promise<
   ReviewResult & {
@@ -277,15 +279,34 @@ export async function reviewPullRequest(
           : totalPatchChars > batchChars;
 
     if (useBatchPath) {
-      // Build headered files from full file contents (for file headers
-      // and import-graph analysis) and try dependency-aware batching.
       const headered = await buildHeaderedFiles(connector, ref, pr);
       const batches = batchChangedFiles(headered, batchChars);
 
       if (batches.length > 1) {
-        // Multi-batch sequential review — each batch reviewed with
-        // running summary from previous batches so the model has
-        // cross-batch context.
+        // Multi-batch review.
+        if (forceStrategy === "parallel") {
+          log.info(
+            { batches: batches.length, totalFiles: pr.files.length },
+            "Large PR: using parallel batch review + synthesis",
+          );
+          return reviewBatchedParallel(pr, batches, {
+            deps,
+            ref,
+            number,
+            round,
+            dryRun: opts.dryRun ?? false,
+            startingCommentId,
+            context,
+            config,
+            provider,
+            instructions,
+            repoMemory,
+            reviewHistory,
+            discussion,
+            log,
+          });
+        }
+        // Sequential: running summary bridges batches
         log.info(
           { batches: batches.length, totalFiles: pr.files.length },
           "Large PR: using dependency-aware batch review",
@@ -835,6 +856,16 @@ async function reviewBatched(
   let runningSummary = "";
   let finalResult: ReviewResult | null = null;
 
+  // ── Token budget ─────────────────────────────────────────────────
+  const tokenBudget = config.limits.tokenBudgetPerPR;
+  let estimatedTokens = 0;
+  const addTokens = (inputChars: number, outputChars: number) => {
+    estimatedTokens +=
+      Math.ceil(inputChars / 3.5) + Math.ceil(outputChars / 3.5);
+  };
+  const budgetExceeded = () =>
+    tokenBudget > 0 && estimatedTokens >= tokenBudget;
+
   // ── MAX_BATCHES backstop ──────────────────────────────────────────
   // Prevent unbounded cost on pathological PRs. Beyond this, select the
   // highest-signal batches by weight and note unreviewed files honestly.
@@ -860,6 +891,36 @@ async function reviewBatched(
   for (let i = 0; i < effectiveBatches.length; i++) {
     const batch = effectiveBatches[i]!;
     const isLast = i === effectiveBatches.length - 1;
+
+    // Check token budget before starting this batch
+    if (budgetExceeded()) {
+      log.warn(
+        {
+          estimatedTokens,
+          tokenBudget,
+          batch: i + 1,
+          remainingBatches: effectiveBatches.length - i,
+        },
+        "Token budget exceeded — stopping batch review",
+      );
+      if (!finalResult) {
+        finalResult = {
+          prSummary: "",
+          summary: `Token budget of ${tokenBudget} exceeded after ${i} batch(es). ${effectiveBatches.length - i} batch(es) not reviewed.`,
+          action: "COMMENT",
+          filesSummary: allFilesSummary,
+          comments: allComments,
+        };
+      }
+      // Note skipped files
+      for (let j = i; j < effectiveBatches.length; j++) {
+        unreviewedFiles.push(
+          ...effectiveBatches[j]!.files.map((f) => f.filename),
+        );
+      }
+      break;
+    }
+
     const batchDiff = assembleBatchDiff(batch.files);
 
     log.info(
@@ -901,6 +962,12 @@ async function reviewBatched(
     const parsed = parseReviewResult(completion.text, {
       structured: provider.supportsStructuredOutput,
     });
+
+    // Token budget tracking
+    addTokens(
+      config.preprompt.length + context.text.length + batchDiff.text.length,
+      completion.text.length,
+    );
 
     // Update progress comment between batches so the author knows progress.
     if (!dryRun && startingCommentId !== null && !isLast) {
@@ -1116,7 +1183,6 @@ function deduplicateComments(
 ): ReviewResult["comments"] {
   const seen = new Set<string>();
   return comments.filter((c) => {
-    // Strip severity emoji prefix (🛑 or ⚠️) — use unicode-aware regex.
     // Strip leading severity emoji + space (🛑 or ⚠️). The `u` flag
     // handles multi-code-unit emoji without charset surrogate errors.
     const normalized = c.body
@@ -1129,4 +1195,237 @@ function deduplicateComments(
     seen.add(key);
     return true;
   });
+}
+
+// ── Parallel batch review + synthesis ──────────────────────────────────────
+
+/**
+ * Review all batches in parallel, then run a single synthesis call that
+ * sees all findings at once to produce the verdict.
+ *
+ * Tradeoff vs sequential:
+ *   + Lower latency (max batch time + synthesis, not sum of all batches)
+ *   + Synthesis sees the whole finding set, not a lossy running summary
+ *   − No cross-batch priming (each batch reviews in isolation)
+ *   − Extra LLM call for synthesis (cheap — input is findings summaries only)
+ */
+async function reviewBatchedParallel(
+  pr: PullRequest,
+  batches: Batch[],
+  opts: BatchedReviewOpts,
+): Promise<
+  ReviewResult & {
+    progressCommentId: number | null;
+    stale: boolean;
+    headSha: string;
+  }
+> {
+  const {
+    deps,
+    ref,
+    number,
+    round,
+    dryRun,
+    startingCommentId,
+    context,
+    config,
+    provider,
+    instructions,
+    repoMemory,
+    reviewHistory,
+    discussion,
+    log,
+  } = opts;
+
+  // ── Phase 1: parallel batch reviews ──────────────────────────────
+  log.info({ batches: batches.length }, "Starting parallel batch reviews");
+
+  const batchResults = await Promise.all(
+    batches.map(async (batch, i) => {
+      const batchDiff = assembleBatchDiff(batch.files);
+
+      const completion = await completeWithRetry(provider, {
+        system: buildSystemPrompt(config),
+        user: buildBatchUserPrompt(pr, context, config, batchDiff, {
+          batchIndex: i + 1,
+          totalBatches: batches.length,
+          isLastBatch: false, // never final — synthesis handles verdict
+          round,
+          discussion,
+          repoMemory: repoMemory ?? undefined,
+          reviewHistory: reviewHistory
+            ? formatReviewHistory(reviewHistory)
+            : undefined,
+          instructions,
+          structuredOutput: provider.supportsStructuredOutput,
+        }),
+        model: config.models[config.provider],
+        temperature: config.generation.temperature,
+        maxTokens: adaptiveMaxTokens(
+          batch.files.length,
+          config.generation.maxTokens,
+        ),
+        jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
+      });
+
+      const parsed = parseReviewResult(completion.text, {
+        structured: provider.supportsStructuredOutput,
+      });
+
+      return { parsed, batchFindings: parsed.batchFindings ?? "" };
+    }),
+  );
+
+  // ── Phase 2: synthesis ───────────────────────────────────────────
+  const allFindings = batchResults
+    .map((r, i) => {
+      const files = batches[i]!.files.map((f) => `\`${f.filename}\``).join(
+        ", ",
+      );
+      return r.batchFindings
+        ? `Batch ${i + 1} (${files}): ${r.batchFindings}`
+        : `Batch ${i + 1} (${files}): no issues found`;
+    })
+    .join("\n");
+
+  log.info("Running synthesis pass");
+  const synthCompletion = await completeWithRetry(provider, {
+    system: buildSystemPrompt(config),
+    user: buildSynthesisPrompt(pr, allFindings, batches),
+    model: config.models[config.provider],
+    temperature: config.generation.temperature,
+    maxTokens: config.generation.maxTokens,
+    jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
+  });
+
+  const synthResult = parseReviewResult(synthCompletion.text, {
+    structured: provider.supportsStructuredOutput,
+  });
+
+  // ── Assemble ─────────────────────────────────────────────────────
+  const allComments = deduplicateComments(
+    batchResults.flatMap((r) => r.parsed.comments),
+  );
+  const allFilesSummary = deduplicateFilesSummary(
+    batchResults.flatMap((r) => r.parsed.filesSummary),
+  );
+
+  // Upgrade to REQUEST_CHANGES if any batch found blockers
+  const finalAction =
+    synthResult.action === "COMMENT" &&
+    allComments.some((c) => c.severity === "blocker")
+      ? "REQUEST_CHANGES"
+      : synthResult.action;
+
+  const result: ReviewResult = {
+    prSummary: synthResult.prSummary || pr.title,
+    summary: synthResult.summary,
+    action: finalAction,
+    filesSummary: allFilesSummary,
+    comments: allComments,
+  };
+
+  // ── Stale-commit guard ──────────────────────────────────────────
+  if (!dryRun) {
+    let currentHead: string | null = null;
+    try {
+      const fresh = await deps.connector.fetchPR(ref, number);
+      currentHead = fresh.headSha;
+    } catch (err) {
+      log.warn({ err }, "Stale-check failed");
+    }
+    if (currentHead !== null && currentHead !== pr.headSha) {
+      log.info("PR head changed — discarding");
+      if (startingCommentId !== null) {
+        await deps.connector
+          .editComment(
+            ref,
+            startingCommentId,
+            "🔄 New commits pushed — discarding stale result.",
+          )
+          .catch(() => undefined);
+      }
+      return {
+        ...result,
+        progressCommentId: startingCommentId,
+        stale: true,
+        headSha: pr.headSha,
+      };
+    }
+  }
+
+  if (!dryRun) {
+    let progressUpdated = false;
+    if (startingCommentId !== null) {
+      try {
+        await deps.connector.editComment(
+          ref,
+          startingCommentId,
+          buildReviewCommentBody(result, pr.changedFiles.length, {
+            diffTruncated: false,
+          }),
+        );
+        progressUpdated = true;
+      } catch (err) {
+        log.warn({ err }, "Failed to update progress comment");
+      }
+    }
+
+    const allVisiblePaths = new Set<string>();
+    for (const batch of batches) {
+      for (const p of batchFilePaths(assembleBatchDiff(batch.files))) {
+        allVisiblePaths.add(p);
+      }
+    }
+    await deps.connector.postReview(pr, result, config, {
+      summaryPostedElsewhere: progressUpdated,
+      visibleFilePaths: allVisiblePaths,
+    });
+    log.info(
+      { comments: allComments.length, batches: batches.length },
+      "Parallel review posted",
+    );
+  }
+
+  return {
+    ...result,
+    progressCommentId: startingCommentId,
+    stale: false,
+    headSha: pr.headSha,
+  };
+}
+
+/** Build the synthesis prompt: findings from all batches, no diffs. */
+function buildSynthesisPrompt(
+  pr: PullRequest,
+  allFindings: string,
+  batches: Batch[],
+): string {
+  return [
+    `## Pull request`,
+    `<pr_title>${escapeXml(pr.title)}</pr_title>`,
+    pr.body
+      ? `<pr_description>\n${escapeXml(pr.body)}\n</pr_description>`
+      : "<pr_description>(none)</pr_description>",
+    `Changed files (${pr.changedFiles.length}):`,
+    pr.changedFiles.map((f) => `- ${f}`).join("\n"),
+    "",
+    `## Findings from ${batches.length} parallel batch reviews`,
+    allFindings,
+    "",
+    `## Your task (SYNTHESIS)`,
+    `Above are findings from ${batches.length} independent batch reviews of this PR.`,
+    `Each batch reviewed a subset of files in isolation. Synthesize these`,
+    `findings into a single coherent review.`,
+    "",
+    `- Produce inline comments for all real issues (skip duplicates).`,
+    `- Produce a final \`action\` verdict considering all findings.`,
+    `- Write a \`summary\` that covers the full PR.`,
+    `- Write a \`prSummary\` describing what the whole PR does.`,
+    `- Cross-batch patterns: if two batches flagged the same underlying issue`,
+    `  in different files, note the pattern in the summary.`,
+    "",
+    `The batchFindings above are the previous model's best-effort — verify`,
+    `independently. Do not assume they are correct.`,
+  ].join("\n");
 }

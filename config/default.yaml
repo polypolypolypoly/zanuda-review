@@ -164,6 +164,9 @@ limits:
   # Max new PRs picked up per poll cycle. Prevents a burst of 50 queued
   # PRs from all firing off LLM calls simultaneously after a restart.
   maxNewPrsPerCycle: 5
+  # Per-PR token budget (input + output). Stops review when exceeded.
+  # 0 = no limit. Useful as a cost backstop for large batched reviews.
+  tokenBudgetPerPR: 0
 
 # ─── Repo memory ────────────────────────────────────────────────────
 # Persistent per-repo knowledge files. On first review of a repo Zanuda
