@@ -70,6 +70,7 @@ const ConfigSchema = z.object({
   review: z.object({
     maxDiffChars: z.number().int().positive(),
     inlineComments: z.boolean(),
+    suggestions: z.boolean(),
   }),
 });
 

@@ -13,6 +13,12 @@ const ReviewCommentSchema = z.object({
     .describe("Line number in the NEW version of the file (the '+' side)."),
   severity: z.enum(["blocker", "warning"]),
   body: z.string().describe("The comment text, in markdown."),
+  suggestion: z
+    .string()
+    .optional()
+    .describe(
+      "Code replacement (new lines only, no fences). Omit if no concrete fix.",
+    ),
 });
 
 const FileSummarySchema = z.object({
@@ -123,6 +129,7 @@ export const REVIEW_RESULT_JSON_SCHEMA: Record<string, unknown> = {
           line: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["blocker", "warning"] },
           body: { type: "string", maxLength: 400 },
+          suggestion: { type: "string" },
         },
       },
     },

@@ -186,3 +186,7 @@ review:
   # Post inline comments anchored to specific lines (true) or a single
   # summary comment (false).
   inlineComments: true
+  # Post code suggestions as one-click-patch ```suggestion blocks.
+  # When enabled the model may include a "suggestion" field in comments
+  # with the corrected code.
+  suggestions: false

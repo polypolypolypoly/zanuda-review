@@ -20,11 +20,19 @@ export function escapeXml(str: string): string {
 
 // ── Output schema instructions ────────────────────────────────────────────────
 
-function outputInstructions(forAllFiles: boolean): string {
+function outputInstructions(
+  forAllFiles: boolean,
+  suggestionsEnabled: boolean,
+): string {
   const filesSummaryInstruction = forAllFiles
     ? "Include one entry in filesSummary for every changed file."
     : "Include one entry in filesSummary for every file whose diff appears above. " +
       "Do NOT invent descriptions for files not shown in the diff.";
+
+  const suggestionField = suggestionsEnabled
+    ? `
+      "suggestion": "corrected code (new lines only) — omit if no concrete replacement"`
+    : "";
 
   return `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
@@ -43,12 +51,24 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
       "path": "repo-relative file path",
       "line": 123,                        // line in the NEW file (the '+' side of the diff)
       "severity": "blocker|warning",
-      "body": "markdown comment about this specific line (≤400 chars)"
+      "body": "markdown comment about this specific line (≤400 chars)"${suggestionField}
     }
   ]
 }
 
-action rules (your recommendation to human reviewers — you do not block or approve merges):
+${
+  suggestionsEnabled
+    ? `Suggestion rules:
+- Include "suggestion" only when you have a concrete code replacement.
+- Write ONLY the new lines. Do not repeat old lines, do not use diff syntax
+  (no +/-, no @@ headers), do not wrap in code fences.
+- For single-line fixes: a single string like "return items.filter(Boolean);"
+- For multi-line fixes: use \\n within the string for newlines.
+- If you are not sure about the exact replacement, omit "suggestion".
+
+`
+    : ""
+}action rules (your recommendation to human reviewers — you do not block or approve merges):
   APPROVE          — no issues found; you recommend merging.
   REQUEST_CHANGES  — blocker-severity issues found; you recommend addressing them first.
   COMMENT          — warnings or observations only; author decides.
@@ -173,8 +193,16 @@ export function buildUserPrompt(
     ...diffSection.parts,
     "",
     isFinal
-      ? finalTaskInstructions(diffSection.forAllFiles, opts.structuredOutput)
-      : round1TaskInstructions(diffSection.forAllFiles, opts.structuredOutput),
+      ? finalTaskInstructions(
+          diffSection.forAllFiles,
+          opts.structuredOutput,
+          config.review.suggestions,
+        )
+      : round1TaskInstructions(
+          diffSection.forAllFiles,
+          opts.structuredOutput,
+          config.review.suggestions,
+        ),
   );
 
   return parts.join("\n");
@@ -241,6 +269,7 @@ function buildFallbackDiffSection(
 function round1TaskInstructions(
   forAllFiles: boolean,
   structured = false,
+  suggestions = false,
 ): string {
   return (
     `## Your task\n` +
@@ -248,13 +277,14 @@ function round1TaskInstructions(
     `Also fill in \`prSummary\`: 1\u20133 sentences describing what this PR does in plain English — ` +
     `not a review, just a neutral description of the change from the author's perspective. ` +
     `Derive it from the diff, PR title, and description.\n` +
-    (structured ? "" : outputInstructions(forAllFiles))
+    (structured ? "" : outputInstructions(forAllFiles, suggestions))
   );
 }
 
 function finalTaskInstructions(
   forAllFiles: boolean,
   structured = false,
+  suggestions = false,
 ): string {
   return (
     `## Your task (FINAL — round 2 of 2)\n` +
@@ -267,7 +297,7 @@ function finalTaskInstructions(
     `When using REQUEST_CHANGES or COMMENT, your summary must clearly state what\n` +
     `still needs fixing and why. Be specific and direct.\n\n` +
     `Set \`prSummary\` to an empty string — it is not needed for round 2.\n` +
-    (structured ? "" : outputInstructions(forAllFiles))
+    (structured ? "" : outputInstructions(forAllFiles, suggestions))
   );
 }
 

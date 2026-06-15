@@ -13,6 +13,25 @@ const SEVERITY_EMOJI: Record<string, string> = {
   warning: "⚠️",
 };
 
+/** Render a review comment for GitHub, appending a suggestion block if present. */
+function renderCommentBody(c: ReviewComment): string {
+  const base = `${SEVERITY_EMOJI[c.severity] ?? ""} ${c.body}`.trim();
+  if (!c.suggestion) return base;
+  return `${base}\n\n\`\`\`suggestion\n${c.suggestion.trimEnd()}\n\`\`\``;
+}
+
+/** Render a one-line summary of a comment for fallback body dumps. */
+function renderCommentSummary(c: ReviewComment): string {
+  const base = `${SEVERITY_EMOJI[c.severity] ?? ""} \`${c.path}:${c.line}\` — ${c.body}`;
+  if (!c.suggestion) return base;
+  // Suggestion shown inline but collapsed for the fallback dump.
+  const preview =
+    c.suggestion.length > 80
+      ? c.suggestion.slice(0, 80).replace(/\n/g, "\\n") + "…"
+      : c.suggestion.replace(/\n/g, "\\n");
+  return `${base}\n  > Suggestion: \`${preview}\``;
+}
+
 /**
  * Post the review back to GitHub.
  *
@@ -65,7 +84,7 @@ export async function postReview(
     path: c.path,
     line: c.line,
     side: "RIGHT" as const,
-    body: `${SEVERITY_EMOJI[c.severity] ?? ""} ${c.body}`.trim(),
+    body: renderCommentBody(c),
   });
 
   const allComments = result.comments.map(toGitHubComment);
@@ -102,12 +121,7 @@ export async function postReview(
         const hiddenFallback =
           hiddenComments.length > 0
             ? "\n\n---\n\n**Comments on files not shown in the diff:**\n" +
-              hiddenComments
-                .map(
-                  (c) =>
-                    `- ${SEVERITY_EMOJI[c.severity] ?? ""} \`${c.path}:${c.line}\` — ${c.body}`,
-                )
-                .join("\n")
+              hiddenComments.map((c) => renderCommentSummary(c)).join("\n")
             : "";
 
         const partialBody = opts.summaryPostedElsewhere
@@ -135,10 +149,7 @@ export async function postReview(
   // we have no inline comments (everything is in the body), pinning to a SHA
   // is unnecessary and GitHub's convention is to omit it.
   const inlineFallback = result.comments
-    .map(
-      (c) =>
-        `- ${SEVERITY_EMOJI[c.severity] ?? ""} \`${c.path}:${c.line}\` — ${c.body}`,
-    )
+    .map((c) => renderCommentSummary(c))
     .join("\n");
   const fallbackBody = opts.summaryPostedElsewhere
     ? `${inlineFallback}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`
