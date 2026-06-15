@@ -187,7 +187,45 @@ export class LocalConnector implements SCMConnector {
       );
       return git(this.repoPath, ["diff", "HEAD", "--unified=5"]);
     }
-    return git(this.repoPath, ["diff", `${this.diffRef}..HEAD`, "--unified=5"]);
+    // Branch diff mode: diff <ref>..HEAD (committed) plus any staged changes.
+    // These are disjoint — staged changes are by definition not in HEAD yet.
+    const committed = git(this.repoPath, [
+      "diff",
+      `${this.diffRef}..HEAD`,
+      "--unified=5",
+    ]);
+    const staged = this._getStagedDiff();
+    if (!staged) return committed || "";
+    return LocalConnector.concatDiffs(committed, staged);
+  }
+
+  /** Return the staged diff (git diff --cached) or null if nothing is staged. */
+  private _getStagedDiff(): string | null {
+    try {
+      // --quiet (exit code 1 if there are staged changes, 0 if clean).
+      git(this.repoPath, ["diff", "--cached", "--quiet"], true);
+      return null; // exit 0 = nothing staged
+    } catch {
+      // exit 1 = there are staged changes — fetch the actual diff.
+      return git(this.repoPath, ["diff", "--cached", "--unified=5"]);
+    }
+  }
+
+  // ── Pure helpers (extracted for testability) ──────────────────────────────────
+
+  /** Concatenate committed and staged diffs with a separator. */
+  static concatDiffs(committed: string, staged: string): string {
+    if (!committed.trim()) return staged;
+    return (
+      committed.trimEnd() +
+      "\n\n# --- staged (uncommitted) changes below ---\n\n" +
+      staged.trimStart()
+    );
+  }
+
+  /** Deduplicated union of committed and staged file paths. */
+  static unionFiles(committed: string[], staged: string[]): string[] {
+    return [...new Set([...committed, ...staged])];
   }
 
   private getChangedFiles(): string[] {
@@ -201,9 +239,28 @@ export class LocalConnector implements SCMConnector {
         .split("\n")
         .filter(Boolean);
     }
-    return git(this.repoPath, ["diff", `${this.diffRef}..HEAD`, "--name-only"])
+    // Branch diff mode: union of committed + staged changed files.
+    const committed = git(this.repoPath, [
+      "diff",
+      `${this.diffRef}..HEAD`,
+      "--name-only",
+    ])
       .split("\n")
       .filter(Boolean);
+    const staged = this._getStagedChangedFiles();
+    return LocalConnector.unionFiles(committed, staged);
+  }
+
+  /** Return staged changed file paths or empty array if nothing is staged. */
+  private _getStagedChangedFiles(): string[] {
+    try {
+      git(this.repoPath, ["diff", "--cached", "--quiet"], true);
+      return [];
+    } catch {
+      return git(this.repoPath, ["diff", "--cached", "--name-only"])
+        .split("\n")
+        .filter(Boolean);
+    }
   }
 
   private getCommitInfo(): { title: string; body: string } {
@@ -223,8 +280,11 @@ export class LocalConnector implements SCMConnector {
         "--format=%s%n%b",
       ]);
       const [title, ...rest] = log.trim().split("\n");
+      const hasStaged = this._getStagedChangedFiles().length > 0;
       return {
-        title: title ?? `Changes since ${this.diffRef}`,
+        title:
+          (title ?? `Changes since ${this.diffRef}`) +
+          (hasStaged ? " (+ staged changes)" : ""),
         body: rest.join("\n").trim(),
       };
     } catch {
