@@ -82,7 +82,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
 export function openAIProvider(): LLMProvider {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
-  return new OpenAICompatibleProvider({ name: "openai", apiKey });
+  const baseURL = process.env.OPENAI_BASE_URL || undefined;
+  return new OpenAICompatibleProvider({ name: "openai", apiKey, baseURL });
 }
 
 export function openRouterProvider(): LLMProvider {
