@@ -7,13 +7,12 @@ import {
   formatDiscussion,
   type PRComment,
 } from "../src/github/comments.ts";
+import { parseReviewResult, extractJson } from "../src/review/parse.js";
 import {
-  parseReviewResult,
-  extractJson,
   adaptiveMaxTokens,
   adjustedDiffBudget,
   parseMaxContextTokens,
-} from "../src/review/engine.ts";
+} from "../src/review/budget.js";
 import {
   buildUserPrompt,
   outputInstructions,
