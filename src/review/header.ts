@@ -36,21 +36,12 @@ export function extractFileHeader(content: string): string {
     const trimmed = line.trim();
 
     if (inLeadingCommentBlock) {
-      // Skip shebang lines (#!), comment lines (//, #, /*, *, --),
-      // and blank lines until we hit actual code.
-      if (
-        trimmed === "" ||
-        trimmed.startsWith("#!") ||
-        trimmed.startsWith("//") ||
-        trimmed.startsWith("#") ||
-        trimmed.startsWith("/*") ||
-        trimmed.startsWith("*") ||
-        trimmed.startsWith("--") ||
-        trimmed.startsWith("<!--")
-      ) {
-        continue;
-      }
+      if (isCommentLine(trimmed)) continue;
       inLeadingCommentBlock = false;
+    } else if (isCommentLine(trimmed)) {
+      // Comment after code started — could be a block-close like */ or -->.
+      // Skip it to avoid wasting budget on comment-closing tokens.
+      continue;
     }
 
     if (header.length + line.length + 1 > MAX_HEADER_CHARS) break;
@@ -58,6 +49,20 @@ export function extractFileHeader(content: string): string {
   }
 
   return header.trimEnd();
+}
+
+/** Check if a trimmed line is purely a comment or blank. */
+function isCommentLine(trimmed: string): boolean {
+  return (
+    trimmed === "" ||
+    trimmed.startsWith("#!") ||
+    trimmed.startsWith("//") ||
+    trimmed.startsWith("#") ||
+    trimmed.startsWith("/*") ||
+    trimmed.startsWith("*") ||
+    trimmed.startsWith("--") ||
+    trimmed.startsWith("<!--")
+  );
 }
 
 /** Per-file data assembled for the prompt. */

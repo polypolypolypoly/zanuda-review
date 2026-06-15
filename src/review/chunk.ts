@@ -27,16 +27,18 @@ import type { HeaderedFile } from "./header.js";
  * languages without requiring a full parser.
  */
 const IMPORT_PATTERNS: RegExp[] = [
-  // TypeScript/JavaScript: import ... from "./foo" or require("./foo")
-  /(?:import\s.*?\sfrom\s|require\s*\(\s*)["']([^"']+)["']/g,
+  // TypeScript/JavaScript: named / default / namespace / side-effect imports + require()
+  /import\s+(?:type\s+)?(?:\{[^}]*\}\s+from\s+|\*\s+as\s+\w+\s+from\s+|\w+\s+from\s+)?["']([^"']+)["']|import\s+["']([^"']+)["']|require\s*\(\s*["']([^"']+)["']/g,
   // Python: from foo import bar | import foo
-  /(?:from\s+(\S+)\s+import|^import\s+(\S+))/gm,
+  // Exclude artifacts from other languages: Python modules start with
+  // a letter or underscore, never { or type.
+  /(?:from\s+(\S+)\s+import|^import\s+([a-zA-Z_]\S*))/gm,
   // Solidity: import "./Foo.sol" | import {Foo} from "./Foo.sol"
   /import\s+(?:\{[^}]*\}\s+from\s+)?["']([^"']+)["']/g,
   // Rust: use crate::foo::bar; | mod foo;
   /(?:use\s+(\S+?);|mod\s+(\S+);)/gm,
-  // Go: import "foo/bar"
-  /import\s+["']([^"']+)["']/g,
+  // Go: import "foo/bar" (single) or import ( "a" "b" ) (parenthesized)
+  /import\s*(?:\(([^)]+)\)|["']([^"']+)["'])/gs,
 ];
 
 /**
@@ -44,12 +46,29 @@ const IMPORT_PATTERNS: RegExp[] = [
  * Returns file-relative paths (e.g. "./foo", "../bar/baz").
  */
 export function extractImports(source: string): string[] {
+  const seen = new Set<string>();
   const imports: string[] = [];
+
+  const add = (path: string) => {
+    if (path && !seen.has(path)) {
+      seen.add(path);
+      imports.push(path);
+    }
+  };
+
   for (const pattern of IMPORT_PATTERNS) {
     for (const match of source.matchAll(pattern)) {
-      // Each pattern has a captured group with the path
-      const path = match[1] || match[2];
-      if (path) imports.push(path);
+      // Go parenthesized imports: group 1 is the body "...", extract each string
+      if (match[1] && match[1].includes('"')) {
+        const inner = [...match[1].matchAll(/["']([^"']+)["']/g)].map(
+          (m) => m[1]!,
+        );
+        for (const p of inner) add(p);
+      } else {
+        // Other patterns: group 1, 2, or 3 has the path
+        const path = match[1] || match[2] || match[3];
+        if (path) add(path);
+      }
     }
   }
   return imports;
@@ -86,7 +105,9 @@ export function resolveImport(
 
   // Add common extensions if the path doesn't have one
   const candidate = parts.join("/");
-  return candidate || null;
+  // Allow empty string — means "repo root" when importing from a nested
+  // file with enough ../ to reach the root.
+  return candidate;
 }
 
 // ── Graph types ──────────────────────────────────────────────────────────────
