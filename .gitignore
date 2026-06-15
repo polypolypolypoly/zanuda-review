@@ -7,3 +7,5 @@ dist/
 coverage/
 .cache/
 eval/.tmp/
+eval/challenges/
+eval/.cache/

@@ -1,9 +1,0 @@
-issues:
-  - file: auth.ts
-    line: 7
-    severity: blocker
-    description: SQL injection via string interpolation in username
-  - file: auth.ts
-    line: 11
-    severity: blocker
-    description: hardcoded API key committed to repo
