@@ -193,3 +193,10 @@ review:
   # Maximum characters per inline comment body. Hard floor: 400.
   # Repos and orgs may raise this but never lower it below 400.
   maxCommentChars: 400
+
+# ─── Model context window ───────────────────────────────────────────
+# When set, Zanuda trims the diff budget before the LLM call to keep the
+# total prompt within this token limit. Useful for local models with small
+# context windows (e.g. 4096). Leave commented out for cloud models.
+# Overridable via LLM_MAX_CONTEXT_TOKENS env var.
+# maxContextTokens: 4096

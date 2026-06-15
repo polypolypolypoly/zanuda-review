@@ -206,9 +206,26 @@ export async function reviewPullRequest(
       );
     }
 
+    // ── Context-window pre-flight ─────────────────────────────────────
+    // For models with small context windows (local models, LM Studio),
+    // trim the diff budget so the total prompt fits without crashing.
+    const effectiveDiffChars = config.maxContextTokens
+      ? adjustedDiffBudget(config, context.text, pr.files.length)
+      : config.review.maxDiffChars;
+    if (effectiveDiffChars < config.review.maxDiffChars) {
+      log.warn(
+        {
+          maxContextTokens: config.maxContextTokens,
+          originalMaxDiffChars: config.review.maxDiffChars,
+          adjustedMaxDiffChars: effectiveDiffChars,
+        },
+        "Diff budget reduced to fit model context window",
+      );
+    }
+
     // Build a budget-aware diff from per-file patches so the model always
     // receives complete file diffs rather than an arbitrary truncated blob.
-    const promptDiff = buildPromptDiff(pr.files, config.review.maxDiffChars);
+    const promptDiff = buildPromptDiff(pr.files, effectiveDiffChars);
     if (promptDiff.truncated) {
       log.info(
         {
@@ -437,6 +454,58 @@ export function adaptiveMaxTokens(
 ): number {
   const estimated = fileCount * 240 + 400; // 400 fixed: summary + action + JSON structure
   return Math.min(configuredMax, Math.max(1500, estimated));
+}
+
+/**
+ * Compute an effective diff character budget that keeps the total prompt
+ * within `config.maxContextTokens`. Only active when `maxContextTokens` is set
+ * (via LLM_MAX_CONTEXT_TOKENS env var).
+ *
+ * Overhead estimation:
+ *   - System prompt (config.preprompt)
+ *   - Project context (contextText from buildContext)
+ *   - Fixed task instructions (~2500 chars / ~700 tokens)
+ *   - Output budget (adaptiveMaxTokens)
+ *
+ * Token estimation uses a conservative 3.5 chars/token (code ~4, English ~3).
+ */
+export function adjustedDiffBudget(
+  config: Config,
+  contextText: string,
+  fileCount: number,
+): number {
+  if (!config.maxContextTokens) return config.review.maxDiffChars;
+
+  const systemTokens = estimateTokens(config.preprompt);
+  const contextTokens = estimateTokens(contextText);
+  const outputTokens = adaptiveMaxTokens(
+    fileCount,
+    config.generation.maxTokens,
+  );
+
+  // Task instructions + JSON schema description + round boilerplate.
+  // Measured from prompt.ts outputInstructions ~= 2500 chars.
+  const FIXED_TASK_TOKENS = 700;
+
+  const nonDiffTokens =
+    systemTokens + contextTokens + FIXED_TASK_TOKENS + outputTokens;
+  const availableDiffTokens = Math.max(
+    0,
+    config.maxContextTokens - nonDiffTokens,
+  );
+
+  // Floor: always leave room for at least 2000 chars of diff so the model
+  // has something to review — an empty diff is useless.
+  const effectiveDiffChars = Math.max(
+    2000,
+    Math.floor(availableDiffTokens * 3.5),
+  );
+
+  return Math.min(effectiveDiffChars, config.review.maxDiffChars);
+}
+
+function estimateTokens(text: string): number {
+  return Math.ceil(text.length / 3.5);
 }
 
 /**
