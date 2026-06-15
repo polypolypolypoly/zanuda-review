@@ -12,6 +12,7 @@
  */
 
 import type { FileChange } from "../platform/types.js";
+import type { HeaderedFile } from "./header.js";
 
 export interface PromptDiff {
   /** The assembled diff text to embed in the prompt. */
@@ -81,4 +82,70 @@ export function buildPromptDiff(
  */
 export function includedPaths(diff: PromptDiff): Set<string> {
   return new Set(diff.includedFiles.map((f) => f.filename));
+}
+
+// ── Batch-aware diff assembly ───────────────────────────────────────────────
+
+export interface BatchDiff {
+  /** Assembled diff text for this batch, with file headers prepended. */
+  text: string;
+  /** Files included in this batch (all have patches). */
+  files: HeaderedFile[];
+}
+
+/**
+ * Assemble the diff text for a single batch, prepending each file's
+ * structural skeleton (header) before its git diff so the model can
+ * see imports, class/contract structure, and function signatures.
+ */
+export function assembleBatchDiff(files: HeaderedFile[]): BatchDiff {
+  const parts: string[] = [];
+
+  for (const file of files) {
+    parts.push(`### \`${file.filename}\``);
+    if (file.header) {
+      parts.push("```" + guessLanguage(file.filename), file.header, "```");
+    }
+    parts.push("```diff", file.patch, "```", "");
+  }
+
+  return { text: parts.join("\n"), files };
+}
+
+/**
+ * The set of file paths in a batch. Used to filter inline comments
+ * before posting.
+ */
+export function batchFilePaths(batch: BatchDiff): Set<string> {
+  return new Set(batch.files.map((f) => f.filename));
+}
+
+/** Guess a language tag for syntax-highlighted code fences. */
+function guessLanguage(filename: string): string {
+  const ext = filename.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "ts":
+    case "tsx":
+      return "typescript";
+    case "js":
+    case "jsx":
+      return "javascript";
+    case "sol":
+      return "solidity";
+    case "py":
+      return "python";
+    case "rs":
+      return "rust";
+    case "go":
+      return "go";
+    case "yaml":
+    case "yml":
+      return "yaml";
+    case "json":
+      return "json";
+    case "md":
+      return "markdown";
+    default:
+      return "";
+  }
 }

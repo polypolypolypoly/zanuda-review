@@ -21,17 +21,28 @@ import {
   type ReviewHistory,
 } from "../context/reviewHistory.js";
 import { formatDiscussion, buildReviewCommentBody } from "./format.js";
-import type { SCMConnector, RepoRef } from "../platform/types.js";
+import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
-import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
-import { buildPromptDiff, includedPaths } from "./diff.js";
+import {
+  buildSystemPrompt,
+  buildUserPrompt,
+  buildBatchUserPrompt,
+} from "./prompt.js";
+import {
+  buildPromptDiff,
+  includedPaths,
+  assembleBatchDiff,
+  batchFilePaths,
+} from "./diff.js";
 import {
   ReviewResultSchema,
   type ReviewResult,
   buildReviewResultJsonSchema,
 } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
+import { headeredFile, type HeaderedFile } from "./header.js";
+import { batchChangedFiles, type Batch } from "./chunk.js";
 
 export interface ReviewDeps {
   connector: SCMConnector;
@@ -229,6 +240,40 @@ export async function reviewPullRequest(
       );
     }
 
+    // Build headered files from full file contents (for file headers and
+    // import-graph analysis) and try dependency-aware batching.
+    const headered = await buildHeaderedFiles(connector, ref, pr);
+    // ~14K tokens per batch keeps each batch within the model's strong
+    // attention window while respecting the effective budget.
+    const batchChars = Math.min(effectiveDiffChars, 50_000);
+    const batches = batchChangedFiles(headered, batchChars);
+
+    if (batches.length > 1) {
+      // Multi-batch sequential review — each batch reviewed with running
+      // summary from previous batches so the model has cross-batch context.
+      log.info(
+        { batches: batches.length, totalFiles: pr.files.length },
+        "Large PR: using dependency-aware batch review",
+      );
+      return reviewBatched(pr, batches, {
+        deps,
+        ref,
+        number,
+        round,
+        dryRun: opts.dryRun ?? false,
+        startingCommentId,
+        context,
+        config,
+        provider,
+        instructions,
+        repoMemory,
+        reviewHistory,
+        discussion,
+        log,
+      });
+    }
+
+    // Single batch — existing single-call path below.
     // Build a budget-aware diff from per-file patches so the model always
     // receives complete file diffs rather than an arbitrary truncated blob.
     const promptDiff = buildPromptDiff(pr.files, effectiveDiffChars);
@@ -639,4 +684,316 @@ function tryExtractBalanced(text: string): string | null {
   }
 
   return null; // unclosed brace
+}
+
+// ── Batch review ────────────────────────────────────────────────────────────
+
+interface BatchedReviewOpts {
+  deps: ReviewDeps;
+  ref: RepoRef;
+  number: number;
+  round: number;
+  dryRun: boolean;
+  startingCommentId: number | null;
+  context: Awaited<ReturnType<typeof buildContext>>;
+  config: Config;
+  provider: LLMProvider;
+  instructions: string | undefined;
+  repoMemory: string | null;
+  reviewHistory: ReviewHistory | null;
+  discussion: string | undefined;
+  log: typeof logger;
+}
+
+/**
+ * Fetch full file contents and build HeaderedFile objects for files with
+ * patches. Files without patches (binary, too large) are skipped.
+ */
+async function buildHeaderedFiles(
+  connector: SCMConnector,
+  ref: RepoRef,
+  pr: PullRequest,
+): Promise<HeaderedFile[]> {
+  const result: HeaderedFile[] = [];
+
+  // Fetch full file contents in parallel for all files with patches.
+  // Use the base SHA — config/context rules require reading from base,
+  // but for the diff itself the file contents are structural only
+  // (imports, declarations) which don't change between base and head.
+  const contents = await Promise.all(
+    pr.files
+      .filter((f) => f.patch)
+      .map(async (f) => {
+        try {
+          const content = await connector.readFile(ref, f.filename, pr.headSha);
+          return { filename: f.filename, content, patch: f.patch! };
+        } catch {
+          return { filename: f.filename, content: null, patch: f.patch! };
+        }
+      }),
+  );
+
+  for (const { filename, content, patch } of contents) {
+    if (content !== null) {
+      const hf = headeredFile(filename, content, patch);
+      if (hf) result.push(hf);
+    } else {
+      // Fallback: no full content available, use empty header
+      result.push({ filename, header: "", patch, weight: patch.length });
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Sequential multi-batch review of a large PR.
+ *
+ * Each batch reviews its files in isolation with a running summary from
+ * previous batches as context. The final batch produces the overall verdict.
+ * All inline comments are accumulated and posted together.
+ */
+async function reviewBatched(
+  pr: PullRequest,
+  batches: Batch[],
+  opts: BatchedReviewOpts,
+): Promise<
+  ReviewResult & {
+    progressCommentId: number | null;
+    stale: boolean;
+    headSha: string;
+  }
+> {
+  const {
+    deps,
+    ref,
+    number,
+    round,
+    dryRun,
+    startingCommentId,
+    context,
+    config,
+    provider,
+    instructions,
+    repoMemory,
+    reviewHistory,
+    discussion,
+    log,
+  } = opts;
+
+  const allComments: ReviewResult["comments"] = [];
+  const allFilesSummary: ReviewResult["filesSummary"] = [];
+  let runningSummary = "";
+  let finalResult: ReviewResult | null = null;
+
+  for (let i = 0; i < batches.length; i++) {
+    const batch = batches[i]!;
+    const isLast = i === batches.length - 1;
+    const batchDiff = assembleBatchDiff(batch.files);
+
+    log.info(
+      {
+        batch: i + 1,
+        totalBatches: batches.length,
+        files: batch.files.length,
+        chars: batch.weight,
+        isLast,
+      },
+      "Reviewing batch",
+    );
+
+    const completion = await completeWithRetry(provider, {
+      system: buildSystemPrompt(config),
+      user: buildBatchUserPrompt(pr, context, config, batchDiff, {
+        batchIndex: i + 1,
+        totalBatches: batches.length,
+        isLastBatch: isLast,
+        runningSummary: runningSummary || undefined,
+        round,
+        discussion,
+        repoMemory: repoMemory ?? undefined,
+        reviewHistory: reviewHistory
+          ? formatReviewHistory(reviewHistory)
+          : undefined,
+        instructions,
+        structuredOutput: provider.supportsStructuredOutput,
+      }),
+      model: config.models[config.provider],
+      temperature: config.generation.temperature,
+      maxTokens: adaptiveMaxTokens(
+        batch.files.length,
+        config.generation.maxTokens,
+      ),
+      jsonSchema: isLast
+        ? buildReviewResultJsonSchema(config.review.maxCommentChars)
+        : undefined, // intermediate batches use prompt-based format
+    });
+
+    const parsed = parseReviewResult(completion.text, {
+      structured: provider.supportsStructuredOutput,
+    });
+
+    // Accumulate comments and file summaries
+    allComments.push(...parsed.comments);
+    allFilesSummary.push(...parsed.filesSummary);
+
+    // Extract batch findings for the running summary
+    const batchFindings = extractBatchFindings(completion.text);
+    if (batchFindings) {
+      runningSummary += `\n## Findings from batch ${i + 1} (${batch.files.map((f) => `\`${f.filename}\``).join(", ")})\n${batchFindings}\n`;
+    }
+
+    if (isLast) {
+      finalResult = parsed;
+
+      // If the final batch's action is COMMENT but we have blockers from
+      // earlier batches, upgrade to REQUEST_CHANGES
+      if (
+        parsed.action === "COMMENT" &&
+        allComments.some((c) => c.severity === "blocker")
+      ) {
+        finalResult = { ...parsed, action: "REQUEST_CHANGES" };
+      }
+    } else if (allComments.some((c) => c.severity === "blocker")) {
+      // Early stop: blocker found, skip remaining batches
+      log.info(
+        { foundInBatch: i + 1, remainingBatches: batches.length - i - 1 },
+        "Blocker found — skipping remaining batches",
+      );
+      finalResult = {
+        prSummary: parsed.prSummary,
+        summary: `Blockers found in batch ${i + 1}. Remaining ${batches.length - i - 1} batch(es) skipped.`,
+        action: "REQUEST_CHANGES",
+        filesSummary: allFilesSummary,
+        comments: allComments,
+      };
+      break;
+    }
+  }
+
+  if (!finalResult) {
+    // Should not happen — at least one batch always runs
+    finalResult = {
+      prSummary: "",
+      summary: "No batches reviewed.",
+      action: "COMMENT",
+      filesSummary: [],
+      comments: [],
+    };
+  }
+
+  // Assemble final result with all accumulated data
+  const result: ReviewResult = {
+    ...finalResult,
+    filesSummary: deduplicateFilesSummary(allFilesSummary),
+    comments: allComments,
+  };
+
+  // ── Stale-commit guard ──────────────────────────────────────────
+  if (!dryRun) {
+    let currentHead: string | null = null;
+    try {
+      const fresh = await deps.connector.fetchPR(ref, number);
+      currentHead = fresh.headSha;
+    } catch (err) {
+      log.warn({ err }, "Stale-check: failed to re-fetch PR head");
+    }
+
+    if (currentHead !== null && currentHead !== pr.headSha) {
+      log.info(
+        { oldHead: pr.headSha, newHead: currentHead },
+        "PR head changed — discarding batch result",
+      );
+      if (startingCommentId !== null) {
+        await deps.connector
+          .editComment(
+            ref,
+            startingCommentId,
+            `🔄 **New commits pushed during review** - discarding stale result.`,
+          )
+          .catch(() => undefined);
+      }
+      return {
+        ...result,
+        progressCommentId: startingCommentId,
+        stale: true,
+        headSha: pr.headSha,
+      };
+    }
+  }
+
+  if (!dryRun) {
+    // Update progress comment with final verdict
+    let progressUpdated = false;
+    if (startingCommentId !== null) {
+      try {
+        await deps.connector.editComment(
+          ref,
+          startingCommentId,
+          buildReviewCommentBody(result, pr.changedFiles.length, {
+            diffTruncated: false, // all files reviewed across batches
+          }),
+        );
+        progressUpdated = true;
+      } catch (err) {
+        log.warn({ err }, "Failed to update progress comment");
+      }
+    }
+
+    // Collect all visible file paths across all batches
+    const allVisiblePaths = new Set<string>();
+    for (const batch of batches) {
+      const batchDiff = assembleBatchDiff(batch.files);
+      for (const p of batchFilePaths(batchDiff)) {
+        allVisiblePaths.add(p);
+      }
+    }
+
+    await deps.connector.postReview(pr, result, config, {
+      summaryPostedElsewhere: progressUpdated,
+      visibleFilePaths: allVisiblePaths,
+    });
+    log.info(
+      { comments: allComments.length, batches: batches.length },
+      "Batch review posted",
+    );
+  }
+
+  return {
+    ...result,
+    progressCommentId: startingCommentId,
+    stale: false,
+    headSha: pr.headSha,
+  };
+}
+
+/** Extract the batchFindings field from a model response. */
+function extractBatchFindings(text: string): string | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (
+      typeof parsed.batchFindings === "string" &&
+      parsed.batchFindings.length > 0
+    ) {
+      return parsed.batchFindings;
+    }
+  } catch {
+    // JSON parse failed — try regex extraction as fallback
+    const match = text.match(/"batchFindings"\s*:\s*"([^"]+)"/);
+    if (match) return match[1]!;
+  }
+  return null;
+}
+
+/** Deduplicate filesSummary entries by path, keeping the first occurrence. */
+function deduplicateFilesSummary(
+  summaries: ReviewResult["filesSummary"],
+): ReviewResult["filesSummary"] {
+  const seen = new Set<string>();
+  return summaries.filter((s) => {
+    const entry = s as { path?: string };
+    if (!entry.path || seen.has(entry.path)) return false;
+    seen.add(entry.path);
+    return true;
+  });
 }
