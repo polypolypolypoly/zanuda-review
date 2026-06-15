@@ -59,7 +59,7 @@ function buildReplySystem(reviewerLogin: string, preprompt: string): string {
     `Someone has mentioned you in a PR comment after you have already posted a review.\n\n` +
     `Reply rules:\n` +
     `- Get straight to the point. No greetings, no filler.\n` +
-    `- Answer questions directly in 2-4 sentences max.\n` +
+    `- Answer questions directly. MAX 400 CHARACTERS per reply.\n` +
     `- If reconsidering a point, either acknowledge it concisely or stand your ground with a reason.\n` +
     `- Do not be sycophantic. Do not start with "Great question" or similar.`
   );
