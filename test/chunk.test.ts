@@ -77,6 +77,55 @@ import (
     assert.ok(imports.includes("./pkg/logger"));
   });
 
+  it("extracts C/C++ local #includes", () => {
+    const source = `
+#include <stdio.h>
+#include "../include/config.h"
+#include "./utils/helpers.h"
+    `;
+    const imports = extractImports(source);
+    // System includes (<...>) are NOT extracted — only local (") ones.
+    assert.ok(!imports.includes("stdio.h"));
+    assert.ok(imports.includes("../include/config.h"));
+    assert.ok(imports.includes("./utils/helpers.h"));
+  });
+
+  it("extracts Java imports", () => {
+    const source = `
+import java.util.List;
+import com.project.utils.Helper;
+import static org.mockito.Mockito.*;
+    `;
+    const imports = extractImports(source);
+    assert.ok(imports.includes("java.util.List"));
+    assert.ok(imports.includes("com.project.utils.Helper"));
+  });
+
+  it("extracts Ruby require_relative calls", () => {
+    const source = `
+require 'json'
+require_relative '../lib/helpers'
+require_relative './config'
+    `;
+    const imports = extractImports(source);
+    // Regular require is load-path based, not file-relative — ignored.
+    assert.ok(!imports.includes("json"));
+    assert.ok(imports.includes("../lib/helpers"));
+    assert.ok(imports.includes("./config"));
+  });
+
+  it("extracts CSS @import statements", () => {
+    const source = `
+@import './variables.css';
+@import url('../theme/colors.css');
+@import './reset';
+    `;
+    const imports = extractImports(source);
+    assert.ok(imports.includes("./variables.css"));
+    assert.ok(imports.includes("../theme/colors.css"));
+    assert.ok(imports.includes("./reset"));
+  });
+
   it("returns empty array for files with no imports", () => {
     assert.deepStrictEqual(extractImports("const x = 1;\nconst y = 2;"), []);
   });
@@ -141,6 +190,25 @@ describe("resolveImport", () => {
     // From "src/app.ts" importing "../.."  → ""
     const result = resolveImport("src/app.ts", "../..");
     assert.equal(result, "");
+  });
+
+  it("resolves Java dot-path imports", () => {
+    assert.equal(
+      resolveImport(
+        "src/main/java/com/project/App.java",
+        "com.project.utils.Helper",
+      ),
+      "com/project/utils/Helper.java",
+    );
+    assert.equal(
+      resolveImport("Foo.java", "com.example.Lib"),
+      "com/example/Lib.java",
+    );
+  });
+
+  it("does not match single-word identifiers as Java imports", () => {
+    // "List" alone is not a Java package path — must have at least one dot
+    assert.equal(resolveImport("Foo.java", "List"), null);
   });
 });
 

@@ -184,6 +184,25 @@ describe("assembleBatchDiff", () => {
       },
       { filename: "data.json", header: "{", patch: "diff", weight: 15 },
       { filename: "README.md", header: "# Title", patch: "diff", weight: 20 },
+      {
+        filename: "Service.java",
+        header: "import com.Foo",
+        patch: "diff",
+        weight: 26,
+      },
+      { filename: "utils.c", header: "#include", patch: "diff", weight: 22 },
+      {
+        filename: "helpers.cpp",
+        header: "#include",
+        patch: "diff",
+        weight: 24,
+      },
+      { filename: "types.h", header: "#ifndef", patch: "diff", weight: 20 },
+      { filename: "script.rb", header: "require", patch: "diff", weight: 22 },
+      { filename: "styles.css", header: "@import", patch: "diff", weight: 24 },
+      { filename: "page.html", header: "<!DOCTYPE", patch: "diff", weight: 26 },
+      { filename: "config.xml", header: "<?xml", patch: "diff", weight: 22 },
+      { filename: "icon.svg", header: "<svg", patch: "diff", weight: 18 },
       { filename: "unknown.xyz", header: "stuff", patch: "diff", weight: 22 },
     ];
 
@@ -192,6 +211,13 @@ describe("assembleBatchDiff", () => {
     assert.ok(result.text.includes("```python"));
     assert.ok(result.text.includes("```rust"));
     assert.ok(result.text.includes("```go"));
+    assert.ok(result.text.includes("```java"));
+    assert.ok(result.text.includes("```c"));
+    assert.ok(result.text.includes("```cpp"));
+    assert.ok(result.text.includes("```ruby"));
+    assert.ok(result.text.includes("```css"));
+    assert.ok(result.text.includes("```html"));
+    assert.ok(result.text.includes("```xml"));
     assert.ok(result.text.includes("```yaml"));
     assert.ok(result.text.includes("```json"));
     assert.ok(result.text.includes("```markdown"));

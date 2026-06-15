@@ -138,6 +138,27 @@ function guessLanguage(filename: string): string {
       return "rust";
     case "go":
       return "go";
+    case "java":
+      return "java";
+    case "c":
+      return "c";
+    case "cpp":
+    case "cc":
+    case "cxx":
+      return "cpp";
+    case "h":
+    case "hpp":
+      return "cpp";
+    case "rb":
+      return "ruby";
+    case "css":
+      return "css";
+    case "html":
+    case "htm":
+      return "html";
+    case "xml":
+    case "svg":
+      return "xml";
     case "yaml":
     case "yml":
       return "yaml";

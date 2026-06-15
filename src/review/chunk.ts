@@ -39,6 +39,14 @@ const IMPORT_PATTERNS: RegExp[] = [
   /(?:use\s+(\S+?);|mod\s+(\S+);)/gm,
   // Go: import "foo/bar" (single) or import ( "a" "b" ) (parenthesized)
   /import\s*(?:\(([^)]+)\)|["']([^"']+)["'])/gs,
+  // C/C++: #include "foo.h" (local) — system includes <foo.h> are ignored
+  /#include\s+"([^"]+)"/g,
+  // Java: import com.foo.Bar;
+  /import\s+([a-z_][\w.]*)\s*;/g,
+  // Ruby: require_relative '../foo' — regular require is load-path, not file-relative
+  /require_relative\s+['"]([^'"]+)['"]/g,
+  // CSS: @import './foo.css' | @import url('./foo.css')
+  /@import\s+(?:url\s*\(\s*)?["']([^"']+)["']/g,
 ];
 
 /**
@@ -76,7 +84,11 @@ export function extractImports(source: string): string[] {
 
 /**
  * Resolve a relative import path to a repo-relative file path.
- * Only handles relative imports ("./foo", "../bar").
+ *
+ * Handles:
+ *   - Relative paths ("./foo", "../bar") — resolved against fromFile's directory.
+ *   - Java-style dot-path imports ("com.foo.Bar") — dots → slashes, .java appended.
+ *
  * Absolute imports ("react", "@scope/pkg") are ignored — they don't
  * reference other files in the changed set.
  */
@@ -84,6 +96,12 @@ export function resolveImport(
   fromFile: string,
   importPath: string,
 ): string | null {
+  // Java-style dot-path imports: convert dots to slashes, append .java.
+  // These don't start with "." but are intra-project file references.
+  if (/^[a-z_]\w*(?:\.[a-zA-Z_]\w*)+$/.test(importPath)) {
+    return importPath.replace(/\./g, "/") + ".java";
+  }
+
   // Only resolve relative imports
   if (!importPath.startsWith(".")) return null;
 
