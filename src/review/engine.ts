@@ -835,15 +835,37 @@ async function reviewBatched(
   let runningSummary = "";
   let finalResult: ReviewResult | null = null;
 
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i]!;
-    const isLast = i === batches.length - 1;
+  // ── MAX_BATCHES backstop ──────────────────────────────────────────
+  // Prevent unbounded cost on pathological PRs. Beyond this, select the
+  // highest-signal batches by weight and note unreviewed files honestly.
+  const MAX_BATCHES = 10;
+  let unreviewedFiles: string[] = [];
+  let effectiveBatches = batches;
+  if (batches.length > MAX_BATCHES) {
+    const sortedBatches = [...batches].sort((a, b) => b.weight - a.weight);
+    effectiveBatches = sortedBatches.slice(0, MAX_BATCHES);
+    const skipped = sortedBatches.slice(MAX_BATCHES);
+    unreviewedFiles = skipped.flatMap((b) => b.files.map((f) => f.filename));
+    log.warn(
+      {
+        totalBatches: batches.length,
+        kept: MAX_BATCHES,
+        skipped: batches.length - MAX_BATCHES,
+        unreviewedFiles: unreviewedFiles.length,
+      },
+      "MAX_BATCHES exceeded — selecting highest-signal batches",
+    );
+  }
+
+  for (let i = 0; i < effectiveBatches.length; i++) {
+    const batch = effectiveBatches[i]!;
+    const isLast = i === effectiveBatches.length - 1;
     const batchDiff = assembleBatchDiff(batch.files);
 
     log.info(
       {
         batch: i + 1,
-        totalBatches: batches.length,
+        totalBatches: effectiveBatches.length,
         files: batch.files.length,
         chars: batch.weight,
         isLast,
@@ -855,7 +877,7 @@ async function reviewBatched(
       system: buildSystemPrompt(config),
       user: buildBatchUserPrompt(pr, context, config, batchDiff, {
         batchIndex: i + 1,
-        totalBatches: batches.length,
+        totalBatches: effectiveBatches.length,
         isLastBatch: isLast,
         runningSummary: runningSummary || undefined,
         round,
@@ -889,7 +911,7 @@ async function reviewBatched(
         (c) => c.severity === "warning",
       ).length;
       const parts: string[] = [
-        `_Batch ${i + 1} of ${batches.length} complete._`,
+        `_Batch ${i + 1} of ${effectiveBatches.length} complete._`,
       ];
       if (blockerCount > 0)
         parts.push(
@@ -941,14 +963,17 @@ async function reviewBatched(
     } else if (allComments.some((c) => c.severity === "blocker")) {
       // Early stop: blocker found, skip remaining batches
       log.info(
-        { foundInBatch: i + 1, remainingBatches: batches.length - i - 1 },
+        {
+          foundInBatch: i + 1,
+          remainingBatches: effectiveBatches.length - i - 1,
+        },
         "Blocker found — skipping remaining batches",
       );
       finalResult = {
         prSummary:
           parsed.prSummary ||
           `(Partial review — stopped after batch ${i + 1} due to blockers)`,
-        summary: `Blockers found in batch ${i + 1}. Remaining ${batches.length - i - 1} batch(es) skipped.`,
+        summary: `Blockers found in batch ${i + 1}. Remaining ${effectiveBatches.length - i - 1} batch(es) skipped.`,
         action: "REQUEST_CHANGES",
         filesSummary: allFilesSummary,
         comments: allComments,
@@ -972,7 +997,21 @@ async function reviewBatched(
   const result: ReviewResult = {
     ...finalResult,
     filesSummary: deduplicateFilesSummary(allFilesSummary),
-    comments: allComments,
+    comments: deduplicateComments(allComments),
+    // Append unreviewed files note when MAX_BATCHES exceeded
+    summary:
+      unreviewedFiles.length > 0
+        ? finalResult.summary +
+          `\n\n⚠️ **${unreviewedFiles.length} file(s) were NOT reviewed** ` +
+          `(batch limit reached). The following were excluded:\n` +
+          unreviewedFiles
+            .slice(0, 20)
+            .map((f) => `- \`${f}\``)
+            .join("\n") +
+          (unreviewedFiles.length > 20
+            ? `\n- ... and ${unreviewedFiles.length - 20} more`
+            : "")
+        : finalResult.summary,
   };
 
   // ── Stale-commit guard ──────────────────────────────────────────
@@ -1040,7 +1079,7 @@ async function reviewBatched(
       visibleFilePaths: allVisiblePaths,
     });
     log.info(
-      { comments: allComments.length, batches: batches.length },
+      { comments: allComments.length, batches: effectiveBatches.length },
       "Batch review posted",
     );
   }
@@ -1062,6 +1101,32 @@ function deduplicateFilesSummary(
     // s is FileSummary (typed by Zod), path is always a string.
     if (!s.path || seen.has(s.path)) return false;
     seen.add(s.path);
+    return true;
+  });
+}
+
+/**
+ * Deduplicate review comments across batches.
+ * Two batches can flag the same cross-cutting issue independently
+ * (e.g., a fence-break pattern in two files). Dedup by path + line +
+ * normalized body (stripped severity emoji, trimmed, first 80 chars).
+ */
+function deduplicateComments(
+  comments: ReviewResult["comments"],
+): ReviewResult["comments"] {
+  const seen = new Set<string>();
+  return comments.filter((c) => {
+    // Strip severity emoji prefix (🛑 or ⚠️) — use unicode-aware regex.
+    // Strip leading severity emoji + space (🛑 or ⚠️). The `u` flag
+    // handles multi-code-unit emoji without charset surrogate errors.
+    const normalized = c.body
+      .replace(/^\p{Extended_Pictographic}\s*/u, "")
+      .trim()
+      .toLowerCase()
+      .slice(0, 80);
+    const key = `${c.path}:${c.line}:${normalized}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 }
