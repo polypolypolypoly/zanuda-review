@@ -92,7 +92,7 @@ export const ReviewResultSchema = z.object({
    * single-call reviews and the final batch. Extracted by the engine and
    * concatenated into the running summary string.
    */
-  batchFindings: z.string().optional().catch(undefined),
+  batchFindings: z.string().max(600).optional().catch(undefined),
 });
 
 export type FileSummary = z.infer<typeof FileSummarySchema>;
@@ -119,7 +119,7 @@ export function buildReviewResultJsonSchema(
         type: "string",
         enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
       },
-      batchFindings: { type: "string" },
+      batchFindings: { type: "string", maxLength: 600 },
       filesSummary: {
         type: "array",
         items: {

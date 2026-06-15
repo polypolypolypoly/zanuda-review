@@ -202,11 +202,11 @@ context:
 
 # ─── Review behaviour ────────────────────────────────────────────────
 review:
-  # Largest diff (in characters) to send to the model. Modern models
-  # have 128K–200K+ context windows — this default assumes ~60K tokens
-  # for the diff (~210K chars) out of a 200K window, leaving headroom
-  # for system prompt, context, and output. When LLM_MAX_CONTEXT_TOKENS
-  # is set (local models), the effective budget is auto-clamped lower.
+  # Largest diff (in characters) to send to the model in a single call.
+  # Each batch is capped at 50 000 chars (~14K tokens) regardless of this
+  # setting — larger PRs are split into multiple batches with dependency-
+  # aware grouping. This ceiling only takes effect through the context-
+  # window pre-flight check (LLM_MAX_CONTEXT_TOKENS).
   maxDiffChars: 200000
   # Post inline comments anchored to specific lines (true) or a single
   # summary comment (false).

@@ -240,41 +240,53 @@ export async function reviewPullRequest(
       );
     }
 
-    // Build headered files from full file contents (for file headers and
-    // import-graph analysis) and try dependency-aware batching.
-    const headered = await buildHeaderedFiles(connector, ref, pr);
+    // ── Large PR detection ──────────────────────────────────────────
     // ~14K tokens per batch keeps each batch within the model's strong
-    // attention window. Always cap at MAX_BATCH_CHARS even for single-batch
-    // PRs — a 180K-char dump dilutes attention, defeating the purpose.
-    // If a PR exceeds this, the batch path splits it. If batchChangedFiles
-    // returns 1 batch, we still use this cap (not effectiveDiffChars directly).
+    // attention window. Batches are capped at this size regardless of
+    // the overall diff budget.
     const MAX_BATCH_CHARS = 50_000;
     const batchChars = Math.min(effectiveDiffChars, MAX_BATCH_CHARS);
-    const batches = batchChangedFiles(headered, batchChars);
 
-    if (batches.length > 1) {
-      // Multi-batch sequential review — each batch reviewed with running
-      // summary from previous batches so the model has cross-batch context.
-      log.info(
-        { batches: batches.length, totalFiles: pr.files.length },
-        "Large PR: using dependency-aware batch review",
-      );
-      return reviewBatched(pr, batches, {
-        deps,
-        ref,
-        number,
-        round,
-        dryRun: opts.dryRun ?? false,
-        startingCommentId,
-        context,
-        config,
-        provider,
-        instructions,
-        repoMemory,
-        reviewHistory,
-        discussion,
-        log,
-      });
+    // Estimate total diff size from per-file patches to decide whether
+    // we need the batch path. This is a cheap check that avoids N extra
+    // GitHub API calls (readFile) on small PRs — upholding the
+    // "zero overhead" claim for the common single-batch case.
+    const totalPatchChars = pr.files.reduce(
+      (sum, f) => sum + (f.patch?.length ?? 0),
+      0,
+    );
+
+    if (totalPatchChars > batchChars) {
+      // Build headered files from full file contents (for file headers
+      // and import-graph analysis) and try dependency-aware batching.
+      const headered = await buildHeaderedFiles(connector, ref, pr);
+      const batches = batchChangedFiles(headered, batchChars);
+
+      if (batches.length > 1) {
+        // Multi-batch sequential review — each batch reviewed with
+        // running summary from previous batches so the model has
+        // cross-batch context.
+        log.info(
+          { batches: batches.length, totalFiles: pr.files.length },
+          "Large PR: using dependency-aware batch review",
+        );
+        return reviewBatched(pr, batches, {
+          deps,
+          ref,
+          number,
+          round,
+          dryRun: opts.dryRun ?? false,
+          startingCommentId,
+          context,
+          config,
+          provider,
+          instructions,
+          repoMemory,
+          reviewHistory,
+          discussion,
+          log,
+        });
+      }
     }
 
     // Single batch — existing single-call path below.
@@ -750,7 +762,12 @@ async function buildHeaderedFiles(
       const hf = headeredFile(filename, content, patch);
       if (hf) result.push(hf);
     } else {
-      // Fallback: no full content available, use empty header
+      // Fallback: no full content available, use empty header.
+      // Common causes: the file was added in this PR (doesn't exist at
+      // baseSha — fetching from headSha would give us the content but
+      // violates the trust boundary), or the file is too large / binary.
+      // New files are exactly where structural context helps most; this
+      // is a known trade-off in favour of security.
       result.push({ filename, header: "", patch, weight: patch.length });
     }
   }
@@ -878,6 +895,16 @@ async function reviewBatched(
         `\n## Findings from batch ${i + 1} (${batch.files.map((f) => `\`${f.filename}\``).join(", ")})\n` +
         `> ⚠️ The above is the previous model's best-effort notes. Verify independently.\n` +
         `${findings}\n`;
+
+      // Cap total running summary to prevent unbounded prompt growth across
+      // many batches. The batchFindings schema already caps each entry at 600
+      // chars; this is a safety net for the running total.
+      const MAX_RUNNING_SUMMARY_CHARS = 5000;
+      if (runningSummary.length > MAX_RUNNING_SUMMARY_CHARS) {
+        runningSummary =
+          runningSummary.slice(0, MAX_RUNNING_SUMMARY_CHARS) +
+          `\n> _(running summary truncated at ${MAX_RUNNING_SUMMARY_CHARS} chars — earlier findings omitted)_\n`;
+      }
     }
 
     if (isLast) {
@@ -898,7 +925,9 @@ async function reviewBatched(
         "Blocker found — skipping remaining batches",
       );
       finalResult = {
-        prSummary: parsed.prSummary,
+        prSummary:
+          parsed.prSummary ||
+          `(Partial review — stopped after batch ${i + 1} due to blockers)`,
         summary: `Blockers found in batch ${i + 1}. Remaining ${batches.length - i - 1} batch(es) skipped.`,
         action: "REQUEST_CHANGES",
         filesSummary: allFilesSummary,

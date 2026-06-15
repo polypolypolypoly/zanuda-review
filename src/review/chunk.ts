@@ -112,6 +112,27 @@ export function resolveImport(
 
 // ── Graph types ──────────────────────────────────────────────────────────────
 
+/** Common file extensions tried when matching resolved imports to filenames. */
+const FILE_EXTENSIONS = [
+  "",
+  ".ts",
+  ".tsx",
+  ".js",
+  ".jsx",
+  ".sol",
+  ".py",
+  ".rs",
+  ".go",
+  ".java",
+  ".c",
+  ".cpp",
+  ".cc",
+  ".h",
+  ".hpp",
+  ".rb",
+  ".css",
+];
+
 interface Graph {
   /** Number of nodes. */
   n: number;
@@ -146,17 +167,7 @@ function buildImportGraph(
       if (resolvedPath === null) continue;
 
       // Check with common extensions
-      for (const ext of [
-        "",
-        ".ts",
-        ".tsx",
-        ".js",
-        ".jsx",
-        ".sol",
-        ".py",
-        ".rs",
-        ".go",
-      ]) {
+      for (const ext of FILE_EXTENSIONS) {
         const target = fileIndex.get(resolvedPath + ext);
         if (target !== undefined) {
           resolved.add(target);
@@ -273,18 +284,23 @@ function condenseSCCs(
   return nodes;
 }
 
-// ── Spectral bisection for oversize SCCs ─────────────────────────────────────
+// ── Spectral split for oversize SCCs ─────────────────────────────────────────
 
 /**
- * Split an oversize SCC into two sub-batches by finding the sparsest cut
- * in the subgraph using the Fiedler vector (spectral bisection).
+ * Split an oversize SCC into two sub-batches via spectral partitioning.
  *
  * Algorithm:
  *   1. Build the symmetric adjacency matrix for the SCC subgraph
- *      (edge if either file imports the other)
  *   2. Build the Laplacian L = D - A
- *   3. Compute the Fiedler vector (second eigenvector) via power iteration
- *   4. Sort nodes by Fiedler value and find the capacity-respecting split
+ *   3. Compute the dominant eigenvector of L (after deflating the all-ones
+ *      null-space vector for λ=0) via power iteration.
+ *      NOTE: This is NOT the Fiedler vector (second-smallest eigenvalue, λ₂).
+ *      It is the dominant (largest) eigenvector after null-space removal,
+ *      which gives a spectral split based on eigenvector centrality — nodes
+ *      with similar degree/connectivity get similar values. For the small
+ *      graphs here (2-10 nodes), any capacity-respecting spectral cut is
+ *      sufficient.
+ *   4. Sort nodes by eigenvector value and find the capacity-respecting split
  *      that minimises the number of edges crossing the partition
  *
  * This is a safety valve for the rare case where a strongly connected
@@ -314,10 +330,15 @@ function splitOversizeSCC(
       const targetFile = files[indices[j]!]!;
       for (const imp of srcImports) {
         const resolved = resolveImport(srcFile.filename, imp);
-        if (resolved && targetFile.filename.startsWith(resolved)) {
-          adj[i]![j] = true;
-          adj[j]![i] = true; // symmetric
-          break;
+        if (resolved === null) continue;
+        // Exact match with common extensions — same logic as buildImportGraph.
+        // startsWith would match "src/a" against "src/ab.ts", creating false edges.
+        for (const ext of FILE_EXTENSIONS) {
+          if (targetFile.filename === resolved + ext) {
+            adj[i]![j] = true;
+            adj[j]![i] = true;
+            break;
+          }
         }
       }
     }
@@ -332,14 +353,16 @@ function splitOversizeSCC(
     }),
   );
 
-  // Power iteration for the Fiedler vector (second-smallest eigenvalue).
-  // Use random initialization, orthogonalize against all-ones vector.
-  const fiedler = computeFiedlerVector(laplacian);
+  // Power iteration for the dominant eigenvector of L (after deflating
+  // the all-ones null-space). This is NOT the Fiedler vector (λ₂) — it is
+  // the largest-eigenvalue vector after null-space removal, giving a
+  // spectral split based on eigenvector centrality.
+  const eigenvec = computeDominantEigenvector(laplacian);
 
-  // Sort by Fiedler value and find the best capacity-respecting split.
+  // Sort by eigenvector value and find the best capacity-respecting split.
   const indexed = indices.map((fileIdx, i) => ({
     file: files[fileIdx]!,
-    value: fiedler[i]!,
+    value: eigenvec[i]!,
   }));
   indexed.sort((a, b) => a.value - b.value);
 
@@ -381,15 +404,35 @@ function splitOversizeSCC(
 
   const left = indexed.slice(0, bestSplit).map((x) => x.file);
   const right = indexed.slice(bestSplit).map((x) => x.file);
-  return [left, right];
+
+  // Recurse: if either half still exceeds capacity, split it further.
+  // This guarantees the documented invariant "each batch ≤ capacity chars"
+  // even for pathological SCCs larger than 2× capacity.
+  const result: HeaderedFile[][] = [];
+  for (const half of [left, right]) {
+    const halfWeight = half.reduce((s, f) => s + f.weight, 0);
+    if (halfWeight > capacity && half.length > 1) {
+      // Find indices of these files in the original array for recursion
+      const halfIndices = half
+        .map((f) => files.indexOf(f))
+        .filter((i) => i >= 0);
+      if (halfIndices.length > 1) {
+        result.push(...splitOversizeSCC(files, halfIndices, capacity));
+        continue;
+      }
+    }
+    result.push(half);
+  }
+  return result;
 }
 
 /**
- * Compute the Fiedler vector (eigenvector for the second-smallest eigenvalue)
- * of a graph Laplacian using power iteration with deflation.
- * Converges in O(n² × iterations) for an n×n matrix.
+ * Compute the dominant eigenvector of a graph Laplacian after deflating
+ * the all-ones null-space vector (λ=0). Uses power iteration with
+ * orthogonalization. NOT the Fiedler vector — see splitOversizeSCC
+ * for the rationale.
  */
-function computeFiedlerVector(L: number[][]): number[] {
+function computeDominantEigenvector(L: number[][]): number[] {
   const n = L.length;
   const MAX_ITER = 100;
   const TOLERANCE = 1e-6;
@@ -409,9 +452,8 @@ function computeFiedlerVector(L: number[][]): number[] {
   for (let i = 0; i < n; i++) x[i]! /= norm;
 
   // Power iteration: repeatedly apply L, orthogonalize, normalize.
-  // In the limit, this converges to the dominant eigenvector.
-  // Since we orthogonalize against all-ones (the null-space vector),
-  // it converges to the Fiedler vector.
+  // Converges to the dominant eigenvector (largest eigenvalue) since
+  // we orthogonalize against the all-ones null-space vector at each step.
   for (let iter = 0; iter < MAX_ITER; iter++) {
     // Multiply: y = L * x
     const y = Array(n).fill(0) as number[];
@@ -459,7 +501,7 @@ export interface Batch {
  *   - Every file with a patch appears in exactly one batch.
  *   - Each batch is ≤ capacity chars.
  *   - Files in the same SCC are always in the same batch (unless the SCC
- *     itself exceeds capacity — then spectral bisection splits it).
+ *     itself exceeds capacity — then a spectral split divides it).
  *   - Batches respect topological order of the import graph — dependencies
  *     are reviewed before dependants.
  *
