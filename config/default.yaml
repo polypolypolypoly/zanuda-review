@@ -193,5 +193,3 @@ review:
   # Maximum characters per inline comment body. Hard floor: 400.
   # Repos and orgs may raise this but never lower it below 400.
   maxCommentChars: 400
-
-
