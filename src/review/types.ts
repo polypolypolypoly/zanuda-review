@@ -122,7 +122,7 @@ export const REVIEW_RESULT_JSON_SCHEMA: Record<string, unknown> = {
           path: { type: "string" },
           line: { type: "integer", minimum: 1 },
           severity: { type: "string", enum: ["blocker", "warning"] },
-          body: { type: "string" },
+          body: { type: "string", maxLength: 400 },
         },
       },
     },
