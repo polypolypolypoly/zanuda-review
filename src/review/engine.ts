@@ -209,13 +209,19 @@ export async function reviewPullRequest(
     // ── Context-window pre-flight ─────────────────────────────────────
     // For models with small context windows (local models, LM Studio),
     // trim the diff budget so the total prompt fits without crashing.
-    const effectiveDiffChars = config.maxContextTokens
-      ? adjustedDiffBudget(config, context.text, pr.files.length)
+    const maxContextTokens = parseMaxContextTokens();
+    const effectiveDiffChars = maxContextTokens
+      ? adjustedDiffBudget(
+          config,
+          context.text,
+          pr.files.length,
+          maxContextTokens,
+        )
       : config.review.maxDiffChars;
     if (effectiveDiffChars < config.review.maxDiffChars) {
       log.warn(
         {
-          maxContextTokens: config.maxContextTokens,
+          maxContextTokens,
           originalMaxDiffChars: config.review.maxDiffChars,
           adjustedMaxDiffChars: effectiveDiffChars,
         },
@@ -457,9 +463,26 @@ export function adaptiveMaxTokens(
 }
 
 /**
+ * Read and validate LLM_MAX_CONTEXT_TOKENS from the environment.
+ * Returns undefined when not set (no limit — cloud models).
+ */
+function parseMaxContextTokens(): number | undefined {
+  const raw = process.env.LLM_MAX_CONTEXT_TOKENS;
+  if (!raw) return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
+    throw new Error(
+      `Invalid LLM_MAX_CONTEXT_TOKENS="${raw}": must be a positive integer`,
+    );
+  }
+  return n;
+}
+
+/**
  * Compute an effective diff character budget that keeps the total prompt
- * within `config.maxContextTokens`. Only active when `maxContextTokens` is set
- * (via LLM_MAX_CONTEXT_TOKENS env var).
+ * within the model's context window. Only active when maxContextTokens is set
+ * (via the LLM_MAX_CONTEXT_TOKENS env var — a hardware constraint, not a
+ * semantic config choice, so it lives in env, not YAML).
  *
  * Overhead estimation:
  *   - System prompt (config.preprompt)
@@ -473,9 +496,8 @@ export function adjustedDiffBudget(
   config: Config,
   contextText: string,
   fileCount: number,
+  maxContextTokens: number,
 ): number {
-  if (!config.maxContextTokens) return config.review.maxDiffChars;
-
   const systemTokens = estimateTokens(config.preprompt);
   const contextTokens = estimateTokens(contextText);
   const outputTokens = adaptiveMaxTokens(
@@ -489,10 +511,7 @@ export function adjustedDiffBudget(
 
   const nonDiffTokens =
     systemTokens + contextTokens + FIXED_TASK_TOKENS + outputTokens;
-  const availableDiffTokens = Math.max(
-    0,
-    config.maxContextTokens - nonDiffTokens,
-  );
+  const availableDiffTokens = Math.max(0, maxContextTokens - nonDiffTokens);
 
   // Floor: always leave room for at least 2000 chars of diff so the model
   // has something to review — an empty diff is useless.

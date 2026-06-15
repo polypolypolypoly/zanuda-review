@@ -75,13 +75,6 @@ const ConfigSchema = z.object({
     /** Max characters per inline comment body. Hard floor: 400. */
     maxCommentChars: z.number().int().min(400).default(400),
   }),
-  /**
-   * Model context window size in tokens. When set, the engine trims the
-   * diff budget before the LLM call to keep the total prompt within this
-   * limit. Unset = no limit (suitable for cloud models with 128K+ context).
-   * Overridable via LLM_MAX_CONTEXT_TOKENS env var.
-   */
-  maxContextTokens: z.number().int().positive().optional(),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -152,16 +145,6 @@ function applyEnvOverrides(config: Config): Config {
   }
   if (process.env.LLM_MODEL) {
     result.models[result.provider] = process.env.LLM_MODEL;
-  }
-  const rawCtx = process.env.LLM_MAX_CONTEXT_TOKENS;
-  if (rawCtx) {
-    const ctx = Number(rawCtx);
-    if (!Number.isFinite(ctx) || ctx <= 0 || !Number.isInteger(ctx)) {
-      throw new Error(
-        `Invalid LLM_MAX_CONTEXT_TOKENS="${rawCtx}": must be a positive integer`,
-      );
-    }
-    result.maxContextTokens = ctx;
   }
   return result;
 }
