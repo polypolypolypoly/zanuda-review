@@ -238,6 +238,7 @@ export async function reviewPullRequest(
           included: promptDiff.includedFiles.length,
           excluded: promptDiff.excludedFiles.length,
           total: pr.files.length,
+          budgetChars: effectiveDiffChars,
         },
         "Large PR: diff assembled from per-file patches (some files excluded)",
       );
