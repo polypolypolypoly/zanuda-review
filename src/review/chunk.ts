@@ -258,8 +258,16 @@ function condenseSCCs(
  * Split an oversize SCC into two sub-batches by finding the sparsest cut
  * in the subgraph using the Fiedler vector (spectral bisection).
  *
- * This is a safety valve for the rare case where a strongly connected component
- * (mutual imports) exceeds batch capacity. In practice, SCCs in import graphs
+ * Algorithm:
+ *   1. Build the symmetric adjacency matrix for the SCC subgraph
+ *      (edge if either file imports the other)
+ *   2. Build the Laplacian L = D - A
+ *   3. Compute the Fiedler vector (second eigenvector) via power iteration
+ *   4. Sort nodes by Fiedler value and find the capacity-respecting split
+ *      that minimises the number of edges crossing the partition
+ *
+ * This is a safety valve for the rare case where a strongly connected
+ * component exceeds batch capacity. In practice, SCCs in import graphs
  * are tiny (2-3 files) and this path is almost never taken.
  */
 function splitOversizeSCC(
@@ -269,32 +277,150 @@ function splitOversizeSCC(
 ): HeaderedFile[][] {
   const n = indices.length;
   if (n <= 1) {
-    // Single file exceeds capacity — force it into its own batch
     return [[files[indices[0]!]!]];
   }
 
-  // Simple fallback: split by size greedily.
-  // The spectral bisection path (Fiedler vector on the Laplacian) is
-  // reserved for when a real SCC exceeds capacity — in practice SCCs in
-  // import graphs are tiny (2-3 files) and this path is almost never taken.
-  const sorted = indices
-    .map((i) => files[i]!)
-    .sort((a, b) => b.weight - a.weight);
-
-  const left: HeaderedFile[] = [];
-  const right: HeaderedFile[] = [];
-  let leftWeight = 0;
-
-  for (const file of sorted) {
-    if (leftWeight + file.weight <= capacity) {
-      left.push(file);
-      leftWeight += file.weight;
-    } else {
-      right.push(file);
+  // Build symmetric adjacency: edge if either file imports the other.
+  // Use the file headers to re-parse imports within this SCC subgraph.
+  const adj: boolean[][] = Array.from({ length: n }, () =>
+    Array(n).fill(false),
+  );
+  for (let i = 0; i < n; i++) {
+    const srcFile = files[indices[i]!]!;
+    const srcImports = extractImports(srcFile.header);
+    for (let j = 0; j < n; j++) {
+      if (i === j) continue;
+      const targetFile = files[indices[j]!]!;
+      for (const imp of srcImports) {
+        const resolved = resolveImport(srcFile.filename, imp);
+        if (resolved && targetFile.filename.startsWith(resolved)) {
+          adj[i]![j] = true;
+          adj[j]![i] = true; // symmetric
+          break;
+        }
+      }
     }
   }
 
+  // Build Laplacian: L = D - A
+  const degree = adj.map((row) => row.filter(Boolean).length);
+  const laplacian: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => {
+      if (i === j) return degree[i]!;
+      return adj[i]![j] ? -1 : 0;
+    }),
+  );
+
+  // Power iteration for the Fiedler vector (second-smallest eigenvalue).
+  // Use random initialization, orthogonalize against all-ones vector.
+  const fiedler = computeFiedlerVector(laplacian);
+
+  // Sort by Fiedler value and find the best capacity-respecting split.
+  const indexed = indices.map((fileIdx, i) => ({
+    file: files[fileIdx]!,
+    value: fiedler[i]!,
+  }));
+  indexed.sort((a, b) => a.value - b.value);
+
+  // Find the split point that puts both halves under capacity and minimises
+  // the number of edges crossing the cut.
+  let bestSplit = 1;
+  let bestCutEdges = Infinity;
+  const prefixWeights: number[] = [];
+  let running = 0;
+  for (const item of indexed) {
+    running += item.file.weight;
+    prefixWeights.push(running);
+  }
+  const totalWeight = running;
+
+  for (let split = 1; split < n; split++) {
+    const leftWeight = prefixWeights[split - 1]!;
+    const rightWeight = totalWeight - leftWeight;
+    if (leftWeight > capacity || rightWeight > capacity) continue;
+
+    // Count cut edges: edges between {0..split-1} and {split..n-1}
+    let cutEdges = 0;
+    for (let i = 0; i < split; i++) {
+      for (let j = split; j < n; j++) {
+        // Find original indices
+        const origI = indices.indexOf(files.indexOf(indexed[i]!.file));
+        const origJ = indices.indexOf(files.indexOf(indexed[j]!.file));
+        if (origI >= 0 && origJ >= 0 && adj[origI]![origJ]) {
+          cutEdges++;
+        }
+      }
+    }
+
+    if (cutEdges < bestCutEdges) {
+      bestCutEdges = cutEdges;
+      bestSplit = split;
+    }
+  }
+
+  const left = indexed.slice(0, bestSplit).map((x) => x.file);
+  const right = indexed.slice(bestSplit).map((x) => x.file);
   return [left, right];
+}
+
+/**
+ * Compute the Fiedler vector (eigenvector for the second-smallest eigenvalue)
+ * of a graph Laplacian using power iteration with deflation.
+ * Converges in O(n² × iterations) for an n×n matrix.
+ */
+function computeFiedlerVector(L: number[][]): number[] {
+  const n = L.length;
+  const MAX_ITER = 100;
+  const TOLERANCE = 1e-6;
+
+  // Start with a random unit vector orthogonal to all-ones
+  let x = Array.from({ length: n }, () => Math.random() * 2 - 1);
+  // Orthogonalize against all-ones vector
+  const onesMean = x.reduce((s, v) => s + v, 0) / n;
+  for (let i = 0; i < n; i++) x[i]! -= onesMean;
+  // Normalize
+  let norm = Math.sqrt(x.reduce((s, v) => s + v * v, 0));
+  if (norm < 1e-10) {
+    // Degenerate: all random values were equal. Use a sawtooth.
+    for (let i = 0; i < n; i++) x[i]! = i / n - 0.5;
+    norm = Math.sqrt(x.reduce((s, v) => s + v * v, 0));
+  }
+  for (let i = 0; i < n; i++) x[i]! /= norm;
+
+  // Power iteration: repeatedly apply L, orthogonalize, normalize.
+  // In the limit, this converges to the dominant eigenvector.
+  // Since we orthogonalize against all-ones (the null-space vector),
+  // it converges to the Fiedler vector.
+  for (let iter = 0; iter < MAX_ITER; iter++) {
+    // Multiply: y = L * x
+    const y = Array(n).fill(0) as number[];
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        y[i]! += L[i]![j]! * x[j]!;
+      }
+    }
+
+    // Orthogonalize against all-ones
+    const mean = y.reduce((s, v) => s + v, 0) / n;
+    for (let i = 0; i < n; i++) y[i]! -= mean;
+
+    // Normalize
+    const yNorm = Math.sqrt(y.reduce((s, v) => s + v * v, 0));
+    if (yNorm < 1e-10) break; // converged to zero
+    for (let i = 0; i < n; i++) y[i]! /= yNorm;
+
+    // Check convergence: dot product with previous
+    let dot = 0;
+    for (let i = 0; i < n; i++) dot += x[i]! * y[i]!;
+    if (Math.abs(dot) > 1 - TOLERANCE) {
+      x = y;
+      break;
+    }
+
+    x = y;
+  }
+
+  return x;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────

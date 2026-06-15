@@ -447,7 +447,9 @@ function batchTaskInstructions(opts: BatchPromptOpts): string {
     return (
       `## Your task (batch ${batchIndex} of ${totalBatches} — FINAL)\n` +
       `Review the files above. This is the last batch in a multi-batch review.\n` +
-      `Your findings from previous batches are included above as context.\n\n` +
+      `Your findings from previous batches are included above as context.\n` +
+      `The running summary is the previous model's best-effort — verify\n` +
+      `independently, do not assume it is correct.\n\n` +
       `Produce the FINAL review output:\n` +
       `- Inline comments for issues in this batch's files\n` +
       `- A final \`action\` verdict that considers findings from ALL batches\n` +
@@ -463,7 +465,9 @@ function batchTaskInstructions(opts: BatchPromptOpts): string {
   return (
     `## Your task (batch ${batchIndex} of ${totalBatches})\n` +
     `Review ONLY the files in this batch. Your findings from previous batches ` +
-    `are included above — do not re-flag issues already noted unless you see ` +
+    `are included above. The running summary is the previous model's\n` +
+    `best-effort — verify independently, do not assume it is correct.\n` +
+    `Do not re-flag issues already noted unless you see ` +
     `a new manifestation. If you notice something that depends on files in other ` +
     `batches you cannot see, note it as a question to verify.\n\n` +
     `Produce:\n` +

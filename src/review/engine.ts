@@ -717,15 +717,16 @@ async function buildHeaderedFiles(
   const result: HeaderedFile[] = [];
 
   // Fetch full file contents in parallel for all files with patches.
-  // Use the base SHA — config/context rules require reading from base,
-  // but for the diff itself the file contents are structural only
-  // (imports, declarations) which don't change between base and head.
+  // Use the base SHA — reading from headSha would let PR authors inject
+  // misleading imports/declarations into the structural header context.
+  // The diff itself still reflects the PR changes; the header is structural
+  // context and must come from the maintainer-controlled base branch.
   const contents = await Promise.all(
     pr.files
       .filter((f) => f.patch)
       .map(async (f) => {
         try {
-          const content = await connector.readFile(ref, f.filename, pr.headSha);
+          const content = await connector.readFile(ref, f.filename, pr.baseSha);
           return { filename: f.filename, content, patch: f.patch! };
         } catch {
           return { filename: f.filename, content: null, patch: f.patch! };
@@ -824,23 +825,48 @@ async function reviewBatched(
         batch.files.length,
         config.generation.maxTokens,
       ),
-      jsonSchema: isLast
-        ? buildReviewResultJsonSchema(config.review.maxCommentChars)
-        : undefined, // intermediate batches use prompt-based format
+      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
     });
 
     const parsed = parseReviewResult(completion.text, {
       structured: provider.supportsStructuredOutput,
     });
 
+    // Update progress comment between batches so the author knows progress.
+    if (!dryRun && startingCommentId !== null && !isLast) {
+      const blockerCount = allComments.filter(
+        (c) => c.severity === "blocker",
+      ).length;
+      const warningCount = allComments.filter(
+        (c) => c.severity === "warning",
+      ).length;
+      const parts: string[] = [
+        `_Batch ${i + 1} of ${batches.length} complete._`,
+      ];
+      if (blockerCount > 0)
+        parts.push(
+          `Found ${blockerCount} blocker(s), ${warningCount} warning(s).`,
+        );
+      else if (warningCount > 0)
+        parts.push(`Found ${warningCount} warning(s).`);
+      else parts.push("No issues found so far.");
+      await deps.connector
+        .editComment(ref, startingCommentId, parts.join(" "))
+        .catch(() => undefined);
+    }
+
     // Accumulate comments and file summaries
     allComments.push(...parsed.comments);
     allFilesSummary.push(...parsed.filesSummary);
 
-    // Extract batch findings for the running summary
-    const batchFindings = extractBatchFindings(completion.text);
-    if (batchFindings) {
-      runningSummary += `\n## Findings from batch ${i + 1} (${batch.files.map((f) => `\`${f.filename}\``).join(", ")})\n${batchFindings}\n`;
+    // Extract batch findings for the running summary — now a first-class
+    // schema field, no regex fallback needed.
+    const findings = parsed.batchFindings;
+    if (findings) {
+      runningSummary +=
+        `\n## Findings from batch ${i + 1} (${batch.files.map((f) => `\`${f.filename}\``).join(", ")})\n` +
+        `> ⚠️ The above is the previous model's best-effort notes. Verify independently.\n` +
+        `${findings}\n`;
     }
 
     if (isLast) {
@@ -965,24 +991,6 @@ async function reviewBatched(
     stale: false,
     headSha: pr.headSha,
   };
-}
-
-/** Extract the batchFindings field from a model response. */
-function extractBatchFindings(text: string): string | null {
-  try {
-    const parsed = JSON.parse(text);
-    if (
-      typeof parsed.batchFindings === "string" &&
-      parsed.batchFindings.length > 0
-    ) {
-      return parsed.batchFindings;
-    }
-  } catch {
-    // JSON parse failed — try regex extraction as fallback
-    const match = text.match(/"batchFindings"\s*:\s*"([^"]+)"/);
-    if (match) return match[1]!;
-  }
-  return null;
 }
 
 /** Deduplicate filesSummary entries by path, keeping the first occurrence. */

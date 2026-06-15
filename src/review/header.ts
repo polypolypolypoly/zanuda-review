@@ -20,14 +20,39 @@ const MAX_HEADER_CHARS = 2000;
 
 /**
  * Extract the structural skeleton from the top of a source file.
+ * Skips leading comment blocks and blank lines (license headers, file-level
+ * docstrings) so the budget isn't wasted on boilerplate. Once the first line
+ * of actual code is found, extraction proceeds normally — inline comments
+ * after code (e.g. SPDX identifiers) are included.
  * Stops at the first min(MAX_HEADER_LINES, MAX_HEADER_CHARS) boundary.
  */
 export function extractFileHeader(content: string): string {
   const lines = content.split("\n");
   let header = "";
+  let inLeadingCommentBlock = true;
 
   for (let i = 0; i < Math.min(lines.length, MAX_HEADER_LINES); i++) {
     const line = lines[i]!;
+    const trimmed = line.trim();
+
+    if (inLeadingCommentBlock) {
+      // Skip shebang lines (#!), comment lines (//, #, /*, *, --),
+      // and blank lines until we hit actual code.
+      if (
+        trimmed === "" ||
+        trimmed.startsWith("#!") ||
+        trimmed.startsWith("//") ||
+        trimmed.startsWith("#") ||
+        trimmed.startsWith("/*") ||
+        trimmed.startsWith("*") ||
+        trimmed.startsWith("--") ||
+        trimmed.startsWith("<!--")
+      ) {
+        continue;
+      }
+      inLeadingCommentBlock = false;
+    }
+
     if (header.length + line.length + 1 > MAX_HEADER_CHARS) break;
     header += line + "\n";
   }
