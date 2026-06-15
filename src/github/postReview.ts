@@ -28,7 +28,7 @@ function renderCommentBody(c: ReviewComment): string {
 function sanitizeSuggestion(text: string): string {
   return text
     .split("\n")
-    .map((line) => (line.startsWith("```") ? " " + line : line))
+    .map((line) => (line.trimStart().startsWith("```") ? " " + line : line))
     .join("\n");
 }
 

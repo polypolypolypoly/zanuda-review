@@ -278,13 +278,19 @@ describe("renderCommentBody", () => {
     assert.ok(result.includes("const x = 1;"));
   });
 
-  it("sanitises fence-break lines in suggestion", () => {
+  it("sanitises fence-break lines starting with ```", () => {
     const result = renderCommentBody(
       makeComment({ suggestion: "line1\n```\nline3" }),
     );
-    // Suggestion content with ``` on its own line should be sanitised
-    // to have a leading space, preventing an early fence close.
     assert.ok(result.includes(" ```\nline3"));
+  });
+
+  it("sanitises indented fence-break lines too", () => {
+    const result = renderCommentBody(
+      makeComment({ suggestion: "line1\n  ```\nline3" }),
+    );
+    // Indented ``` should also get sanitised (GFM closes fence with up to 3 spaces).
+    assert.ok(result.includes("   ```\nline3"));
   });
 
   it("preserves normal lines in multi-line suggestions", () => {

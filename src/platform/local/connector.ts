@@ -338,7 +338,7 @@ function renderReview(result: ReviewResult): string {
         // fence-break in the markdown output.
         const safe = c.suggestion
           .split("\n")
-          .map((l) => (l.startsWith("```") ? " " + l : l))
+          .map((l) => (l.trimStart().startsWith("```") ? " " + l : l))
           .join("\n");
         lines.push("**Suggested fix:**", "", `\`\`\`${ext}`, safe, "```", "");
       }

@@ -135,7 +135,7 @@ export function buildReviewResultJsonSchema(
             line: { type: "integer", minimum: 1 },
             severity: { type: "string", enum: ["blocker", "warning"] },
             body: { type: "string", maxLength: maxCommentChars },
-            suggestion: { type: "string" },
+            suggestion: { type: "string", maxLength: 2000 },
           },
         },
       },
