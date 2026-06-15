@@ -332,6 +332,16 @@ function renderReview(result: ReviewResult): string {
     for (const c of result.comments) {
       const emoji = SEVERITY_EMOJI[c.severity] ?? "";
       lines.push(`### ${emoji} \`${c.path}:${c.line}\``, "", c.body, "");
+      if (c.suggestion) {
+        const ext = c.path.match(/\.(\w+)$/)?.[1] ?? "";
+        // Sanitise: prepend space to lines starting with ``` to prevent
+        // fence-break in the markdown output.
+        const safe = c.suggestion
+          .split("\n")
+          .map((l) => (l.trimStart().startsWith("```") ? " " + l : l))
+          .join("\n");
+        lines.push("**Suggested fix:**", "", `\`\`\`${ext}`, safe, "```", "");
+      }
     }
   }
 

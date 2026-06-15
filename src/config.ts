@@ -70,6 +70,9 @@ const ConfigSchema = z.object({
   review: z.object({
     maxDiffChars: z.number().int().positive(),
     inlineComments: z.boolean(),
+    suggestions: z.boolean(),
+    /** Max characters per inline comment body. Hard floor: 400. */
+    maxCommentChars: z.number().int().min(400).default(400),
   }),
 });
 
