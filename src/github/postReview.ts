@@ -17,8 +17,23 @@ const SEVERITY_EMOJI: Record<string, string> = {
 function renderCommentBody(c: ReviewComment): string {
   const base = `${SEVERITY_EMOJI[c.severity] ?? ""} ${c.body}`.trim();
   if (!c.suggestion) return base;
-  return `${base}\n\n\`\`\`suggestion\n${c.suggestion.trimEnd()}\n\`\`\``;
+  return `${base}\n\n\`\`\`suggestion\n${sanitizeSuggestion(c.suggestion)}\n\`\`\``;
 }
+
+/**
+ * Prevent fence-break injection: if the suggestion contains a line starting
+ * with \`\`\`, prepend a single space. A space-prefixed fence does not close
+ * the \`\`\`suggestion block in GitHub-flavoured markdown.
+ */
+function sanitizeSuggestion(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => (line.startsWith("```") ? " " + line : line))
+    .join("\n");
+}
+
+// Exported for tests.
+export { renderCommentBody, renderCommentSummary };
 
 /** Render a one-line summary of a comment for fallback body dumps. */
 function renderCommentSummary(c: ReviewComment): string {

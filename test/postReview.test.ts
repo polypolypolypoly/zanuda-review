@@ -243,3 +243,86 @@ describe("postReview 422 recovery", () => {
     // Should have posted just the summary in body (no inline fallback needed)
   });
 });
+
+// ── Suggestion rendering ─────────────────────────────────────────────────────
+
+import {
+  renderCommentBody,
+  renderCommentSummary,
+} from "../src/github/postReview.js";
+import type { ReviewComment } from "../src/review/types.js";
+
+function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
+  return {
+    path: "src/foo.ts",
+    line: 42,
+    severity: "warning",
+    body: "Use const here.",
+    ...overrides,
+  };
+}
+
+describe("renderCommentBody", () => {
+  it("renders body with severity emoji when no suggestion", () => {
+    const result = renderCommentBody(makeComment());
+    assert.ok(result.includes("⚠️"));
+    assert.ok(result.includes("Use const here."));
+    assert.ok(!result.includes("```suggestion"));
+  });
+
+  it("appends suggestion block when suggestion is present", () => {
+    const result = renderCommentBody(
+      makeComment({ suggestion: "const x = 1;" }),
+    );
+    assert.ok(result.includes("```suggestion"));
+    assert.ok(result.includes("const x = 1;"));
+  });
+
+  it("sanitises fence-break lines in suggestion", () => {
+    const result = renderCommentBody(
+      makeComment({ suggestion: "line1\n```\nline3" }),
+    );
+    // Suggestion content with ``` on its own line should be sanitised
+    // to have a leading space, preventing an early fence close.
+    assert.ok(result.includes(" ```\nline3"));
+  });
+
+  it("preserves normal lines in multi-line suggestions", () => {
+    const result = renderCommentBody(
+      makeComment({
+        suggestion: "function foo() {\n  return true;\n}",
+      }),
+    );
+    assert.ok(result.includes("function foo() {"));
+    assert.ok(result.includes("  return true;"));
+    // Normal code lines should not be modified.
+    assert.ok(!result.includes(" function foo"));
+  });
+});
+
+describe("renderCommentSummary", () => {
+  it("renders one-line summary without suggestion", () => {
+    const result = renderCommentSummary(makeComment());
+    assert.ok(result.includes("⚠️"));
+    assert.ok(result.includes("src/foo.ts:42"));
+    assert.ok(result.includes("Use const here."));
+    assert.ok(!result.includes("Suggestion:"));
+  });
+
+  it("includes suggestion preview for short suggestions", () => {
+    const result = renderCommentSummary(
+      makeComment({ suggestion: "return null;" }),
+    );
+    assert.ok(result.includes("Suggestion:"));
+    assert.ok(result.includes("return null;"));
+  });
+
+  it("truncates suggestion preview at 80 chars", () => {
+    const long = "x".repeat(100);
+    const result = renderCommentSummary(makeComment({ suggestion: long }));
+    assert.ok(result.includes("…"));
+    // Preview should be <= 80 chars + ellipsis in the rendered output.
+    const previewPart = result.split("Suggestion: `")[1]!;
+    assert.ok(previewPart.length <= 85);
+  });
+});

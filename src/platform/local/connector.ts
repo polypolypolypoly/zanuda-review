@@ -334,14 +334,13 @@ function renderReview(result: ReviewResult): string {
       lines.push(`### ${emoji} \`${c.path}:${c.line}\``, "", c.body, "");
       if (c.suggestion) {
         const ext = c.path.match(/\.(\w+)$/)?.[1] ?? "";
-        lines.push(
-          "**Suggested fix:**",
-          "",
-          `\`\`\`${ext}`,
-          c.suggestion,
-          "```",
-          "",
-        );
+        // Sanitise: prepend space to lines starting with ``` to prevent
+        // fence-break in the markdown output.
+        const safe = c.suggestion
+          .split("\n")
+          .map((l) => (l.startsWith("```") ? " " + l : l))
+          .join("\n");
+        lines.push("**Suggested fix:**", "", `\`\`\`${ext}`, safe, "```", "");
       }
     }
   }

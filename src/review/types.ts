@@ -15,6 +15,7 @@ const ReviewCommentSchema = z.object({
   body: z.string().describe("The comment text, in markdown."),
   suggestion: z
     .string()
+    .max(2000)
     .optional()
     .describe(
       "Code replacement (new lines only, no fences). Omit if no concrete fix.",

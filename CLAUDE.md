@@ -202,3 +202,20 @@ All caps survive process restarts (persisted in `state.json`).
 - Context caching between reviews (currently re-fetches on every review)
 - Tool-use / function-calling output parsing instead of JSON-in-text
 - Per-repo daily LLM call budget cap
+
+## Defensive coding — check before shipping
+
+When adding any new feature, especially one that processes or renders LLM output,
+pause and ask:
+
+1. **Fence-break / injection:** If this string gets embedded inside markdown fences
+   (\`\`\`, `"""`, `<tag>`), can it break out? Sanitise: prepend a space to lines
+   starting with the fence delimiter, or reject/escape the delimiter.
+2. **Unbounded output:** If the LLM generates this field, what's the worst-case
+   size? Add a `.max()` in Zod and `maxLength` in JSON schema. Every string field
+   the LLM writes needs a cap.
+3. **Happy-path thinking:** "The prompt tells the model not to do X" is not a
+   security boundary. Always ask: what happens if the model ignores the instruction?
+   Add a defensive fallback.
+4. **Tests for new rendering/output functions:** Even simple formatters on
+   security-relevant paths need tests. Check if a test file already exists.
