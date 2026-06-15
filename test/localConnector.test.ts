@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { LocalConnector } from "../src/platform/local/connector.js";
 
 /**
  * Test the unified diff parser used by the local connector.
@@ -152,5 +153,78 @@ index aaa..bbb 100644
     // Should count only the "+added line", not the @@ header
     assert.strictEqual(result[0]!.additions, 1);
     assert.strictEqual(result[0]!.deletions, 0);
+  });
+});
+
+// ── Branch-diff helpers (extracted static methods) ────────────────────────────
+
+describe("LocalConnector.concatDiffs", () => {
+  it("concatenates committed and staged diffs with separator", () => {
+    const committed = "diff --git a/src/a.ts b/src/a.ts\n+committed change";
+    const staged = "diff --git a/src/b.ts b/src/b.ts\n+staged change";
+    const result = LocalConnector.concatDiffs(committed, staged);
+    assert.ok(result.includes("+committed change"));
+    assert.ok(result.includes("+staged change"));
+    assert.ok(result.includes("# --- staged (uncommitted) changes below ---"));
+    // Committed appears before the separator, staged after.
+    const committedIdx = result.indexOf("+committed change");
+    const separatorIdx = result.indexOf("staged (uncommitted)");
+    const stagedIdx = result.indexOf("+staged change");
+    assert.ok(committedIdx < separatorIdx);
+    assert.ok(separatorIdx < stagedIdx);
+  });
+
+  it("returns staged alone when committed is empty", () => {
+    const staged = "diff --git a/src/a.ts b/src/a.ts\n+staged";
+    assert.strictEqual(LocalConnector.concatDiffs("", staged), staged);
+    assert.strictEqual(LocalConnector.concatDiffs("   \n", staged), staged);
+  });
+
+  it("does not add separator when committed is empty/whitespace", () => {
+    const staged = "diff --git a/src/a.ts b/src/a.ts\n+staged";
+    const result = LocalConnector.concatDiffs("   ", staged);
+    assert.ok(!result.includes("staged (uncommitted)"));
+  });
+
+  it("trims trailing whitespace from committed before concatenating", () => {
+    const committed = "diff --git a/src/a.ts b/src/a.ts\n+line\n";
+    const staged = "+staged";
+    const result = LocalConnector.concatDiffs(committed, staged);
+    // Should not have double newlines before separator.
+    assert.ok(!result.includes("\n\n\n# --- staged"));
+  });
+});
+
+describe("LocalConnector.unionFiles", () => {
+  it("returns deduplicated union of committed and staged paths", () => {
+    const committed = ["src/a.ts", "src/b.ts"];
+    const staged = ["src/b.ts", "src/c.ts"];
+    const result = LocalConnector.unionFiles(committed, staged);
+    assert.deepStrictEqual(result.sort(), ["src/a.ts", "src/b.ts", "src/c.ts"]);
+  });
+
+  it("returns committed when staged is empty", () => {
+    const committed = ["src/a.ts", "src/b.ts"];
+    assert.deepStrictEqual(LocalConnector.unionFiles(committed, []).sort(), [
+      "src/a.ts",
+      "src/b.ts",
+    ]);
+  });
+
+  it("returns staged when committed is empty", () => {
+    const staged = ["src/a.ts"];
+    assert.deepStrictEqual(LocalConnector.unionFiles([], staged), ["src/a.ts"]);
+  });
+
+  it("returns empty array when both are empty", () => {
+    assert.deepStrictEqual(LocalConnector.unionFiles([], []), []);
+  });
+
+  it("handles overlapping paths (committed + staged same file)", () => {
+    const committed = ["src/a.ts"];
+    const staged = ["src/a.ts"];
+    assert.deepStrictEqual(LocalConnector.unionFiles(committed, staged), [
+      "src/a.ts",
+    ]);
   });
 });
