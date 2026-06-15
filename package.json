@@ -8,7 +8,7 @@
     "node": ">=20"
   },
   "bin": {
-    "zanuda": "./dist/cli.js"
+    "zanuda": "./bin/zanuda"
   },
   "scripts": {
     "prepare": "husky",

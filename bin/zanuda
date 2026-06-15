@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Zanuda CLI wrapper — auto-detects project vs global install.
+# Zanuda CLI wrapper — auto-detects built vs source runtime.
 set -euo pipefail
 
-# Resolve the project root (where this script lives is bin/, one level up).
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ -f "$PROJECT_ROOT/dist/cli.js" ]; then
   exec node "$PROJECT_ROOT/dist/cli.js" "$@"
 elif [ -f "$PROJECT_ROOT/src/cli.ts" ]; then
-  exec npx tsx "$PROJECT_ROOT/src/cli.ts" "$@"
+  exec npx --no-install tsx "$PROJECT_ROOT/src/cli.ts" "$@"
 else
   echo "zanuda: cannot find dist/cli.js or src/cli.ts in $PROJECT_ROOT" >&2
   exit 1
