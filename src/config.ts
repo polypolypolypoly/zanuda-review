@@ -57,6 +57,8 @@ const ConfigSchema = z.object({
     maxConcurrentReviews: z.number().int().positive(),
     /** Max new PRs picked up per poll cycle (caps burst from a flooded queue). */
     maxNewPrsPerCycle: z.number().int().positive(),
+    /** Per-PR token budget (input + output). 0 = no limit. */
+    tokenBudgetPerPR: z.number().int().nonnegative().default(0),
   }),
   memory: z.object({
     /** Toggle the whole feature on/off. */
@@ -72,8 +74,10 @@ const ConfigSchema = z.object({
     maxDiffChars: z.number().int().positive(),
     inlineComments: z.boolean(),
     suggestions: z.boolean(),
-    /** Max characters per inline comment body. Hard floor: 400. */
     maxCommentChars: z.number().int().min(400).default(400),
+    /** Self-verification: after review, a second LLM call checks each finding
+     * against the diff. Disable for budget-constrained self-hosters. */
+    verifyFindings: z.boolean().default(true),
   }),
 });
 

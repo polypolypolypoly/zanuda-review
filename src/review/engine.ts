@@ -26,13 +26,17 @@ import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { buildPromptDiff, includedPaths } from "./diff.js";
-import {
-  ReviewResultSchema,
-  type ReviewResult,
-  buildReviewResultJsonSchema,
-} from "./types.js";
+import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
-
+import { batchChangedFiles } from "./chunk.js";
+import { parseReviewResult } from "./parse.js";
+import { verifyFindings } from "./verify.js";
+import {
+  adaptiveMaxTokens,
+  parseMaxContextTokens,
+  adjustedDiffBudget,
+} from "./budget.js";
+import { buildHeaderedFiles, reviewBatched } from "./batch.js";
 export interface ReviewDeps {
   connector: SCMConnector;
   baseConfig: Config;
@@ -50,7 +54,15 @@ export async function reviewPullRequest(
   deps: ReviewDeps,
   ref: RepoRef,
   number: number,
-  opts: { dryRun?: boolean; round?: number; progressCommentId?: number } = {},
+  opts: {
+    dryRun?: boolean;
+    round?: number;
+    progressCommentId?: number;
+    /** Force a specific review strategy for evaluation. "single" skips the
+     * batch path entirely; "batch" forces multi-batch even for small PRs;
+     * Undefined = auto-detect based on PR size. */
+    forceStrategy?: "single" | "batch";
+  } = {},
 ): Promise<
   ReviewResult & {
     progressCommentId: number | null;
@@ -229,15 +241,75 @@ export async function reviewPullRequest(
       );
     }
 
+    // ── Large PR detection ──────────────────────────────────────────
+    // ~14K tokens per batch keeps each batch within the model's strong
+    // attention window. Batches are capped at this size regardless of
+    // the overall diff budget.
+    const forceStrategy = opts.forceStrategy;
+    const MAX_BATCH_CHARS = 50_000;
+    // forceStrategy="batch" uses a tiny batch size to force splitting.
+    const batchChars =
+      forceStrategy === "batch"
+        ? 500
+        : Math.min(effectiveDiffChars, MAX_BATCH_CHARS);
+
+    // Estimate total diff size from per-file patches to decide whether
+    // we need the batch path. This is a cheap check that avoids N extra
+    // GitHub API calls (readFile) on small PRs — upholding the
+    // "zero overhead" claim for the common single-batch case.
+    const totalPatchChars = pr.files.reduce(
+      (sum, f) => sum + (f.patch?.length ?? 0),
+      0,
+    );
+
+    const useBatchPath =
+      forceStrategy === "single"
+        ? false
+        : forceStrategy === "batch"
+          ? true
+          : totalPatchChars > batchChars;
+
+    if (useBatchPath) {
+      const headered = await buildHeaderedFiles(connector, ref, pr);
+      const batches = batchChangedFiles(headered, batchChars);
+
+      if (batches.length > 1) {
+        log.info(
+          { batches: batches.length, totalFiles: pr.files.length },
+          "Large PR: using dependency-aware batch review",
+        );
+        return reviewBatched(pr, batches, {
+          deps,
+          ref,
+          number,
+          round,
+          dryRun: opts.dryRun ?? false,
+          startingCommentId,
+          context,
+          config,
+          provider,
+          instructions,
+          repoMemory,
+          reviewHistory,
+          discussion,
+          log,
+        });
+      }
+    }
+
+    // Single batch — existing single-call path below.
     // Build a budget-aware diff from per-file patches so the model always
     // receives complete file diffs rather than an arbitrary truncated blob.
-    const promptDiff = buildPromptDiff(pr.files, effectiveDiffChars);
+    // Use batchChars (already capped at MAX_BATCH_CHARS) not effectiveDiffChars
+    // so single-batch PRs also benefit from the attention cap.
+    const promptDiff = buildPromptDiff(pr.files, batchChars);
     if (promptDiff.truncated) {
       log.info(
         {
           included: promptDiff.includedFiles.length,
           excluded: promptDiff.excludedFiles.length,
           total: pr.files.length,
+          budgetChars: batchChars,
         },
         "Large PR: diff assembled from per-file patches (some files excluded)",
       );
@@ -274,9 +346,26 @@ export async function reviewPullRequest(
       "Model responded",
     );
 
-    const result = parseReviewResult(completion.text, {
+    const parsed = parseReviewResult(completion.text, {
       structured: provider.supportsStructuredOutput,
     });
+
+    // Self-verification: filter findings through a second pass
+    const verifiedComments =
+      parsed.comments.length > 0 && config.review.verifyFindings
+        ? await verifyFindings(
+            parsed.comments,
+            promptDiff.text,
+            config,
+            provider,
+            log,
+          )
+        : [];
+
+    const result: ReviewResult = {
+      ...parsed,
+      comments: verifiedComments,
+    };
     const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
@@ -454,188 +543,3 @@ export async function reviewPullRequest(
  *
  * The configured maxTokens acts as a hard ceiling.
  */
-export function adaptiveMaxTokens(
-  fileCount: number,
-  configuredMax: number,
-): number {
-  const estimated = fileCount * 240 + 400; // 400 fixed: summary + action + JSON structure
-  return Math.min(configuredMax, Math.max(1500, estimated));
-}
-
-/**
- * Read and validate LLM_MAX_CONTEXT_TOKENS from the environment.
- * Returns undefined when not set (no limit — cloud models).
- */
-export function parseMaxContextTokens(): number | undefined {
-  const raw = process.env.LLM_MAX_CONTEXT_TOKENS;
-  if (!raw) return undefined;
-  const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0 || !Number.isInteger(n)) {
-    throw new Error(
-      `Invalid LLM_MAX_CONTEXT_TOKENS="${raw}": must be a positive integer`,
-    );
-  }
-  return n;
-}
-
-/**
- * Compute an effective diff character budget that keeps the total prompt
- * within the model's context window. Only active when maxContextTokens is set
- * (via the LLM_MAX_CONTEXT_TOKENS env var — a hardware constraint, not a
- * semantic config choice, so it lives in env, not YAML).
- *
- * Overhead estimation:
- *   - System prompt (config.preprompt)
- *   - Project context (contextText from buildContext)
- *   - Fixed task instructions (~2500 chars / ~700 tokens)
- *   - Output budget (adaptiveMaxTokens)
- *
- * Token estimation uses a conservative 3.5 chars/token (code ~4, English ~3).
- */
-export function adjustedDiffBudget(
-  config: Config,
-  contextText: string,
-  fileCount: number,
-  maxContextTokens: number,
-): number {
-  const systemTokens = estimateTokens(config.preprompt);
-  const contextTokens = estimateTokens(contextText);
-  const outputTokens = adaptiveMaxTokens(
-    fileCount,
-    config.generation.maxTokens,
-  );
-
-  // Task instructions + JSON schema description + round boilerplate.
-  // Measured from prompt.ts outputInstructions ~= 2500 chars.
-  // Verified by test: "prompt.ts outputInstructions token budget".
-  const FIXED_TASK_TOKENS = 700;
-
-  const nonDiffTokens =
-    systemTokens + contextTokens + FIXED_TASK_TOKENS + outputTokens;
-  const availableDiffTokens = Math.max(0, maxContextTokens - nonDiffTokens);
-
-  // Floor: always leave room for at least 2000 chars of diff so the model
-  // has something to review — an empty diff is useless.
-  const effectiveDiffChars = Math.max(
-    2000,
-    Math.floor(availableDiffTokens * 3.5),
-  );
-
-  return Math.min(effectiveDiffChars, config.review.maxDiffChars);
-}
-
-function estimateTokens(text: string): number {
-  return Math.ceil(text.length / 3.5);
-}
-
-/**
- * Parse the model's response into a ReviewResult.
- *
- * When the provider used structured output (jsonSchema), `text` is already
- * clean JSON and we skip extractJson. When it's a plain text response we run
- * the full extraction pipeline as a fallback.
- */
-export function parseReviewResult(
-  text: string,
-  opts: { structured?: boolean } = {},
-): ReviewResult {
-  let parsed: ReviewResult;
-  if (opts.structured) {
-    // Response is guaranteed JSON from the provider — parse directly.
-    parsed = ReviewResultSchema.parse(JSON.parse(text));
-  } else {
-    const json = extractJson(text);
-    parsed = ReviewResultSchema.parse(JSON.parse(json));
-  }
-
-  // Warn when any field fell back to its catch/default value so the
-  // occurrence is visible in logs without crashing the review.
-  const fallbacks: string[] = [];
-  if (parsed.summary === "") fallbacks.push("summary");
-  if (parsed.action === "COMMENT" && !text.includes("COMMENT"))
-    fallbacks.push("action");
-  if (
-    parsed.filesSummary.length === 0 &&
-    text.includes("filesSummary") === false
-  )
-    fallbacks.push("filesSummary");
-  if (fallbacks.length > 0) {
-    logger.warn(
-      { fallbacks, rawResponse: text.slice(0, 300) },
-      "Model returned malformed structured output — fallback values applied",
-    );
-  }
-
-  return parsed;
-}
-
-/**
- * Extract a JSON object from the model's response.
- *
- * Strategy:
- * 1. Use brace-depth scanning from the first `{` to the matching `}` - this
- *    correctly handles trailing prose that might contain stray `}` characters.
- * 2. If no opening brace is found, try stripping a wrapping code fence and retry.
- *
- * Delegates actual JSON validation to `JSON.parse` rather than re-implementing
- * escape-sequence handling.
- */
-export function extractJson(text: string): string {
-  const json = tryExtractBalanced(text);
-  if (json) return json;
-
-  // Fallback: strip a wrapping code fence (model sometimes wraps in ```json).
-  const fenced = text.match(/^```(?:json)?[ \t]*\n([\s\S]*?)\n```[ \t]*$/);
-  if (fenced) {
-    const inner = fenced[1]!.trim();
-    const json = tryExtractBalanced(inner);
-    if (json) return json;
-  }
-
-  throw new Error(
-    `No JSON object found in model response: ${text.slice(0, 200)}`,
-  );
-}
-
-function tryExtractBalanced(text: string): string | null {
-  const start = text.indexOf("{");
-  if (start === -1) return null;
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-
-  for (let i = start; i < text.length; i++) {
-    const ch = text[i]!;
-
-    if (escaped) {
-      escaped = false;
-      continue;
-    }
-    if (ch === "\\" && inString) {
-      escaped = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-
-    if (ch === "{") depth++;
-    else if (ch === "}") {
-      depth--;
-      if (depth === 0) {
-        const slice = text.slice(start, i + 1);
-        try {
-          JSON.parse(slice); // validate
-          return slice;
-        } catch {
-          return null; // malformed JSON
-        }
-      }
-    }
-  }
-
-  return null; // unclosed brace
-}

@@ -264,6 +264,14 @@ export class LocalConnector implements SCMConnector {
   }
 
   private getCommitInfo(): { title: string; body: string } {
+    // Eval harness override: inject PR metadata via env vars.
+    if (process.env.EVAL_PR_TITLE) {
+      return {
+        title: process.env.EVAL_PR_TITLE,
+        body: process.env.EVAL_PR_BODY ?? "",
+      };
+    }
+
     if (this.diffRef === "-") {
       return { title: "Diff from stdin", body: "" };
     }

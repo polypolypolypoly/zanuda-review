@@ -73,7 +73,7 @@ export const ReviewResultSchema = z.object({
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
     .catch("COMMENT")
     .describe(
-      "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings or observations.",
+      "APPROVE if the PR is solid; REQUEST_CHANGES if any blocker exists; COMMENT if there are only warnings.",
     ),
   filesSummary: z
     .array(z.unknown())
@@ -86,6 +86,13 @@ export const ReviewResultSchema = z.object({
     .default([])
     .transform((items) => filterValidItems(ReviewCommentSchema, items))
     .catch([]),
+  /**
+   * Running summary of key findings from this batch, for the next batch to
+   * read as context. Only used in multi-batch large-PR reviews; absent in
+   * single-call reviews and the final batch. Extracted by the engine and
+   * concatenated into the running summary string.
+   */
+  batchFindings: z.string().max(600).optional().catch(undefined),
 });
 
 export type FileSummary = z.infer<typeof FileSummarySchema>;
@@ -112,6 +119,7 @@ export function buildReviewResultJsonSchema(
         type: "string",
         enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
       },
+      batchFindings: { type: "string", maxLength: 600 },
       filesSummary: {
         type: "array",
         items: {

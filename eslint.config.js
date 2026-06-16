@@ -4,7 +4,7 @@ import prettier from "eslint-config-prettier";
 
 export default tseslint.config(
   // Ignore generated and dependency directories
-  { ignores: ["dist/", "node_modules/"] },
+  { ignores: ["dist/", "node_modules/", "eval/"] },
 
   js.configs.recommended,
   ...tseslint.configs.recommended,

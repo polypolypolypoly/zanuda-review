@@ -1,7 +1,7 @@
 import type { Config } from "../config.js";
 import type { ProjectContext } from "../context/builder.js";
 import type { PullRequestData } from "../github/pullRequest.js";
-import type { PromptDiff } from "./diff.js";
+import type { PromptDiff, BatchDiff } from "./diff.js";
 
 // ── XML escaping ──────────────────────────────────────────────────────────────
 
@@ -325,4 +325,169 @@ export function truncate(
   // (e.g. a single huge line).
   const end = cut > 0 ? cut : max;
   return { text: s.slice(0, end), truncated: true };
+}
+
+// ── Batch review prompt ──────────────────────────────────────────────────────
+
+export interface BatchPromptOpts {
+  /** The batch being reviewed (1-indexed). */
+  batchIndex: number;
+  /** Total number of batches. */
+  totalBatches: number;
+  /** Accumulated findings from all previous batches (empty for batch 1). */
+  runningSummary?: string;
+  /** Round number (1 or 2). */
+  round?: number;
+  /** PR discussion, injected on round 2. */
+  discussion?: string;
+  repoMemory?: string;
+  reviewHistory?: string;
+  instructions?: string;
+  structuredOutput?: boolean;
+  /** True if this is the final batch (last in the sequence). */
+  isLastBatch: boolean;
+}
+
+/**
+ * Build the user prompt for a single batch in a multi-batch sequential review.
+ *
+ * Each batch prompt:
+ *   - Includes the shared context (repo memory, review history, instructions)
+ *   - Includes the running summary from previous batches (except batch 1)
+ *   - Includes the batch diff with file headers
+ *   - Gives batch-specific task instructions: review only these files,
+ *     produce comments + a findings summary for the next batch
+ *
+ * The final batch also gets the overall verdict task.
+ */
+export function buildBatchUserPrompt(
+  pr: PullRequestData,
+  context: ProjectContext,
+  config: Config,
+  batch: BatchDiff,
+  opts: BatchPromptOpts,
+): string {
+  const round = opts.round ?? 1;
+  const isFinalRound = round >= 2;
+
+  const parts: string[] = [];
+
+  if (opts.repoMemory) {
+    parts.push(
+      "## Repo memory (persistent knowledge about this codebase)",
+      "<repo_memory>",
+      escapeXml(opts.repoMemory),
+      "</repo_memory>",
+      "",
+    );
+  }
+
+  if (opts.reviewHistory) {
+    parts.push(opts.reviewHistory, "");
+  }
+
+  if (opts.instructions) {
+    parts.push(
+      "## Repo-specific reviewer guidelines (.zanuda/instructions.md)",
+      opts.instructions.trim(),
+      "",
+    );
+  }
+
+  parts.push(
+    "## Project context",
+    context.text,
+    "",
+    `## Pull request${isFinalRound ? " (round 2 of 2 — FINAL)" : ""}`,
+    `<pr_title>${escapeXml(pr.title)}</pr_title>`,
+    pr.body
+      ? `<pr_description>\n${escapeXml(pr.body)}\n</pr_description>`
+      : "<pr_description>(none)</pr_description>",
+    `Changed files (${pr.changedFiles.length}):`,
+    pr.changedFiles.map((f) => `- ${f}`).join("\n"),
+    "",
+  );
+
+  if (isFinalRound && opts.discussion) {
+    parts.push(
+      "## Discussion since round 1",
+      "<discussion>",
+      escapeXml(opts.discussion),
+      "</discussion>",
+      "",
+    );
+  }
+
+  // Batch header (no running summary — each batch is independent)
+  const batchLabel = opts.isLastBatch
+    ? `Batch ${opts.batchIndex} of ${opts.totalBatches} (FINAL BATCH)`
+    : `Batch ${opts.batchIndex} of ${opts.totalBatches}`;
+
+  parts.push(
+    `## ${batchLabel} — review these files\n`,
+    `Files in this batch: ${batch.files.map((f) => `\`${f.filename}\``).join(", ")}`,
+    "",
+    batch.text,
+    "",
+    batchTaskInstructions(opts),
+  );
+
+  return parts.join("\n");
+}
+
+function batchTaskInstructions(opts: BatchPromptOpts): string {
+  const { batchIndex, totalBatches, isLastBatch, structuredOutput } = opts;
+
+  if (isLastBatch) {
+    return (
+      `## Your task (batch ${batchIndex} of ${totalBatches} — FINAL)\n` +
+      `Review the files above. This is the last batch in a multi-batch review.\n\n` +
+      `Produce the FINAL review output:\n` +
+      `- Inline comments for issues in this batch's files\n` +
+      `- A final \`action\` verdict that considers whether ANY batch above\n` +
+      `  found blockers (check the progress status in the system prompt)\n` +
+      `- A \`summary\` that covers the full PR, not just this batch\n` +
+      `- \`prSummary\` describing what the whole PR does\n` +
+      (structuredOutput ? "" : outputInstructions(true, false, 400)) // structured output handled at API level
+    );
+  }
+
+  return (
+    `## Your task (batch ${batchIndex} of ${totalBatches})\n` +
+    `Review ONLY the files in this batch. You are reviewing in isolation.\n` +
+    `If you notice something that depends on files in other batches you\n` +
+    `cannot see, do not flag it — you cannot verify it.\n\n` +
+    `Produce:\n` +
+    `- Inline comments for issues you can verify in these files\n` +
+    `- Set \`filesSummary\` for the files in this batch only\n` +
+    `- Set \`action\` to COMMENT (the final batch produces the verdict)\n\n` +
+    (structuredOutput ? "" : batchOutputInstructions())
+  );
+}
+
+function batchOutputInstructions(): string {
+  return `
+Respond with a single JSON object and nothing else (no markdown fences). Shape:
+{
+  "prSummary": "string — empty for intermediate batches",
+  "summary": "string — overall assessment for this batch",
+  "action": "COMMENT",
+  "filesSummary": [
+    {
+      "path": "repo-relative file path",
+      "description": "one-line description of what changed in this file"
+    }
+  ],
+  "comments": [
+    {
+      "path": "repo-relative file path",
+      "line": 123,
+      "severity": "blocker|warning",
+      "body": "markdown comment about this specific line (≤400 chars)"
+    }
+  ]
+}
+
+Only comment on lines that appear in the diff for this batch.
+If there is nothing to flag, return an empty "comments" array.`;
 }

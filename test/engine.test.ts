@@ -7,13 +7,12 @@ import {
   formatDiscussion,
   type PRComment,
 } from "../src/github/comments.ts";
+import { parseReviewResult, extractJson } from "../src/review/parse.js";
 import {
-  parseReviewResult,
-  extractJson,
   adaptiveMaxTokens,
   adjustedDiffBudget,
   parseMaxContextTokens,
-} from "../src/review/engine.ts";
+} from "../src/review/budget.js";
 import {
   buildUserPrompt,
   outputInstructions,
@@ -284,10 +283,10 @@ describe("adjustedDiffBudget", () => {
     },
   };
 
-  it("returns full maxDiffChars when context window is huge", () => {
-    // 1M token window — no reduction needed
+  it("returns maxDiffChars × safety margin when context window is huge", () => {
+    // 1M token window — computed budget hits maxDiffChars, then safety-margined
     const budget = adjustedDiffBudget(cfg, "tiny context", 1, 1_000_000);
-    assert.equal(budget, 60000);
+    assert.equal(budget, Math.floor(60000 * 0.9));
   });
 
   it("reduces budget when context window is small", () => {
@@ -323,9 +322,32 @@ describe("adjustedDiffBudget", () => {
     );
   });
 
-  it("never exceeds configured maxDiffChars", () => {
+  it("never exceeds configured maxDiffChars (after safety margin)", () => {
     const budget = adjustedDiffBudget(cfg, "ctx", 1, 1_000_000);
-    assert.equal(budget, cfg.review.maxDiffChars);
+    assert.ok(
+      budget <= cfg.review.maxDiffChars,
+      `expected ≤ ${cfg.review.maxDiffChars}, got ${budget}`,
+    );
+  });
+
+  it("applies 10% safety margin to prevent near-miss overflow", () => {
+    // 5000 token window — just enough that nonDiff overhead (~2600) + diff
+    // should fill the rest. The 10% margin ensures we don't cut it too close.
+    const budget = adjustedDiffBudget(cfg, "short", 1, 5000);
+    // Without margin: ~(5000 - 2600) * 3.5 ≈ 8400 chars
+    // With margin: floor(8400 * 0.9) = 7560 chars
+    assert.ok(budget >= 2000);
+    // Budget should be less than the unmargined estimate
+    const nonDiffTokens =
+      Math.ceil("Short preprompt.".length / 3.5) +
+      Math.ceil("short".length / 3.5) +
+      700 +
+      1500; // adaptiveMaxTokens(1, 2048) ≈ 1500
+    const unmargined = Math.max(2000, Math.floor((5000 - nonDiffTokens) * 3.5));
+    assert.ok(
+      budget < unmargined,
+      `margined ${budget} should be < unmargined ${unmargined}`,
+    );
   });
 });
 

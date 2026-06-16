@@ -6,3 +6,6 @@ dist/
 .DS_Store
 coverage/
 .cache/
+eval/.tmp/
+eval/challenges/
+eval/.cache/
