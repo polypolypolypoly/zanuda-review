@@ -35,11 +35,7 @@ import {
   parseMaxContextTokens,
   adjustedDiffBudget,
 } from "./budget.js";
-import {
-  buildHeaderedFiles,
-  reviewBatched,
-  reviewBatchedParallel,
-} from "./batch.js";
+import { buildHeaderedFiles, reviewBatched } from "./batch.js";
 export interface ReviewDeps {
   connector: SCMConnector;
   baseConfig: Config;
@@ -63,9 +59,8 @@ export async function reviewPullRequest(
     progressCommentId?: number;
     /** Force a specific review strategy for evaluation. "single" skips the
      * batch path entirely; "batch" forces multi-batch even for small PRs;
-     * "parallel" reviews all batches concurrently then synthesizes.
      * Undefined = auto-detect based on PR size. */
-    forceStrategy?: "single" | "batch" | "parallel";
+    forceStrategy?: "single" | "batch";
   } = {},
 ): Promise<
   ReviewResult & {
@@ -278,30 +273,6 @@ export async function reviewPullRequest(
       const batches = batchChangedFiles(headered, batchChars);
 
       if (batches.length > 1) {
-        // Multi-batch review.
-        if (forceStrategy === "parallel") {
-          log.info(
-            { batches: batches.length, totalFiles: pr.files.length },
-            "Large PR: using parallel batch review + synthesis",
-          );
-          return reviewBatchedParallel(pr, batches, {
-            deps,
-            ref,
-            number,
-            round,
-            dryRun: opts.dryRun ?? false,
-            startingCommentId,
-            context,
-            config,
-            provider,
-            instructions,
-            repoMemory,
-            reviewHistory,
-            discussion,
-            log,
-          });
-        }
-        // Sequential: running summary bridges batches
         log.info(
           { batches: batches.length, totalFiles: pr.files.length },
           "Large PR: using dependency-aware batch review",

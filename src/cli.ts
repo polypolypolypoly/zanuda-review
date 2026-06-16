@@ -16,9 +16,8 @@ import { reviewPullRequest } from "./review/engine.js";
 
 function forceStrategy(
   values: Record<string, string | boolean | undefined>,
-): "single" | "batch" | "parallel" | undefined {
+): "single" | "batch" | undefined {
   if (values["force-single"] === true) return "single";
-  if (values["force-parallel"] === true) return "parallel";
   if (values["force-batch"] === true) return "batch";
   return undefined;
 }
@@ -56,7 +55,6 @@ async function main(): Promise<void> {
       spawn: { type: "boolean", default: false },
       "force-single": { type: "boolean", default: false },
       "force-batch": { type: "boolean", default: false },
-      "force-parallel": { type: "boolean", default: false },
     },
     allowPositionals: true,
     strict: true,
