@@ -14,10 +14,8 @@
  * The harness:
  *   1. Creates a temp git repo from before/
  *   2. Copies after/ over it, stages everything
- *   3. Runs --force-single review → result-single.json
- *   4. Runs --force-batch review → result-batch.json
- *   5. Runs --force-parallel review → result-parallel.json
- *   6. Loads all results, diffs findings, reports
+ *   3. Runs --force-batch review → result-batch.json
+ *   4. Loads both results, diffs findings, reports
  */
 
 import { execSync } from "node:child_process";

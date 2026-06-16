@@ -271,7 +271,7 @@ export async function reviewBatched(
 
     // Accumulate comments and file summaries (after verification)
     const batchComments =
-      parsed.comments.length > 0
+      parsed.comments.length > 0 && config.review.verifyFindings
         ? await verifyFindings(
             parsed.comments,
             batchDiff.text,

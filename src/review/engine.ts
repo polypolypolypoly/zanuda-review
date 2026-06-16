@@ -352,7 +352,7 @@ export async function reviewPullRequest(
 
     // Self-verification: filter findings through a second pass
     const verifiedComments =
-      parsed.comments.length > 0
+      parsed.comments.length > 0 && config.review.verifyFindings
         ? await verifyFindings(
             parsed.comments,
             promptDiff.text,

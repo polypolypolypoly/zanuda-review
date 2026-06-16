@@ -11,6 +11,10 @@
  * Won't catch confident hallucinations (the model that invented a finding
  * will often invent a justification too), but catches the careless errors
  * that make up most of the noise.
+ *
+ * Failure mode: verification is a precision filter, not a correctness gate.
+ * If the verifier can't parse its result, we keep the original findings and
+ * log loudly — a parse failure should never silently suppress real issues.
  */
 
 import type { LLMProvider } from "../llm/index.js";
@@ -24,12 +28,9 @@ import { extractJson } from "./parse.js";
  * Returns only the findings that the model could ground in the diff.
  * Retracted findings are logged as warnings.
  *
- * @param findings — the original findings to verify
- * @param diffText — the diff the findings were based on
- * @param config — for model selection
- * @param provider — LLM provider
- * @param log — logger for retraction warnings
- * @returns filtered findings (verified only)
+ * If verification itself fails (provider error, unparseable response),
+ * keeps all original findings — verification is a precision filter, not
+ * a correctness gate. A parse failure shouldn't silently approve.
  */
 export async function verifyFindings(
   findings: ReviewComment[],
@@ -42,36 +43,39 @@ export async function verifyFindings(
 
   const verificationPrompt = buildVerificationPrompt(findings, diffText);
 
-  const completion = await completeWithRetry(provider, {
-    system: VERIFICATION_SYSTEM,
-    user: verificationPrompt,
-    model: config.models[config.provider],
-    temperature: 0, // deterministic — we want consistent verification
-    maxTokens: Math.min(config.generation.maxTokens, 4096),
-  });
+  try {
+    const completion = await completeWithRetry(provider, {
+      system: VERIFICATION_SYSTEM,
+      user: verificationPrompt,
+      model: config.models[config.provider],
+      temperature: 0,
+      maxTokens: Math.min(config.generation.maxTokens, 4096),
+    });
 
-  // Parse the verification response — same JSON extraction as reviews
-  const result = parseVerificationResult(completion.text);
+    const result = parseVerificationResult(completion.text, findings.length);
 
-  // Log retracted findings
-  for (const r of result.retracted) {
+    // Log retractions
+    for (const idx of result.retractedIndices) {
+      const f = findings[idx];
+      if (f) {
+        log.warn(
+          { path: f.path, line: f.line, body: f.body.slice(0, 100) },
+          "Finding retracted — could not be verified against diff",
+        );
+      }
+    }
+
+    // Keep findings whose index was verified, drop the rest
+    const verifiedSet = new Set(result.verifiedIndices);
+    return findings.filter((_, i) => verifiedSet.has(i));
+  } catch (err) {
+    // Verification itself failed — fail open: keep all findings
     log.warn(
-      {
-        path: r.path,
-        line: r.line,
-        reason: r.reason,
-      },
-      "Finding retracted — could not be verified against diff",
+      { err },
+      "Verification pass failed — keeping original findings unverified",
     );
+    return findings;
   }
-
-  // Match verified findings back to original findings (preserve body, severity)
-  const verifiedSet = new Set(
-    result.verified.map((v) => `${v.path}:${v.line}`),
-  );
-  const kept = findings.filter((f) => verifiedSet.has(`${f.path}:${f.line}`));
-
-  return kept;
 }
 
 const VERIFICATION_SYSTEM = `\
@@ -82,27 +86,23 @@ cannot find clear evidence in the diff, mark the finding as RETRACTED.
 Rules:
 - You are NOT producing new findings. Only verify what's given.
 - A finding is verified if there is concrete evidence in the diff that
-  supports it. "Concrete" means a specific line or hunk that shows the
-  issue.
+  supports it. "Concrete" means a specific line or hunk that shows the issue.
 - If the finding references a line that doesn't appear in the diff,
   or the diff doesn't show the claimed issue, retract it.
-- If the diff shows the issue but the finding mischaracterizes it,
-  retract it (the finding body is what gets posted — if it's wrong, it
-  must be retracted).
-- Do not retract just because the finding is imprecise about the line
-  number — if the issue is visible somewhere nearby (±5 lines), verify it.
-- Return only the verified findings. Retracted findings must include a
-  one-sentence reason.`;
+- If the diff shows the issue but the finding mischaracterizes it, retract it.
+- Do not retract just because the finding is imprecise about the line number —
+  if the issue is visible somewhere nearby (±5 lines), verify it.
+- Return indices (0-based) of verified and retracted findings. Do NOT
+  re-emit the finding bodies — reference by index only.`;
 
 function buildVerificationPrompt(
   findings: ReviewComment[],
   diffText: string,
 ): string {
   const findingsList = findings
-    .map((f) => `- [${f.path}:${f.line}] ${f.severity}: ${f.body}`)
+    .map((f, i) => `[${i}] ${f.path}:${f.line} ${f.severity}: ${f.body}`)
     .join("\n");
 
-  // Truncate diff if it's huge — verification only needs the relevant sections
   const MAX_DIFF_CHARS = 50000;
   const truncated =
     diffText.length > MAX_DIFF_CHARS
@@ -120,43 +120,60 @@ function buildVerificationPrompt(
     findingsList || "(none)",
     "",
     `## Your task`,
-    `Verify each finding above against the diff. Return JSON:`,
+    `Verify each finding against the diff. Reference findings by their [N] index.`,
+    `Return JSON with verified and retracted INDICES (0-based), not the full bodies:`,
     `{`,
-    `  "verified": [`,
-    `    { "path": "repo-relative path", "line": N, "severity": "blocker|warning", "body": "original body" }`,
-    `  ],`,
-    `  "retracted": [`,
-    `    { "path": "repo-relative path", "line": N, "reason": "one-sentence explanation" }`,
-    `  ]`,
+    `  "verifiedIndices": [0, 2],`,
+    `  "retractedIndices": [1]`,
     `}`,
     ``,
-    `Pass through the original body and severity unchanged for verified findings.`,
-    `Do not modify the finding text — just verify or retract.`,
+    `Only return indices. Do not re-emit the finding bodies.`,
   ].join("\n");
 }
 
 interface VerificationResult {
-  verified: ReviewComment[];
-  retracted: { path: string; line: number; reason: string }[];
+  verifiedIndices: number[];
+  retractedIndices: number[];
 }
 
-function parseVerificationResult(text: string): VerificationResult {
+function parseVerificationResult(
+  text: string,
+  totalFindings: number,
+): VerificationResult {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(text);
-    return {
-      verified: Array.isArray(parsed.verified) ? parsed.verified : [],
-      retracted: Array.isArray(parsed.retracted) ? parsed.retracted : [],
-    };
+    parsed = JSON.parse(text);
   } catch {
     try {
       const json = extractJson(text);
-      const parsed = JSON.parse(json);
-      return {
-        verified: Array.isArray(parsed.verified) ? parsed.verified : [],
-        retracted: Array.isArray(parsed.retracted) ? parsed.retracted : [],
-      };
+      parsed = JSON.parse(json);
     } catch {
-      return { verified: [], retracted: [] };
+      throw new Error("Unparseable verification response");
     }
   }
+
+  if (typeof parsed !== "object" || parsed === null)
+    throw new Error("Not an object");
+
+  const obj = parsed as Record<string, unknown>;
+  const verified = normalizeIndices(obj.verifiedIndices, totalFindings);
+  const retracted = normalizeIndices(obj.retractedIndices, totalFindings);
+
+  // A finding can't be both verified and retracted — verified wins
+  const retractedSet = new Set(retracted);
+  const verifiedSet = new Set(verified);
+  for (const r of retractedSet) verifiedSet.delete(r);
+
+  return {
+    verifiedIndices: [...verifiedSet],
+    retractedIndices: [...retractedSet],
+  };
+}
+
+/** Validate and clamp indices to the valid range. */
+function normalizeIndices(raw: unknown, max: number): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(Number)
+    .filter((n) => Number.isInteger(n) && n >= 0 && n < max);
 }

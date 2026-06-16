@@ -74,8 +74,10 @@ const ConfigSchema = z.object({
     maxDiffChars: z.number().int().positive(),
     inlineComments: z.boolean(),
     suggestions: z.boolean(),
-    /** Max characters per inline comment body. Hard floor: 400. */
     maxCommentChars: z.number().int().min(400).default(400),
+    /** Self-verification: after review, a second LLM call checks each finding
+     * against the diff. Disable for budget-constrained self-hosters. */
+    verifyFindings: z.boolean().default(true),
   }),
 });
 

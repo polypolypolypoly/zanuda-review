@@ -242,3 +242,7 @@ review:
   # Maximum characters per inline comment body. Hard floor: 400.
   # Repos and orgs may raise this but never lower it below 400.
   maxCommentChars: 400
+  # Self-verification: after review, a second LLM call checks each
+  # finding against the diff before posting. Filtered findings are logged
+  # as retracted. Disable for budget-constrained self-hosted setups.
+  verifyFindings: true
