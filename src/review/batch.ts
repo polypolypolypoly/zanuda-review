@@ -18,6 +18,7 @@ import { completeWithRetry } from "../llm/retry.js";
 import { headeredFile, type HeaderedFile } from "./header.js";
 import { type Batch } from "./chunk.js";
 import { parseReviewResult } from "./parse.js";
+import { verifyFindings } from "./verify.js";
 import { adaptiveMaxTokens } from "./budget.js";
 import {
   formatReviewHistory,
@@ -268,8 +269,19 @@ export async function reviewBatched(
         .catch(() => undefined);
     }
 
-    // Accumulate comments and file summaries
-    allComments.push(...parsed.comments);
+    // Accumulate comments and file summaries (after verification)
+    const batchComments =
+      parsed.comments.length > 0
+        ? await verifyFindings(
+            parsed.comments,
+            batchDiff.text,
+            config,
+            provider,
+            log,
+          )
+        : [];
+
+    allComments.push(...batchComments);
     allFilesSummary.push(...parsed.filesSummary);
 
     if (isLast) {

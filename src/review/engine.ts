@@ -30,6 +30,7 @@ import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 import { batchChangedFiles } from "./chunk.js";
 import { parseReviewResult } from "./parse.js";
+import { verifyFindings } from "./verify.js";
 import {
   adaptiveMaxTokens,
   parseMaxContextTokens,
@@ -345,9 +346,26 @@ export async function reviewPullRequest(
       "Model responded",
     );
 
-    const result = parseReviewResult(completion.text, {
+    const parsed = parseReviewResult(completion.text, {
       structured: provider.supportsStructuredOutput,
     });
+
+    // Self-verification: filter findings through a second pass
+    const verifiedComments =
+      parsed.comments.length > 0
+        ? await verifyFindings(
+            parsed.comments,
+            promptDiff.text,
+            config,
+            provider,
+            log,
+          )
+        : [];
+
+    const result: ReviewResult = {
+      ...parsed,
+      comments: verifiedComments,
+    };
     const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
