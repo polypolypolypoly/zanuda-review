@@ -203,56 +203,9 @@ Zanuda reads your local diff and `.zanuda/` config, sends it to the configured L
 npm test
 ```
 
-## Adding a new LLM provider
-
-Zanuda's LLM layer is a single-method interface. Adding a new provider follows the same pattern as the existing ones.
-
-**Four wiring points:**
-
-1. **Copy the stub** - `src/llm/stub.ts` is an annotated skeleton with JSDoc explaining every field.
-
-   ```bash
-   cp src/llm/stub.ts src/llm/<name>.ts
-   ```
-
-2. **Implement `complete()`** - one method: takes a system prompt + user message, returns a text string. See `src/llm/types.ts` for the full contract.
-
-3. **Register in the factory** - add one `case` to `src/llm/index.ts` and add the provider name to the enum in `src/config.ts`.
-
-4. **Wire up config** - add a default model ID to `config/default.yaml` and an API key entry to `.env.example`.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide including notes on temperature handling, streaming, and error propagation.
-
-## Adding a new platform (GitLab, Bitbucket, ...)
-
-Zanuda's GitHub integration is one connector behind a clean interface. The review engine, LLM layer, config system, and state store are all platform-agnostic and require zero changes to support a new platform.
-
-**Five steps:**
-
-1. **Copy the stub** - `src/platform/stub/connector.ts` is a fully annotated skeleton with JSDoc explaining what each method needs to do, plus GitLab/Bitbucket API equivalents for every call.
-
-   ```bash
-   cp src/platform/stub/connector.ts src/platform/<name>/connector.ts
-   ```
-
-2. **Implement the interface** - 10 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, edit comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
-
-3. **Register in the factory** - add one `case` to `src/platform/index.ts`:
-
-   ```typescript
-   case "gitlab":
-     return new GitLabConnector({ token: requireEnv("GITLAB_TOKEN") });
-   ```
-
-4. **Wire up config** - add the new token/URL env vars to `.env.example` under the platform section.
-
-5. **Test** - run `npm test` and add connector-specific tests in `test/`. See `test/githubConnector.test.ts` for the pattern.
-
-Set `PLATFORM=<name>` in `.env` to activate your connector. Everything else - reviews, memory, config merging, rate limits - works unchanged.
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, including how to add a new platform connector.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for developer setup, adding a new LLM provider or platform connector, and contribution guidelines.
 
 Short version: open an issue first for anything beyond a small fix, tests are required, all CI checks must pass. Security issues go to the maintainers directly, not a public issue.
 
