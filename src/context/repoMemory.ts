@@ -280,13 +280,7 @@ export async function maybeUpdateRepoMemory(
 
   let parsed: z.infer<typeof MemoryUpdateResponseSchema>;
   try {
-    // Use extractJson (same as review result parser) to handle both
-    // clean JSON and responses where the model puts explanatory prose
-    // before the JSON object. This is the same failure mode that
-    // parseReviewResult handles — models like to say "Here's my
-    // assessment..." before the actual JSON.
-    const raw = extractJson(completion.text);
-    parsed = MemoryUpdateResponseSchema.parse(JSON.parse(raw));
+    parsed = parseMemoryUpdateResponse(completion.text);
   } catch {
     log.warn(
       { text: completion.text.slice(0, 200) },
@@ -309,4 +303,16 @@ export async function maybeUpdateRepoMemory(
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Parse the model's memory-update response. Extracted for testability:
+ * handles prose-wrapped JSON (explanatory text before the JSON object),
+ * code-fenced JSON, and clean JSON uniformly via extractJson.
+ */
+export function parseMemoryUpdateResponse(
+  text: string,
+): z.infer<typeof MemoryUpdateResponseSchema> {
+  const raw = extractJson(text);
+  return MemoryUpdateResponseSchema.parse(JSON.parse(raw));
 }
