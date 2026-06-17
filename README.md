@@ -9,11 +9,14 @@ Zanuda polls GitHub every 60 s for PRs with a pending review request, then:
 1. Fetches the diff, per-repo config, and convention files (README, manifests, etc.)
 2. On first encounter with a repo, generates a persistent memory doc (architecture, code style, invariants) and reuses it on every subsequent review
 3. Sends everything to the configured LLM and parses the structured result
-4. Posts inline review comments via the GitHub API
+4. Runs a self-verification pass — a second LLM call that checks each finding against the diff and retracts any that aren't grounded in visible code
+5. Posts inline review comments via the GitHub API
 
 No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the other way around.
 
-**Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. If the author pushes fixes and re-requests, round 2 is the final verdict. It also replies to `@mentions` in the PR discussion (up to 5 per PR).
+**Large PRs.** When a diff exceeds ~50K characters, Zanuda splits files into dependency-aware batches using the import graph so coupled files stay together. Each batch is reviewed independently; if a blocker is found early, remaining batches are skipped. A hard backstop of 10 batches caps cost on pathological PRs.
+
+**Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. Round 2 only fires if the author pushed new commits after round 1 — no redundant second pass on unchanged code. It also replies to `@mentions` in the PR discussion (up to 5 per PR). If a round fails for a transient reason, comment `@ZlayaZanuda retry` to restart it.
 
 **Providers.** Anthropic, OpenAI, OpenRouter (200+ models), Ollama (local), DeepSeek, and Gemini. Switch with `LLM_PROVIDER` in `.env`; nothing else changes.
 
@@ -106,6 +109,16 @@ To give a user or org access: add their slug to `access.allowlist` in your local
 
 ---
 
+## Repo learning
+
+Zanuda builds persistent knowledge about your codebase over time, so reviews get more informed with each PR.
+
+**Repo memory.** On first review of a repo, Zanuda scans the project context files and generates a structured memory document: architecture, tech stack, code style, key invariants, and entry points. This is injected into every subsequent review so the model understands your codebase without re-reading everything. After each review, Zanuda checks if the PR revealed anything worth updating — new patterns, dismissed false alarms that should become calibration notes, etc.
+
+**Review history.** After round 2, Zanuda classifies the outcome of each round-1 comment (addressed, dismissed, or ignored) and records it in a per-repo history log. Future reviews include this log so the model learns which patterns are intentional in your codebase and doesn't re-flag them.
+
+Both are stored on disk alongside the PR state file. Disable with `memory.enabled: false` in `.zanuda/config.yml`.
+
 ## Configuration
 
 All Zanuda files live under `.zanuda/` in the repo root (or in the org's `.github` repo for org-wide settings):
@@ -169,6 +182,7 @@ npm run review -- --local --output review.md     # write to file
 npm run review -- --local --casual               # lighter, concise review
 npm run review -- --local --no-memory            # skip repo memory gen
 npm run review -- --local --model gemini-2.5-flash  # override model
+npm run review -- --spawn                         # initial memory scan (no review)
 ```
 Zanuda reads your local diff and `.zanuda/` config, sends it to the configured LLM, and prints the review to stdout (or a file).
 

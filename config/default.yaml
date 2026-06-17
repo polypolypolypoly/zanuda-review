@@ -155,7 +155,7 @@ preprompt: |
 
 # ─── Persistence ────────────────────────────────────────────────────
 # Path to the PR state file that survives restarts (round counts, mention
-# reply caps, etc). Empty = ~/.review-helper/state.json
+# reply caps, etc). Empty = ~/.zanuda/state.json
 persistence:
   stateFile: "" # empty = ~/.zanuda/state.json
 
