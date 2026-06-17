@@ -4,7 +4,7 @@ An AI code reviewer that runs as its own GitHub account. Add Zanuda to a PR and 
 
 ## How it works
 
-Zanuda polls GitHub every 60 s for PRs with a pending review request, then:
+Zanuda polls for review requests (default every 60 s) for PRs with a pending review request, then:
 
 1. Fetches the diff, per-repo config, and convention files (README, manifests, etc.)
 2. On first encounter with a repo, generates a persistent memory doc (architecture, code style, invariants) and reuses it on every subsequent review
