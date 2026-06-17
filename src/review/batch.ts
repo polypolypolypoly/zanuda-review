@@ -141,25 +141,26 @@ export async function reviewBatched(
   const budgetExceeded = () =>
     tokenBudget > 0 && estimatedTokens >= tokenBudget;
 
-  // ── MAX_BATCHES backstop ──────────────────────────────────────────
+  // ── maxBatches backstop ──────────────────────────────────────────
   // Prevent unbounded cost on pathological PRs. Beyond this, select the
   // highest-signal batches by weight and note unreviewed files honestly.
-  const MAX_BATCHES = 10;
+  // When config.limits.maxBatches is 0, there is no limit.
+  const maxBatches = config.limits.maxBatches;
   let unreviewedFiles: string[] = [];
   let effectiveBatches = batches;
-  if (batches.length > MAX_BATCHES) {
+  if (maxBatches > 0 && batches.length > maxBatches) {
     const sortedBatches = [...batches].sort((a, b) => b.weight - a.weight);
-    effectiveBatches = sortedBatches.slice(0, MAX_BATCHES);
-    const skipped = sortedBatches.slice(MAX_BATCHES);
+    effectiveBatches = sortedBatches.slice(0, maxBatches);
+    const skipped = sortedBatches.slice(maxBatches);
     unreviewedFiles = skipped.flatMap((b) => b.files.map((f) => f.filename));
     log.warn(
       {
         totalBatches: batches.length,
-        kept: MAX_BATCHES,
-        skipped: batches.length - MAX_BATCHES,
+        kept: maxBatches,
+        skipped: batches.length - maxBatches,
         unreviewedFiles: unreviewedFiles.length,
       },
-      "MAX_BATCHES exceeded — selecting highest-signal batches",
+      "maxBatches limit reached — selecting highest-signal batches",
     );
   }
 
