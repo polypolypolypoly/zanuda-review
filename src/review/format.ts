@@ -59,11 +59,20 @@ export function buildReviewCommentBody(
   };
 
   const reviewed = result.filesSummary.length;
-  const scope =
-    reviewed === totalFiles
-      ? `Checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
-      : `Checked ${reviewed} of ${totalFiles} files`;
   const inlineCount = result.comments.length;
+
+  // Scope line: shows how many files were described. When filesSummary is
+  // empty but the model posted inline comments we avoid "Checked 0 of N" —
+  // the model clearly examined specific files even if it skipped per-file
+  // descriptions (common in round 2, where the model focuses on re-assessing
+  // round-1 issues rather than mechanically listing every changed file).
+  let scopeLine = "";
+  if (reviewed > 0) {
+    scopeLine =
+      reviewed === totalFiles
+        ? `Checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
+        : `Checked ${reviewed} of ${totalFiles} files`;
+  }
   const { icon, label } = VERDICT_DISPLAY[result.action] ?? {
     icon: "💬",
     label: "observations",
@@ -73,11 +82,19 @@ export function buildReviewCommentBody(
     ? " · ⚠️ diff truncated (PR too large — review may be incomplete)"
     : "";
 
-  const parts: string[] = [
-    `<sub>${scope}${inlineCount > 0 ? ` · ${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}` : ""}${truncationNote}</sub>`,
-    "",
-    `${icon} **Review complete** · ${label}`,
-  ];
+  const parts: string[] = [];
+
+  // Scope + inline count sub-line
+  const subParts: string[] = [];
+  if (scopeLine) subParts.push(scopeLine);
+  if (inlineCount > 0)
+    subParts.push(
+      `${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}`,
+    );
+  if (truncationNote) subParts.push(truncationNote);
+  if (subParts.length > 0) parts.push(`<sub>${subParts.join(" · ")}</sub>`, "");
+
+  parts.push(`${icon} **Review complete** · ${label}`);
 
   if (result.prSummary) {
     parts.push("", `**What this PR does**`, "", result.prSummary);
