@@ -14,7 +14,6 @@ import type { LLMProvider } from "../llm/types.js";
 import { logger } from "../logger.js";
 import type { ProjectContext } from "./builder.js";
 import { completeWithRetry } from "../llm/retry.js";
-import { extractJson } from "../review/parse.js";
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
@@ -280,12 +279,11 @@ export async function maybeUpdateRepoMemory(
 
   let parsed: z.infer<typeof MemoryUpdateResponseSchema>;
   try {
-    // Use extractJson (same as review result parser) to handle both
-    // clean JSON and responses where the model puts explanatory prose
-    // before the JSON object. This is the same failure mode that
-    // parseReviewResult handles — models like to say "Here's my
-    // assessment..." before the actual JSON.
-    const raw = extractJson(completion.text);
+    // Strip optional code fence before parsing.
+    const raw = completion.text
+      .replace(/^```(?:json)?\n?/m, "")
+      .replace(/\n?```$/m, "")
+      .trim();
     parsed = MemoryUpdateResponseSchema.parse(JSON.parse(raw));
   } catch {
     log.warn(
