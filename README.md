@@ -26,7 +26,7 @@ No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the o
 
 The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If you've been given access:
 
-1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
+1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough). For orgs, making Zanuda an org member or adding it to a team with repo access is the easiest path.
 2. Optionally commit `.zanuda/config.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
 3. Open a PR and request a review from Zanuda. That's it.
 
