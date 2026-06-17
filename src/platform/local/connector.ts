@@ -323,9 +323,21 @@ function renderReview(result: ReviewResult): string {
     `# ${icon} Zanuda Review · ${label}`,
     "",
     result.summary,
-    "",
-    `> Checked ${reviewed} file${reviewed === 1 ? "" : "s"}${inlineCount > 0 ? ` · ${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}` : ""}`,
   ];
+
+  // Scope line: only show file count when filesSummary has entries.
+  // When empty, the model skipped per-file descriptions (common in round 2)
+  // but may still have posted inline comments — show those instead of "0 files".
+  if (reviewed > 0 || inlineCount > 0) {
+    const parts: string[] = [];
+    if (reviewed > 0)
+      parts.push(`Checked ${reviewed} file${reviewed === 1 ? "" : "s"}`);
+    if (inlineCount > 0)
+      parts.push(
+        `${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}`,
+      );
+    lines.push("", `> ${parts.join(" · ")}`);
+  }
 
   if (result.filesSummary.length > 0) {
     lines.push("", "## Changed files", "");
