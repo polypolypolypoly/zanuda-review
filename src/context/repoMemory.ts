@@ -14,6 +14,7 @@ import type { LLMProvider } from "../llm/types.js";
 import { logger } from "../logger.js";
 import type { ProjectContext } from "./builder.js";
 import { completeWithRetry } from "../llm/retry.js";
+import { extractJson } from "../review/parse.js";
 
 // ─── Storage helpers ──────────────────────────────────────────────────────────
 
@@ -279,12 +280,7 @@ export async function maybeUpdateRepoMemory(
 
   let parsed: z.infer<typeof MemoryUpdateResponseSchema>;
   try {
-    // Strip optional code fence before parsing.
-    const raw = completion.text
-      .replace(/^```(?:json)?\n?/m, "")
-      .replace(/\n?```$/m, "")
-      .trim();
-    parsed = MemoryUpdateResponseSchema.parse(JSON.parse(raw));
+    parsed = parseMemoryUpdateResponse(completion.text);
   } catch {
     log.warn(
       { text: completion.text.slice(0, 200) },
@@ -307,4 +303,16 @@ export async function maybeUpdateRepoMemory(
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Parse the model's memory-update response. Extracted for testability:
+ * handles prose-wrapped JSON (explanatory text before the JSON object),
+ * code-fenced JSON, and clean JSON uniformly via extractJson.
+ */
+export function parseMemoryUpdateResponse(
+  text: string,
+): z.infer<typeof MemoryUpdateResponseSchema> {
+  const raw = extractJson(text);
+  return MemoryUpdateResponseSchema.parse(JSON.parse(raw));
 }
