@@ -188,6 +188,10 @@ limits:
   # Per-PR token budget (input + output). Stops review when exceeded.
   # 0 = no limit. Useful as a cost backstop for large batched reviews.
   tokenBudgetPerPR: 0
+  # Hard cap on review batches per PR. Prevents unbounded cost on
+  # pathological PRs. Beyond this limit, highest-signal batches win;
+  # unreviewed files are noted in the verdict. 0 = no limit.
+  maxBatches: 10
 
 # ─── Repo memory ────────────────────────────────────────────────────
 # Persistent per-repo knowledge files. On first review of a repo Zanuda

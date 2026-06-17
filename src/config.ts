@@ -59,6 +59,13 @@ const ConfigSchema = z.object({
     maxNewPrsPerCycle: z.number().int().positive(),
     /** Per-PR token budget (input + output). 0 = no limit. */
     tokenBudgetPerPR: z.number().int().nonnegative().default(0),
+    /**
+     * Hard cap on review batches per PR. Prevents unbounded LLM cost on
+     * pathological PRs with hundreds of changed files. Beyond this limit,
+     * the highest-signal batches are selected and unreviewed files are
+     * noted honestly in the verdict comment. 0 = no limit.
+     */
+    maxBatches: z.number().int().nonnegative().default(10),
   }),
   memory: z.object({
     /** Toggle the whole feature on/off. */
