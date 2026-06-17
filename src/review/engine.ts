@@ -434,6 +434,7 @@ export async function reviewPullRequest(
             startingCommentId,
             buildReviewCommentBody(result, pr.changedFiles.length, {
               diffTruncated,
+              reviewedFiles: promptDiff.includedFiles.length,
             }),
           );
           progressCommentUpdated = true;
