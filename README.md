@@ -4,16 +4,19 @@ An AI code reviewer that runs as its own GitHub account. Add Zanuda to a PR and 
 
 ## How it works
 
-Zanuda polls GitHub every 60 s for PRs with a pending review request, then:
+Zanuda polls for review requests (default every 60 seconds) for PRs with a pending review request, then:
 
 1. Fetches the diff, per-repo config, and convention files (README, manifests, etc.)
 2. On first encounter with a repo, generates a persistent memory doc (architecture, code style, invariants) and reuses it on every subsequent review
 3. Sends everything to the configured LLM and parses the structured result
-4. Posts inline review comments via the GitHub API
+4. Runs a self-verification pass — a second LLM call that checks each finding against the diff and retracts any that aren't grounded in visible code
+5. Posts inline review comments via the GitHub API
 
 No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the other way around.
 
-**Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. If the author pushes fixes and re-requests, round 2 is the final verdict. It also replies to `@mentions` in the PR discussion (up to 5 per PR).
+**Large PRs.** When a diff exceeds ~50K characters, Zanuda splits files into dependency-aware batches using the import graph so coupled files stay together. Each batch is reviewed independently; if a blocker is found early, remaining batches are skipped. A hard backstop of 10 batches caps cost on pathological PRs.
+
+**Rounds.** Zanuda does at most two rounds per PR. Round 1 is the initial review. Round 2 only fires if the author pushed new commits after round 1 — no redundant second pass on unchanged code. It also replies to `@mentions` in the PR discussion (up to 5 per PR). If a round fails for a transient reason, comment `@ZlayaZanuda retry` to restart it.
 
 **Providers.** Anthropic, OpenAI, OpenRouter (200+ models), Ollama (local), DeepSeek, and Gemini. Switch with `LLM_PROVIDER` in `.env`; nothing else changes.
 
@@ -23,7 +26,7 @@ No webhook or public endpoint needed — Zanuda reaches out to GitHub, not the o
 
 The hosted instance runs as [@ZlayaZanuda](https://github.com/ZlayaZanuda). If you've been given access:
 
-1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough on public repos; for orgs, making it an org member covers everything).
+1. Add [@ZlayaZanuda](https://github.com/ZlayaZanuda) as a collaborator on your repo (Read is enough). For orgs, making Zanuda an org member or adding it to a team with repo access is the easiest path.
 2. Optionally commit `.zanuda/config.yml` to your org's `.github` repo for org-wide defaults, or to individual repos to override them.
 3. Open a PR and request a review from Zanuda. That's it.
 
@@ -106,6 +109,16 @@ To give a user or org access: add their slug to `access.allowlist` in your local
 
 ---
 
+## Repo learning
+
+Zanuda builds persistent knowledge about your codebase over time, so reviews get more informed with each PR.
+
+**Repo memory.** On first review of a repo, Zanuda scans the project context files and generates a structured memory document: architecture, tech stack, code style, key invariants, and entry points. This is injected into every subsequent review so the model understands your codebase without re-reading everything. After each review, Zanuda checks if the PR revealed anything worth updating — new patterns, dismissed false alarms that should become calibration notes, etc.
+
+**Review history.** After round 2, Zanuda classifies the outcome of each round-1 comment (addressed, dismissed, or ignored) and records it in a per-repo history log. Future reviews include this log so the model learns which patterns are intentional in your codebase and doesn't re-flag them.
+
+Both are stored on disk alongside the PR state file. Disable with `memory.enabled: false` in `.zanuda/config.yml`.
+
 ## Configuration
 
 All Zanuda files live under `.zanuda/` in the repo root (or in the org's `.github` repo for org-wide settings):
@@ -169,6 +182,7 @@ npm run review -- --local --output review.md     # write to file
 npm run review -- --local --casual               # lighter, concise review
 npm run review -- --local --no-memory            # skip repo memory gen
 npm run review -- --local --model gemini-2.5-flash  # override model
+npm run review -- --spawn                         # initial memory scan (no review)
 ```
 Zanuda reads your local diff and `.zanuda/` config, sends it to the configured LLM, and prints the review to stdout (or a file).
 
@@ -189,56 +203,9 @@ Zanuda reads your local diff and `.zanuda/` config, sends it to the configured L
 npm test
 ```
 
-## Adding a new LLM provider
-
-Zanuda's LLM layer is a single-method interface. Adding Gemini, Mistral, Cohere, or any other provider follows the same pattern as the existing ones.
-
-**Four wiring points:**
-
-1. **Copy the stub** - `src/llm/stub.ts` is an annotated skeleton with JSDoc explaining every field.
-
-   ```bash
-   cp src/llm/stub.ts src/llm/<name>.ts
-   ```
-
-2. **Implement `complete()`** - one method: takes a system prompt + user message, returns a text string. See `src/llm/types.ts` for the full contract.
-
-3. **Register in the factory** - add one `case` to `src/llm/index.ts` and add the provider name to the enum in `src/config.ts`.
-
-4. **Wire up config** - add a default model ID to `config/default.yaml` and an API key entry to `.env.example`.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide including notes on temperature handling, streaming, and error propagation.
-
-## Adding a new platform (GitLab, Bitbucket, ...)
-
-Zanuda's GitHub integration is one connector behind a clean interface. The review engine, LLM layer, config system, and state store are all platform-agnostic and require zero changes to support a new platform.
-
-**Five steps:**
-
-1. **Copy the stub** - `src/platform/stub/connector.ts` is a fully annotated skeleton with JSDoc explaining what each method needs to do, plus GitLab/Bitbucket API equivalents for every call.
-
-   ```bash
-   cp src/platform/stub/connector.ts src/platform/<name>/connector.ts
-   ```
-
-2. **Implement the interface** - 10 methods: auth, polling, PR fetch, file read, file tree, discussion fetch, post review, post comment, edit comment, reply to comment. See `src/platform/types.ts` for the full contract and `src/platform/github/connector.ts` as a reference.
-
-3. **Register in the factory** - add one `case` to `src/platform/index.ts`:
-
-   ```typescript
-   case "gitlab":
-     return new GitLabConnector({ token: requireEnv("GITLAB_TOKEN") });
-   ```
-
-4. **Wire up config** - add the new token/URL env vars to `.env.example` under the platform section.
-
-5. **Test** - run `npm test` and add connector-specific tests in `test/`. See `test/githubConnector.test.ts` for the pattern.
-
-Set `PLATFORM=<name>` in `.env` to activate your connector. Everything else - reviews, memory, config merging, rate limits - works unchanged.
-
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide, including how to add a new platform connector.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for developer setup, adding a new LLM provider or platform connector, and contribution guidelines.
 
 Short version: open an issue first for anything beyond a small fix, tests are required, all CI checks must pass. Security issues go to the maintainers directly, not a public issue.
 

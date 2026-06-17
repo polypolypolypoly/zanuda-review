@@ -42,5 +42,12 @@ export interface LLMProvider {
    * valid JSON without schema enforcement.
    */
   readonly supportsStructuredOutput: boolean;
+  /**
+   * Provider's effective max output token limit. Undefined = no known cap
+   * (cloud models with large output windows). When set, adaptiveMaxTokens
+   * uses this as an additional ceiling to prevent 400s from providers that
+   * reject oversized max_tokens requests (e.g. local Ollama models).
+   */
+  readonly maxOutputTokens?: number;
   complete(req: CompletionRequest): Promise<CompletionResult>;
 }

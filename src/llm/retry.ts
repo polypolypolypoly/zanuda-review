@@ -57,6 +57,45 @@ function isRetryable(err: unknown): boolean {
   return false;
 }
 
+/**
+ * Detect context-overflow errors from LLM providers.
+ *
+ * Every provider formats these differently, but the key phrases are
+ * consistent enough to catch the common cases:
+ *   - Anthropic: "prompt is too long"
+ *   - OpenAI: "maximum context length", "reduce the length"
+ *   - Ollama: "context length exceeded", "exceeds the context window"
+ *   - Generic: "context_length_exceeded"
+ *
+ * Returns the provider's raw message excerpt if detected, null otherwise.
+ */
+function detectContextOverflow(err: unknown): string | null {
+  if (!err || typeof err !== "object") return null;
+
+  const message =
+    (err as { message?: string }).message ??
+    (err as { error?: { message?: string } }).error?.message ??
+    "";
+
+  const lower = message.toLowerCase();
+  const keywords = [
+    "context length",
+    "context_length",
+    "prompt is too long",
+    "reduce the length",
+    "maximum context",
+    "exceeds the context window",
+    "too many tokens",
+    "token limit",
+    "max context length",
+  ];
+
+  for (const kw of keywords) {
+    if (lower.includes(kw)) return message.slice(0, 300);
+  }
+  return null;
+}
+
 function jitteredDelay(attempt: number): number {
   const cap = Math.min(BASE_DELAY_MS * 2 ** attempt, MAX_DELAY_MS);
   return Math.random() * cap;
@@ -92,7 +131,37 @@ export async function completeWithRetry(
       return await provider.complete(req);
     } catch (err) {
       lastErr = err;
-      if (!isRetryable(err)) throw err; // auth errors, bad request, etc. — fail fast
+      if (!isRetryable(err)) {
+        // Context-overflow errors are non-retryable 400s. Surface a
+        // clear message so the operator knows to trim config or use a
+        // larger model — rather than staring at a cryptic provider error.
+        const overflowMsg = detectContextOverflow(err);
+        if (overflowMsg) {
+          logger.error(
+            {
+              provider: provider.name,
+              model: req.model,
+              systemChars: req.system.length,
+              userChars: req.user.length,
+              estimatedInputTokens: Math.ceil(
+                (req.system.length + req.user.length) / 3.5,
+              ),
+              providerMessage: overflowMsg,
+            },
+            "Context window exceeded — prompt too large for the configured model. " +
+              "Reduce context.maxFileChars, trim .zanuda/instructions.md, set LLM_MAX_CONTEXT_TOKENS, " +
+              "or switch to a model with a larger context window.",
+          );
+          throw new Error(
+            `Context window exceeded (${provider.name}/${req.model}): ${overflowMsg}. ` +
+              `Prompt was ${req.system.length + req.user.length} chars ` +
+              `(~${Math.ceil((req.system.length + req.user.length) / 3.5)} tokens). ` +
+              `Reduce context.maxFileChars, trim .zanuda/instructions.md, or use a larger model.`,
+            { cause: err },
+          );
+        }
+        throw err;
+      }
     }
   }
 

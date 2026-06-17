@@ -4,6 +4,7 @@
  */
 
 import type { Config } from "../config.js";
+import { logger } from "../logger.js";
 
 /**
  * Scale the completion token budget to the actual PR size instead of always
@@ -14,14 +15,20 @@ import type { Config } from "../config.js";
  *   ~80 tokens for an inline comment (typically 1-2 per file reviewed)
  *   = ~120 tokens/file, doubled for headroom = ~240 tokens/file
  *
- * The configured maxTokens acts as a hard ceiling.
+ * The configured maxTokens acts as a hard ceiling. If `providerMaxOutput`
+ * is provided (from LLMProvider.maxOutputTokens), it acts as an additional
+ * ceiling — prevents 400s from providers with small output windows (Ollama).
  */
 export function adaptiveMaxTokens(
   fileCount: number,
   configuredMax: number,
+  providerMaxOutput?: number,
 ): number {
   const estimated = fileCount * 240 + 400;
-  return Math.min(configuredMax, Math.max(1500, estimated));
+  const ceiling = providerMaxOutput
+    ? Math.min(configuredMax, providerMaxOutput)
+    : configuredMax;
+  return Math.min(ceiling, Math.max(1500, estimated));
 }
 
 /**
@@ -47,18 +54,26 @@ export function parseMaxContextTokens(): number | undefined {
  *
  * Token estimation uses a conservative 3.5 chars/token (code ~4, English ~3).
  * A 10% safety margin prevents near-miss overflows.
+ *
+ * IMPORTANT: this function only controls the DIFF budget. Context, memory,
+ * preprompt, and other non-diff components are NOT trimmed here. If those
+ * alone exceed the context window, a warning is logged and the diff budget
+ * is clamped to a safe minimum — but the caller should also trim non-diff
+ * content before building the prompt.
  */
 export function adjustedDiffBudget(
   config: Config,
   contextText: string,
   fileCount: number,
   maxContextTokens: number,
+  providerMaxOutput?: number,
 ): number {
   const systemTokens = estimateTokens(config.preprompt);
   const contextTokens = estimateTokens(contextText);
   const outputTokens = adaptiveMaxTokens(
     fileCount,
     config.generation.maxTokens,
+    providerMaxOutput,
   );
 
   const FIXED_TASK_TOKENS = 700;
@@ -67,12 +82,56 @@ export function adjustedDiffBudget(
     systemTokens + contextTokens + FIXED_TASK_TOKENS + outputTokens;
   const availableDiffTokens = Math.max(0, maxContextTokens - nonDiffTokens);
 
+  if (availableDiffTokens <= 0) {
+    logger.warn(
+      {
+        maxContextTokens,
+        systemTokens,
+        contextTokens,
+        outputTokens,
+        nonDiffTokens,
+        contextChars: contextText.length,
+      },
+      "Context window exceeded by non-diff content alone (preprompt + context + output). " +
+        "The diff budget is at minimum, but the prompt will likely still overflow. " +
+        "Reduce context.maxFileChars, trim .zanuda/instructions.md, or use a model with a larger context window.",
+    );
+  }
+
   const computed = Math.max(2000, Math.floor(availableDiffTokens * 3.5));
   const capped = Math.min(computed, config.review.maxDiffChars);
 
   const SAFETY_MARGIN = 0.9;
   const withMargin = Math.floor(capped * SAFETY_MARGIN);
   return Math.max(2000, withMargin);
+}
+
+/**
+ * Log the total prompt size before an LLM call so operators can see what
+ * is actually being sent and spot budget issues without provider errors.
+ */
+export function logPromptSize(opts: {
+  systemChars: number;
+  userChars: number;
+  provider: string;
+  model: string;
+  maxOutputTokens: number;
+}): void {
+  const inputChars = opts.systemChars + opts.userChars;
+  const inputTokens = Math.ceil(inputChars / 3.5);
+  logger.info(
+    {
+      provider: opts.provider,
+      model: opts.model,
+      inputChars,
+      inputTokens: Math.round(inputTokens),
+      systemChars: opts.systemChars,
+      userChars: opts.userChars,
+      maxOutputTokens: opts.maxOutputTokens,
+      totalEstimatedTokens: Math.round(inputTokens) + opts.maxOutputTokens,
+    },
+    "Prompt assembled",
+  );
 }
 
 function estimateTokens(text: string): number {

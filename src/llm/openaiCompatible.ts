@@ -13,6 +13,7 @@ import type {
 export class OpenAICompatibleProvider implements LLMProvider {
   readonly name: string;
   readonly supportsStructuredOutput: boolean;
+  readonly maxOutputTokens: number | undefined;
   private client: OpenAI;
   /** json_object = valid JSON without schema enforcement; json_schema = strict schema */
   private jsonMode: "json_schema" | "json_object";
@@ -23,10 +24,13 @@ export class OpenAICompatibleProvider implements LLMProvider {
     baseURL?: string;
     /** Defaults to json_schema. Use json_object for providers that don't support strict schema mode. */
     jsonMode?: "json_schema" | "json_object";
+    /** Provider's effective max output token cap. Set for local models with small output windows. */
+    maxOutputTokens?: number;
   }) {
     this.name = opts.name;
     this.supportsStructuredOutput =
       (opts.jsonMode ?? "json_schema") === "json_schema";
+    this.maxOutputTokens = opts.maxOutputTokens;
     this.client = new OpenAI({ apiKey: opts.apiKey, baseURL: opts.baseURL });
     this.jsonMode = opts.jsonMode ?? "json_schema";
   }
@@ -103,6 +107,10 @@ export function ollamaProvider(): LLMProvider {
     name: "ollama",
     apiKey: "ollama",
     baseURL,
+    // Local models commonly have small output windows (2K–4K). 2048 is a
+    // safe default that prevents max_tokens-rejection 400s; override via
+    // OLLAMA_MAX_OUTPUT_TOKENS env var if your model supports more.
+    maxOutputTokens: Number(process.env.OLLAMA_MAX_OUTPUT_TOKENS) || 2048,
   });
 }
 
