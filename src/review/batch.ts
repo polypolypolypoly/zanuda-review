@@ -19,7 +19,7 @@ import { headeredFile, type HeaderedFile } from "./header.js";
 import { type Batch } from "./chunk.js";
 import { parseReviewResult } from "./parse.js";
 import { verifyFindings } from "./verify.js";
-import { adaptiveMaxTokens } from "./budget.js";
+import { adaptiveMaxTokens, logPromptSize } from "./budget.js";
 import {
   formatReviewHistory,
   type ReviewHistory,
@@ -209,30 +209,41 @@ export async function reviewBatched(
       "Reviewing batch",
     );
 
+    const systemPrompt = buildSystemPrompt(config);
+    const userPrompt = buildBatchUserPrompt(pr, context, config, batchDiff, {
+      batchIndex: i + 1,
+      totalBatches: effectiveBatches.length,
+      isLastBatch: isLast,
+      round,
+      discussion,
+      repoMemory: repoMemory ?? undefined,
+      reviewHistory: reviewHistory
+        ? formatReviewHistory(reviewHistory)
+        : undefined,
+      instructions,
+      structuredOutput: provider.supportsStructuredOutput,
+    });
+
+    const batchOutputTokens = adaptiveMaxTokens(
+      batch.files.length,
+      config.generation.maxTokens,
+      provider.maxOutputTokens,
+    );
+
+    logPromptSize({
+      systemChars: systemPrompt.length,
+      userChars: userPrompt.length,
+      provider: config.provider,
+      model: config.models[config.provider],
+      maxOutputTokens: batchOutputTokens,
+    });
+
     const completion = await completeWithRetry(provider, {
-      system: buildSystemPrompt(config),
-      user: buildBatchUserPrompt(pr, context, config, batchDiff, {
-        batchIndex: i + 1,
-        totalBatches: effectiveBatches.length,
-        isLastBatch: isLast,
-        // No running summary: each batch reviews independently.
-        // Cross-batch oversight happens at verdict level (last batch
-        // sees earlier-blocker counts, not lossy text summaries).
-        round,
-        discussion,
-        repoMemory: repoMemory ?? undefined,
-        reviewHistory: reviewHistory
-          ? formatReviewHistory(reviewHistory)
-          : undefined,
-        instructions,
-        structuredOutput: provider.supportsStructuredOutput,
-      }),
+      system: systemPrompt,
+      user: userPrompt,
       model: config.models[config.provider],
       temperature: config.generation.temperature,
-      maxTokens: adaptiveMaxTokens(
-        batch.files.length,
-        config.generation.maxTokens,
-      ),
+      maxTokens: batchOutputTokens,
       jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
     });
 
