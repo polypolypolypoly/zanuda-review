@@ -48,7 +48,13 @@ export function formatDiscussion(
 export function buildReviewCommentBody(
   result: ReviewResult,
   totalFiles: number,
-  opts: { diffTruncated?: boolean } = {},
+  opts: {
+    diffTruncated?: boolean;
+    /** Actual number of files whose diffs were visible to the model.
+     * When provided, used instead of the model-generated filesSummary.length
+     * for the scope line — the engine always knows exactly what was sent. */
+    reviewedFiles?: number;
+  } = {},
 ): string {
   // Verdicts are recommendations to humans — not GitHub review actions.
   // Language reflects that Zanuda is advising, not deciding.
@@ -58,7 +64,9 @@ export function buildReviewCommentBody(
     COMMENT: { icon: "💬", label: "observations" },
   };
 
-  const reviewed = result.filesSummary.length;
+  // Use the engine-provided count when available — it's always accurate.
+  // Fall back to filesSummary.length for backward compatibility (CLI dry-run).
+  const reviewed = opts.reviewedFiles ?? result.filesSummary.length;
   const inlineCount = result.comments.length;
 
   // Scope line: shows how many files were described. When filesSummary is

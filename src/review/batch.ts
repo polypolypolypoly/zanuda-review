@@ -402,7 +402,10 @@ export async function reviewBatched(
           ref,
           startingCommentId,
           buildReviewCommentBody(result, pr.changedFiles.length, {
-            diffTruncated: false, // all files reviewed across batches
+            diffTruncated: false,
+            reviewedFiles: new Set(
+              effectiveBatches.flatMap((b) => b.files.map((f) => f.filename)),
+            ).size,
           }),
         );
         progressUpdated = true;
