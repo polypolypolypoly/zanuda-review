@@ -205,7 +205,7 @@ npm test
 
 ## Adding a new LLM provider
 
-Zanuda's LLM layer is a single-method interface. Adding Mistral, Groq, Cohere, or any other provider follows the same pattern as the existing ones.
+Zanuda's LLM layer is a single-method interface. Adding a new provider follows the same pattern as the existing ones.
 
 **Four wiring points:**
 
