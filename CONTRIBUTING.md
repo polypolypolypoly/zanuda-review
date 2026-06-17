@@ -118,8 +118,7 @@ These are not optional — they exist for security and correctness reasons:
 
 ## Adding a new LLM provider
 
-Zanuda's LLM layer is a one-method interface. Adding Gemini, Mistral, Cohere,
-or any other provider takes about 30 minutes.
+Zanuda's LLM layer is a one-method interface. Adding a new provider takes about 30 minutes.
 
 ### How the abstraction works
 

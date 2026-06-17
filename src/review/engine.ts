@@ -35,6 +35,7 @@ import {
   adaptiveMaxTokens,
   parseMaxContextTokens,
   adjustedDiffBudget,
+  logPromptSize,
 } from "./budget.js";
 import { buildHeaderedFiles, reviewBatched } from "./batch.js";
 export interface ReviewDeps {
@@ -228,6 +229,7 @@ export async function reviewPullRequest(
           context.text,
           pr.files.length,
           maxContextTokens,
+          provider.maxOutputTokens,
         )
       : config.review.maxDiffChars;
     if (effectiveDiffChars < config.review.maxDiffChars) {
@@ -315,30 +317,39 @@ export async function reviewPullRequest(
       );
     }
 
+    const systemPrompt = buildSystemPrompt(config);
+    const userPrompt = buildUserPrompt(pr, context, config, {
+      round,
+      discussion,
+      repoMemory: repoMemory ?? undefined,
+      reviewHistory: reviewHistory
+        ? formatReviewHistory(reviewHistory)
+        : undefined,
+      instructions,
+      promptDiff,
+      structuredOutput: provider.supportsStructuredOutput,
+    });
+
+    const outputTokens = adaptiveMaxTokens(
+      promptDiff.includedFiles.length,
+      config.generation.maxTokens,
+      provider.maxOutputTokens,
+    );
+
+    logPromptSize({
+      systemChars: systemPrompt.length,
+      userChars: userPrompt.length,
+      provider: config.provider,
+      model: config.models[config.provider],
+      maxOutputTokens: outputTokens,
+    });
+
     const completion = await completeWithRetry(provider, {
-      system: buildSystemPrompt(config),
-      user: buildUserPrompt(pr, context, config, {
-        round,
-        discussion,
-        repoMemory: repoMemory ?? undefined,
-        reviewHistory: reviewHistory
-          ? formatReviewHistory(reviewHistory)
-          : undefined,
-        instructions,
-        promptDiff,
-        // When the provider enforces the schema at the API level
-        // (tool_use / json_schema strict mode), output instructions can
-        // be omitted from the prompt. When it only guarantees valid JSON
-        // (json_object mode), the prompt must carry the format instructions
-        // so the model knows the expected shape.
-        structuredOutput: provider.supportsStructuredOutput,
-      }),
+      system: systemPrompt,
+      user: userPrompt,
       model: config.models[config.provider],
       temperature: config.generation.temperature,
-      maxTokens: adaptiveMaxTokens(
-        promptDiff.includedFiles.length,
-        config.generation.maxTokens,
-      ),
+      maxTokens: outputTokens,
       jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
     });
     log.info(

@@ -155,7 +155,7 @@ preprompt: |
 
 # ─── Persistence ────────────────────────────────────────────────────
 # Path to the PR state file that survives restarts (round counts, mention
-# reply caps, etc). Empty = ~/.review-helper/state.json
+# reply caps, etc). Empty = ~/.zanuda/state.json
 persistence:
   stateFile: "" # empty = ~/.zanuda/state.json
 
@@ -226,12 +226,11 @@ context:
 
 # ─── Review behaviour ────────────────────────────────────────────────
 review:
-  # Largest diff (in characters) to send to the model in a single call.
-  # Each batch is capped at 50 000 chars (~14K tokens) regardless of this
-  # setting — larger PRs are split into multiple batches with dependency-
-  # aware grouping. This ceiling only takes effect through the context-
-  # window pre-flight check (LLM_MAX_CONTEXT_TOKENS).
-  maxDiffChars: 200000
+  # Per-batch diff character ceiling. Each individual review batch never
+  # exceeds this limit — larger PRs are split across multiple batches via
+  # dependency-aware clustering (see chunk.ts). 50 000 chars ≈ 14K tokens
+  # keeps each batch within strong attention for most models.
+  maxDiffChars: 50000
   # Post inline comments anchored to specific lines (true) or a single
   # summary comment (false).
   inlineComments: true
