@@ -351,7 +351,9 @@ export async function reviewPullRequest(
       model: config.models[config.provider],
       temperature: config.generation.temperature,
       maxTokens: outputTokens,
-      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
+      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars, {
+        round,
+      }),
     });
     log.info(
       { provider: completion.provider, model: completion.model },

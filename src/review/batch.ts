@@ -246,7 +246,9 @@ export async function reviewBatched(
       model: config.models[config.provider],
       temperature: config.generation.temperature,
       maxTokens: batchOutputTokens,
-      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
+      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars, {
+        round,
+      }),
     });
 
     const parsed = parseReviewResult(completion.text, {
