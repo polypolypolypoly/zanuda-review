@@ -42,6 +42,15 @@ const FileSummarySchema = z.object({
 // This is intentionally more lenient than the JSON Schema we pass to the API
 // (which still declares the strict contract): the schema tells the model what
 // to produce; this tells us what to do when it doesn't fully comply.
+//
+// Note on maxLength asymmetry:
+//   filesSummary[].description has Zod .max(100) — a single overlong
+//   description is dropped per-item by filterValidItems, which is safe.
+//   summary/prSummary do NOT have Zod .max() — they have .catch(""),
+//   which would silently drop the ENTIRE field if 1 char over the limit.
+//   Dropping the whole summary is worse than a slightly long one.
+//   The JSON schema maxLength is the enforcement mechanism for those fields;
+//   Zod is intentionally lenient as a safety net.
 
 function filterValidItems<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
   return items.flatMap((item) => {
