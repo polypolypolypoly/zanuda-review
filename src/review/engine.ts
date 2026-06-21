@@ -450,27 +450,8 @@ export async function reviewPullRequest(
     }
 
     if (!opts.dryRun) {
-      // Try to edit the progress comment to show the final verdict.
-      if (startingCommentId !== null) {
-        try {
-          await connector.editComment(
-            ref,
-            startingCommentId,
-            buildReviewCommentBody(result, pr.changedFiles.length, {
-              diffTruncated,
-              reviewedFiles: promptDiff.includedFiles.length,
-              round,
-            }),
-          );
-        } catch (err) {
-          log.warn({ err }, "Failed to update starting comment");
-        }
-      }
-
       // Post the review. The summary is always included in the review body
       // so the review is self-contained (not split across an issue comment).
-      // The progress comment edit above is a convenience — it gives a quick
-      // status — but the review body is the source of truth.
       await connector.postReview(pr, result, config, {
         summaryPostedElsewhere: false,
         visibleFilePaths: includedPaths(promptDiff),
