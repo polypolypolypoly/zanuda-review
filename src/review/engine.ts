@@ -469,19 +469,17 @@ export async function reviewPullRequest(
         }
       }
 
-      // Post the review. If the progress comment wasn't updated (either because
-      // it never existed or the edit failed), postReview will include the summary
-      // in the review body as a fallback.
-      // Pass the set of file paths whose diff was visible so the connector can
-      // strip comments on unseen files before anchoring, preventing 422s.
+      // Post the review. The summary is always included in the review body
+      // so the review is self-contained (not split across an issue comment).
+      // The progress comment edit above is a convenience — it gives a quick
+      // status — but the review body is the source of truth.
       await connector.postReview(pr, result, config, {
-        summaryPostedElsewhere: progressCommentUpdated,
+        summaryPostedElsewhere: false,
         visibleFilePaths: includedPaths(promptDiff),
       });
       log.info(
         {
           comments: result.comments.length,
-          summaryPostedElsewhere: progressCommentUpdated,
         },
         "Review posted",
       );
