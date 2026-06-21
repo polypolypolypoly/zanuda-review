@@ -14,6 +14,7 @@ import type { logger } from "../logger.js";
 import {
   filterReviewComments,
   filterReviewVerdict,
+  truncateReviewSummary,
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
@@ -383,6 +384,13 @@ export async function reviewBatched(
   const verdictReason = filterReviewVerdict(result);
   if (verdictReason) {
     log.warn(`Verdict adjusted: ${verdictReason}`);
+  }
+
+  // Summary length caps: hard-truncate prSummary (200) and summary (400).
+  // Mutates result in place.
+  const truncReason = truncateReviewSummary(result);
+  if (truncReason) {
+    log.warn(`Summary truncated: ${truncReason}`);
   }
 
   // ── Stale-commit guard ──────────────────────────────────────────

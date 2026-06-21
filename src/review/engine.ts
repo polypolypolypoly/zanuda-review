@@ -27,6 +27,7 @@ import { logger } from "../logger.js";
 import {
   filterReviewComments,
   filterReviewVerdict,
+  truncateReviewSummary,
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
@@ -400,6 +401,13 @@ export async function reviewPullRequest(
     const verdictReason = filterReviewVerdict(result);
     if (verdictReason) {
       log.warn(`Verdict adjusted: ${verdictReason}`);
+    }
+
+    // Summary length caps: hard-truncate prSummary (200) and summary (400).
+    // Mutates result in place.
+    const truncReason = truncateReviewSummary(result);
+    if (truncReason) {
+      log.warn(`Summary truncated: ${truncReason}`);
     }
 
     const diffTruncated = promptDiff.truncated;

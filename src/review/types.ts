@@ -26,7 +26,10 @@ const FileSummarySchema = z.object({
   path: z.string().describe("Repo-relative file path."),
   description: z
     .string()
-    .describe("One-line description of what changed in this file."),
+    .max(100)
+    .describe(
+      "One-line description of what changed in this file (≤100 chars).",
+    ),
 });
 
 // ─── Resilient array helpers ─────────────────────────────────────────────────
@@ -64,11 +67,16 @@ function filterValidItems<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
 export const ReviewResultSchema = z.object({
   prSummary: z
     .string()
+    .max(200)
     .default("")
     .describe(
-      "Short neutral description of what this PR does — 1-3 sentences from the author's perspective (what changed and why). Not a review assessment. Round 1 only; omit in round 2.",
+      "Short neutral description of what this PR does — 1-2 sentences from the author's perspective. Round 1 only; omit in round 2.",
     ),
-  summary: z.string().catch("").describe("Overall assessment, 1-4 sentences."),
+  summary: z
+    .string()
+    .max(400)
+    .catch("")
+    .describe("Overall assessment, 1-3 short sentences."),
   action: z
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
     .catch("COMMENT")
@@ -114,7 +122,7 @@ export function buildReviewResultJsonSchema(
   // The model cannot produce it even if it ignores the prompt instructions.
   // (Round 1 keeps it: the model fills it for the first-review overview.)
   const properties: Record<string, unknown> = {
-    summary: { type: "string" },
+    summary: { type: "string", maxLength: 400 },
     action: {
       type: "string",
       enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
@@ -127,8 +135,8 @@ export function buildReviewResultJsonSchema(
         required: ["path", "description"],
         additionalProperties: false,
         properties: {
-          path: { type: "string" },
-          description: { type: "string" },
+          path: { type: "string", maxLength: 200 },
+          description: { type: "string", maxLength: 100 },
         },
       },
     },
@@ -150,7 +158,7 @@ export function buildReviewResultJsonSchema(
   };
 
   if (round < 2) {
-    properties.prSummary = { type: "string" };
+    properties.prSummary = { type: "string", maxLength: 200 };
   }
 
   return {
