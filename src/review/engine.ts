@@ -20,7 +20,7 @@ import {
   saveReviewHistory,
   type ReviewHistory,
 } from "../context/reviewHistory.js";
-import { formatDiscussion, buildReviewCommentBody } from "./format.js";
+import { formatDiscussion } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
@@ -401,8 +401,6 @@ export async function reviewPullRequest(
     if (verdictReason) {
       log.warn(`Verdict adjusted: ${verdictReason}`);
     }
-
-    const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
     // The LLM call can take 30-60 s. If the author pushed new commits in that
