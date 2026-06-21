@@ -205,4 +205,11 @@ export interface SCMConnector {
     comment: SCMComment,
     body: string,
   ): Promise<void>;
+
+  /**
+   * List commit SHAs in a PR (ordered, oldest first).
+   * Used by the deduplication gate to skip PRs whose commits were all
+   * already reviewed in a previous PR.
+   */
+  listCommitShas(ref: RepoRef, number: number): Promise<string[]>;
 }

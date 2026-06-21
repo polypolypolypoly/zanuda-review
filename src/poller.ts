@@ -8,6 +8,7 @@ import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
 import { PRStateStore } from "./state/store.js";
+import { CommitLog } from "./state/commitLog.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
@@ -39,6 +40,11 @@ export async function startPoller(opts: {
   /** Persistent per-PR state — survives restarts. */
   const store = new PRStateStore(config.persistence.stateFile || undefined);
 
+  /** Tracks reviewed commit SHAs per repo — prevents re-reviewing merge PRs. */
+  const commitLog = new CommitLog(
+    config.persistence.commitLogFile || undefined,
+  );
+
   /**
    * Single provider instance shared across both review rounds and mention
    * replies. Creating it once avoids allocating a new HTTP client on every
@@ -58,6 +64,7 @@ export async function startPoller(opts: {
       connector,
       inProgress,
       store,
+      commitLog,
     });
     await pollMentions({ config, reviewerLogin, connector, store, provider });
   };
@@ -80,8 +87,10 @@ async function pollReviewRequests(opts: {
   connector: SCMConnector;
   inProgress: Set<number>;
   store: PRStateStore;
+  commitLog: CommitLog;
 }): Promise<void> {
-  const { config, reviewerLogin, connector, inProgress, store } = opts;
+  const { config, reviewerLogin, connector, inProgress, store, commitLog } =
+    opts;
 
   logger.debug("Polling for review requests…");
 
@@ -212,6 +221,48 @@ async function pollReviewRequests(opts: {
       }
     }
 
+    // ── Commit dedup gate (round 1 only) ───────────────────────────────────
+    // If every commit in this PR was already reviewed in a previous PR,
+    // skip — nothing new to check. Catches develop→main sync PRs where
+    // all feature-PR commits were already reviewed individually.
+    if (nextRound === 1) {
+      try {
+        const shas = await connector.listCommitShas(item.ref, item.number);
+        if (
+          shas.length > 0 &&
+          commitLog.hasAll(item.ref.owner, item.ref.repo, shas)
+        ) {
+          logger.info(
+            {
+              repo: `${item.ref.owner}/${item.ref.repo}`,
+              pr: item.number,
+              commits: shas.length,
+            },
+            "All commits already reviewed in prior PRs — skipping",
+          );
+          await connector
+            .postComment(
+              item.ref,
+              item.number,
+              `⏭️ **Skipping review** — all ${shas.length} commit(s) in this PR were already reviewed in earlier PRs. Nothing new to check.`,
+            )
+            .catch((err: unknown) =>
+              logger.warn({ err }, "Failed to post skip-review comment"),
+            );
+          continue;
+        }
+      } catch (err) {
+        logger.warn(
+          {
+            err,
+            repo: `${item.ref.owner}/${item.ref.repo}`,
+            pr: item.number,
+          },
+          "Commit dedup check failed — proceeding with review anyway",
+        );
+      }
+    }
+
     logger.info(
       {
         repo: `${item.ref.owner}/${item.ref.repo}`,
@@ -282,6 +333,20 @@ async function pollReviewRequests(opts: {
           lastReviewedHeadSha: result.headSha,
           failedAwaitingRetry: false,
         });
+
+        // Record reviewed commits so future merge/sync PRs with the same
+        // commits are skipped. Fire-and-forget — a failure here is non-fatal.
+        connector
+          .listCommitShas(item.ref, item.number)
+          .then((shas) => {
+            if (shas.length > 0) {
+              commitLog.addAll(item.ref.owner, item.ref.repo, shas);
+            }
+          })
+          .catch((err: unknown) =>
+            logger.warn({ err }, "Failed to record reviewed commits"),
+          );
+
         logger.info(
           {
             repo: `${item.ref.owner}/${item.ref.repo}`,

@@ -167,6 +167,7 @@ preprompt: |
 # reply caps, etc). Empty = ~/.zanuda/state.json
 persistence:
   stateFile: "" # empty = ~/.zanuda/state.json
+  commitLogFile: "" # empty = ~/.zanuda/commit-log.json
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
