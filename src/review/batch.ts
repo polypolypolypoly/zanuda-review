@@ -407,6 +407,7 @@ export async function reviewBatched(
             reviewedFiles: new Set(
               effectiveBatches.flatMap((b) => b.files.map((f) => f.filename)),
             ).size,
+            round,
           }),
         );
         progressUpdated = true;
