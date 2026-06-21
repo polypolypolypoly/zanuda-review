@@ -197,6 +197,23 @@ describe("CommitLog load validation", () => {
     assert.equal(log.hasAll("bad", "repo", ["sha1"]), false);
   });
 
+  it("drops repos with non-datetime updatedAt (e.g. 'banana')", () => {
+    writeFileSync(
+      logPath,
+      JSON.stringify({
+        version: 1,
+        repos: {
+          "good/repo": { shas: ["sha1"], updatedAt: new Date().toISOString() },
+          "bad/repo": { shas: ["sha1"], updatedAt: "banana" },
+        },
+      }),
+      "utf8",
+    );
+    const log = new CommitLog(logPath);
+    assert.equal(log.hasAll("good", "repo", ["sha1"]), true);
+    assert.equal(log.hasAll("bad", "repo", ["sha1"]), false);
+  });
+
   it("drops repos with missing updatedAt", () => {
     writeFileSync(
       logPath,

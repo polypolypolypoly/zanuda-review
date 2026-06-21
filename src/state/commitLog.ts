@@ -27,7 +27,7 @@ const PRUNE_AFTER_DAYS = 60;
 
 const CommitLogEntrySchema = z.object({
   shas: z.array(z.string()),
-  updatedAt: z.string(),
+  updatedAt: z.string().datetime(),
 });
 
 const CommitLogFileSchema = z.object({
@@ -124,7 +124,8 @@ export class CommitLog {
         continue;
       }
       const e = validated.data;
-      if (new Date(e.updatedAt).getTime() < cutoff) {
+      const ts = new Date(e.updatedAt).getTime();
+      if (isNaN(ts) || ts < cutoff) {
         pruned++;
         continue;
       }
