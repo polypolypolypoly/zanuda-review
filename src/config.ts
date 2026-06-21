@@ -44,9 +44,9 @@ const ConfigSchema = z.object({
     stateFile: z.string(),
     /**
      * Path to the commit log file (reviewed commit SHAs per repo).
-     * Empty string = ~/.zanuda/commit-log.json
+     * Empty string or absent = ~/.zanuda/commit-log.json
      */
-    commitLogFile: z.string(),
+    commitLogFile: z.string().optional(),
   }),
   access: z.object({
     /**
