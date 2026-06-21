@@ -100,16 +100,16 @@ export const RepoConfigSchema = ConfigSchema.partial().extend({
   // Convenience: a repo can append extra instructions without replacing the
   // whole preprompt.
   prepromptAppend: z.string().optional(),
-  // Make nested objects partial so overlay configs can specify only the
+  // Make nested objects partial so overlay/repo configs can specify only the
   // fields they need, without restating every field from defaults.
+  // Note: access and models are intentionally NOT overridable by repo config
+  // — access is security-sensitive, models affect operator cost.
   persistence: ConfigSchema.shape.persistence.partial().optional(),
   memory: ConfigSchema.shape.memory.partial().optional(),
   context: ConfigSchema.shape.context.partial().optional(),
   review: ConfigSchema.shape.review.partial().optional(),
   generation: ConfigSchema.shape.generation.partial().optional(),
   limits: ConfigSchema.shape.limits.partial().optional(),
-  access: ConfigSchema.shape.access.partial().optional(),
-  models: ConfigSchema.shape.models.partial().optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -188,14 +188,18 @@ export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {
   const merged: Config = {
     ...base,
     ...stripUndefined(repo),
-    models: mergeSection(base.models, repo.models),
+    // access and models are NOT merged from repo config — access is
+    // security-sensitive (a repo could widen the allowlist), and models
+    // affect operator cost. They are operator-only, set in the global
+    // config or ZANUDA_CONFIG overlay.
+    models: base.models,
+    access: base.access,
     generation: mergeSection(base.generation, repo.generation),
     persistence: mergeSection(base.persistence, repo.persistence),
     memory: mergeSection(base.memory, repo.memory),
     context: mergeSection(base.context, repo.context),
     review: mergeSection(base.review, repo.review),
     limits: mergeSection(base.limits, repo.limits),
-    access: mergeSection(base.access, repo.access),
   };
   if (repo.preprompt) merged.preprompt = repo.preprompt;
   if (repo.prepromptAppend) {

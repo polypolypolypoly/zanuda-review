@@ -183,4 +183,55 @@ describe("mergeRepoConfig: property-based", () => {
       ),
     );
   });
+
+  // ── mergeRepoConfig: field-by-field nested merge ─────────────────────────
+
+  it("preserves base values when repo config is null", () => {
+    const merged = mergeRepoConfig(baseConfig, null);
+    assert.deepEqual(merged, baseConfig);
+  });
+
+  it("merges a single nested field without affecting siblings", () => {
+    const merged = mergeRepoConfig(baseConfig, {
+      memory: { enabled: false },
+    });
+    // Override took effect
+    assert.equal(merged.memory.enabled, false);
+    // Sibling fields preserved from base
+    assert.equal(merged.memory.dir, baseConfig.memory.dir);
+    assert.equal(
+      merged.memory.maxHistoryEntries,
+      baseConfig.memory.maxHistoryEntries,
+    );
+    // Other sections untouched
+    assert.equal(
+      merged.review.inlineComments,
+      baseConfig.review.inlineComments,
+    );
+  });
+
+  it("strips undefined repo fields so they don't override base", () => {
+    // A repo config with memory.enabled set but memory.dir missing
+    // should NOT result in memory.dir being undefined.
+    const merged = mergeRepoConfig(baseConfig, {
+      memory: { enabled: false },
+    });
+    assert.equal(merged.memory.dir, baseConfig.memory.dir);
+  });
+
+  it("does NOT merge access from repo config (security)", () => {
+    const merged = mergeRepoConfig(baseConfig, {
+      access: { allowlist: ["evil-org"] },
+    });
+    // Access should remain the base config value, not the repo override
+    assert.deepEqual(merged.access.allowlist, baseConfig.access.allowlist);
+  });
+
+  it("does NOT merge models from repo config (operator cost)", () => {
+    const originalModel = baseConfig.models.anthropic;
+    const merged = mergeRepoConfig(baseConfig, {
+      models: { anthropic: "claude-expensive-9000" },
+    });
+    assert.equal(merged.models.anthropic, originalModel);
+  });
 });
