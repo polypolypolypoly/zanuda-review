@@ -398,6 +398,11 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /zero inline/);
     assert.equal(r.action, "COMMENT");
+    // Summary must be amended so the body doesn't contradict the header verdict.
+    assert.ok(
+      r.summary.includes("Verdict adjusted"),
+      "summary should contain adjustment note",
+    );
   });
 
   it("downgrades REQUEST_CHANGES with only warnings to COMMENT", () => {
@@ -406,6 +411,21 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /no blocker/);
     assert.equal(r.action, "COMMENT");
+    assert.ok(
+      r.summary.includes("Verdict adjusted"),
+      "summary should contain adjustment note",
+    );
+  });
+
+  it("does not amend summary when no downgrade occurs", () => {
+    const r = makeResult("REQUEST_CHANGES", [blocker("a.ts", 1)]);
+    const originalSummary = r.summary;
+    filterReviewVerdict(r);
+    assert.equal(
+      r.summary,
+      originalSummary,
+      "summary must not change when verdict is kept",
+    );
   });
 
   it("keeps REQUEST_CHANGES when at least one blocker exists", () => {

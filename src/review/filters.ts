@@ -298,8 +298,13 @@ export function filterAnchorableComments(
 // More subtly: REQUEST_CHANGES without any blocker-severity inline comments
 // is equally unjustified. A warning alone doesn't warrant blocking.
 //
+// When we downgrade, we also append a note to result.summary so the displayed
+// body never contradicts the header verdict. The model often writes "Verdict is
+// REQUEST_CHANGES" in the free-text summary — without this, the header shows
+// 💬 observations while the body says REQUEST_CHANGES.
+//
 // Returns a reason string if the action was changed, null otherwise.
-// Mutates result.action in place.
+// Mutates result.action (and result.summary when changed) in place.
 
 export function filterReviewVerdict(result: ReviewResult): string | null {
   if (result.action !== "REQUEST_CHANGES") return null;
@@ -308,11 +313,17 @@ export function filterReviewVerdict(result: ReviewResult): string | null {
 
   if (result.comments.length === 0) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";
+    (result as { summary: string }).summary =
+      result.summary.trim() +
+      "\n\n_(Verdict adjusted: no inline findings — REQUEST\\_CHANGES downgraded to COMMENT.)_";
     return "REQUEST_CHANGES→COMMENT (zero inline comments — no specific issues to address)";
   }
 
   if (!hasBlocker) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";
+    (result as { summary: string }).summary =
+      result.summary.trim() +
+      "\n\n_(Verdict adjusted: all findings are warnings, none blockers — REQUEST\\_CHANGES downgraded to COMMENT.)_";
     return "REQUEST_CHANGES→COMMENT (no blocker-severity comments — warnings alone don't justify blocking)";
   }
 
