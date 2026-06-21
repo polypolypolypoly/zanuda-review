@@ -171,6 +171,19 @@ export class LocalConnector implements SCMConnector {
     // No-op — no discussion in local mode.
   }
 
+  async listCommitShas(_ref: RepoRef, _number: number): Promise<string[]> {
+    // In local mode there is no PR — return empty so the dedup gate passes.
+    return [];
+  }
+
+  async dismissReviewRequest(
+    _ref: RepoRef,
+    _number: number,
+    _reviewerLogin: string,
+  ): Promise<void> {
+    // No-op — no remote review requests in local mode.
+  }
+
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   /** Cache for stdin read — getDiff and getChangedFiles both call it. */

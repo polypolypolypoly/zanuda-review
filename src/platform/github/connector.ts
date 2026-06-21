@@ -145,6 +145,26 @@ export class GitHubConnector implements SCMConnector {
   ): Promise<void> {
     return replyToComment(this.octokit, ref, number, comment, body);
   }
+
+  async listCommitShas(ref: RepoRef, number: number): Promise<string[]> {
+    const commits = await this.octokit.paginate(
+      this.octokit.pulls.listCommits,
+      { ...ref, pull_number: number, per_page: 100 },
+    );
+    return commits.map((c) => c.sha);
+  }
+
+  async dismissReviewRequest(
+    ref: RepoRef,
+    number: number,
+    reviewerLogin: string,
+  ): Promise<void> {
+    await this.octokit.pulls.removeRequestedReviewers({
+      ...ref,
+      pull_number: number,
+      reviewers: [reviewerLogin],
+    });
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

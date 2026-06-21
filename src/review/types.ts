@@ -106,47 +106,57 @@ export type ReviewResult = z.infer<typeof ReviewResultSchema>;
  */
 export function buildReviewResultJsonSchema(
   maxCommentChars: number,
+  opts: { round?: number } = {},
 ): Record<string, unknown> {
-  return {
-    type: "object",
-    // prSummary is intentionally NOT in required — round 2 should omit it.
-    required: ["summary", "action", "filesSummary", "comments"],
-    additionalProperties: false,
-    properties: {
-      prSummary: { type: "string" },
-      summary: { type: "string" },
-      action: {
-        type: "string",
-        enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
-      },
-      batchFindings: { type: "string", maxLength: 600 },
-      filesSummary: {
-        type: "array",
-        items: {
-          type: "object",
-          required: ["path", "description"],
-          additionalProperties: false,
-          properties: {
-            path: { type: "string" },
-            description: { type: "string" },
-          },
-        },
-      },
-      comments: {
-        type: "array",
-        items: {
-          type: "object",
-          required: ["path", "line", "severity", "body"],
-          additionalProperties: false,
-          properties: {
-            path: { type: "string" },
-            line: { type: "integer", minimum: 1 },
-            severity: { type: "string", enum: ["blocker", "warning"] },
-            body: { type: "string", maxLength: maxCommentChars },
-            suggestion: { type: "string", maxLength: 2000 },
-          },
+  const round = opts.round ?? 1;
+
+  // On round 2, prSummary is removed from the JSON schema entirely.
+  // The model cannot produce it even if it ignores the prompt instructions.
+  // (Round 1 keeps it: the model fills it for the first-review overview.)
+  const properties: Record<string, unknown> = {
+    summary: { type: "string" },
+    action: {
+      type: "string",
+      enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
+    },
+    batchFindings: { type: "string", maxLength: 600 },
+    filesSummary: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["path", "description"],
+        additionalProperties: false,
+        properties: {
+          path: { type: "string" },
+          description: { type: "string" },
         },
       },
     },
+    comments: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["path", "line", "severity", "body"],
+        additionalProperties: false,
+        properties: {
+          path: { type: "string" },
+          line: { type: "integer", minimum: 1 },
+          severity: { type: "string", enum: ["blocker", "warning"] },
+          body: { type: "string", maxLength: maxCommentChars },
+          suggestion: { type: "string", maxLength: 2000 },
+        },
+      },
+    },
+  };
+
+  if (round < 2) {
+    properties.prSummary = { type: "string" };
+  }
+
+  return {
+    type: "object",
+    required: ["summary", "action", "filesSummary", "comments"],
+    additionalProperties: false,
+    properties,
   };
 }

@@ -941,4 +941,38 @@ describe("buildReviewCommentBody", () => {
     assert.ok(subheaderIdx > verdictIdx, "subheader should follow verdict");
     assert.ok(summaryIdx > subheaderIdx, "prSummary should follow subheader");
   });
+
+  // ── Round 2 ────────────────────────────────────────────────────────────────────
+
+  it("shows round label on the verdict line for round 2", () => {
+    const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 1, {
+      round: 2,
+    });
+    assert.ok(text.includes("(round 2 of 2)"));
+  });
+
+  it("suppresses prSummary on round 2 even when model provides one", () => {
+    const result = {
+      ...makeResult("REQUEST_CHANGES", "Still needs fixes."),
+      prSummary: "Adds auth and refactors middleware.",
+    };
+    const text = buildReviewCommentBody(result, 5, { round: 2 });
+    assert.ok(!text.includes("What this PR does"));
+    assert.ok(!text.includes("Adds auth"));
+    // Verdict line should still show the round label
+    assert.ok(text.includes("(round 2 of 2)"));
+  });
+
+  it("round 2 does not show round label for round 1 (default)", () => {
+    const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 1);
+    assert.ok(!text.includes("(round "));
+  });
+
+  it("round 2 still renders Observations section even without prSummary", () => {
+    const text = buildReviewCommentBody(makeResult("COMMENT", "All good."), 1, {
+      round: 2,
+    });
+    assert.ok(text.includes("**Observations**"));
+    assert.ok(text.includes("All good."));
+  });
 });

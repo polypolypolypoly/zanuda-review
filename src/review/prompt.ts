@@ -294,15 +294,26 @@ function finalTaskInstructions(
 ): string {
   return (
     `## Your task (FINAL — round 2 of 2)\n` +
-    `Examine the current diff and the discussion above. Assess whether the issues ` +
-    `from round 1 have been adequately addressed. This is your last word on this PR.\n\n` +
+    `\n` +
+    `This is NOT a new review. You already reviewed this PR in round 1 (see the\n` +
+    `Discussion below). Your sole job now: follow up on your own findings.\n` +
+    `\n` +
+    `Structure your summary as a status update:\n` +
+    `1. **Round-1 follow-up:** go through each issue you flagged in round 1. For each:\n` +
+    `   - State whether the author addressed it (addressed / partially addressed / not addressed)\n` +
+    `   - If partially or not addressed: what still needs fixing\n` +
+    `2. **New findings:** only flag NEW blockers introduced by the author's fixes.\n` +
+    `   Do NOT re-flag things you already covered in step 1.\n` +
+    `\n` +
     `Valid actions for round 2:\n` +
-    `  APPROVE          — issues resolved; you recommend merging.\n` +
-    `  REQUEST_CHANGES  — unresolved blockers remain; you recommend not merging yet.\n` +
-    `  COMMENT          — observations only or minor issues; author decides.\n\n` +
-    `When using REQUEST_CHANGES or COMMENT, your summary must clearly state what\n` +
-    `still needs fixing and why. Be specific and direct.\n\n` +
-    `Set \`prSummary\` to an empty string — it is not needed for round 2.\n` +
+    `  APPROVE          — all round-1 issues resolved; no new blockers.\n` +
+    `  REQUEST_CHANGES  — unresolved round-1 blockers remain, or new blockers.\n` +
+    `  COMMENT          — warnings only; no blockers old or new.\n` +
+    `\n` +
+    `CRITICAL:\n` +
+    `- prSummary MUST be an empty string. Do NOT describe what the PR does.\n` +
+    `- Your summary must read like a follow-up status check on round 1. If it\n` +
+    `  could pass as a standalone round-1 review of the whole PR, redo it.\n` +
     (structured
       ? ""
       : outputInstructions(forAllFiles, suggestions, maxCommentChars))

@@ -12,7 +12,10 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { ReviewResultSchema } from "../src/review/types.ts";
+import {
+  ReviewResultSchema,
+  buildReviewResultJsonSchema,
+} from "../src/review/types.ts";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -249,5 +252,37 @@ describe("ReviewResultSchema validation", () => {
     });
     assert.equal(r.comments.length, 2);
     assert.ok(r.comments.some((c) => c.body === "second valid"));
+  });
+});
+
+// ─── buildReviewResultJsonSchema ─────────────────────────────────────────────
+
+describe("buildReviewResultJsonSchema", () => {
+  it("includes prSummary in round 1", () => {
+    const schema = buildReviewResultJsonSchema(400);
+    assert.ok("prSummary" in (schema.properties as object));
+  });
+
+  it("includes prSummary in round 1 explicitly", () => {
+    const schema = buildReviewResultJsonSchema(400, { round: 1 });
+    assert.ok("prSummary" in (schema.properties as object));
+  });
+
+  it("removes prSummary from round 2 schema", () => {
+    const schema = buildReviewResultJsonSchema(400, { round: 2 });
+    assert.ok(!("prSummary" in (schema.properties as object)));
+  });
+
+  it("round 2 schema still has summary and comments", () => {
+    const schema = buildReviewResultJsonSchema(400, { round: 2 });
+    const props = schema.properties as Record<string, unknown>;
+    assert.ok("summary" in props);
+    assert.ok("comments" in props);
+    assert.ok("action" in props);
+  });
+
+  it("additionalProperties is false (rejects unknown fields)", () => {
+    const schema = buildReviewResultJsonSchema(400);
+    assert.equal(schema.additionalProperties, false);
   });
 });

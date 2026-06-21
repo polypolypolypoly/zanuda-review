@@ -8,6 +8,7 @@ import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
 import { PRStateStore } from "./state/store.js";
+import { CommitLog } from "./state/commitLog.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
@@ -39,6 +40,11 @@ export async function startPoller(opts: {
   /** Persistent per-PR state — survives restarts. */
   const store = new PRStateStore(config.persistence.stateFile || undefined);
 
+  /** Tracks reviewed commit SHAs per repo — prevents re-reviewing merge PRs. */
+  const commitLog = new CommitLog(
+    config.persistence.commitLogFile || undefined,
+  );
+
   /**
    * Single provider instance shared across both review rounds and mention
    * replies. Creating it once avoids allocating a new HTTP client on every
@@ -58,6 +64,7 @@ export async function startPoller(opts: {
       connector,
       inProgress,
       store,
+      commitLog,
     });
     await pollMentions({ config, reviewerLogin, connector, store, provider });
   };
@@ -80,8 +87,10 @@ async function pollReviewRequests(opts: {
   connector: SCMConnector;
   inProgress: Set<number>;
   store: PRStateStore;
+  commitLog: CommitLog;
 }): Promise<void> {
-  const { config, reviewerLogin, connector, inProgress, store } = opts;
+  const { config, reviewerLogin, connector, inProgress, store, commitLog } =
+    opts;
 
   logger.debug("Polling for review requests…");
 
@@ -92,6 +101,32 @@ async function pollReviewRequests(opts: {
   } catch (err) {
     logger.error({ err }, "Error polling for review requests");
     return;
+  }
+
+  // Also scan the state store for PRs with explicit re-review requests
+  // (set by the mention path when the author posts "@reviewer re-review").
+  // These may not appear in pollPendingReviews if the original review
+  // request was already fulfilled.
+  const fromStateStore = new Set<number>();
+  for (const [platformId, s] of store.entries()) {
+    if (
+      s.reReviewRequested &&
+      !pending.some(
+        (p) =>
+          p.ref.owner === s.ref.owner &&
+          p.ref.repo === s.ref.repo &&
+          p.number === s.number,
+      ) &&
+      !inProgress.has(platformId)
+    ) {
+      pending.push({
+        ref: s.ref,
+        number: s.number,
+        title: `PR #${s.number}`,
+        platformId,
+      });
+      fromStateStore.add(platformId);
+    }
   }
 
   if (pending.length === 0) {
@@ -178,6 +213,7 @@ async function pollReviewRequests(opts: {
           maxRoundsNotified: true,
           lastReviewedHeadSha: state.lastReviewedHeadSha,
           failedAwaitingRetry: false,
+          reReviewRequested: false,
         });
       }
       continue;
@@ -185,30 +221,68 @@ async function pollReviewRequests(opts: {
 
     const nextRound = completedRounds + 1;
 
-    // ── Round-2 gate: require new commits since the last review ──────────────
-    // Round 2 is only useful if the author has pushed fixes. Without this
-    // guard, round 2 fires on the very next poll tick after round 1 with
-    // no code changes, producing a redundant and inconsistent second review.
-    if (nextRound >= 2 && state?.lastReviewedHeadSha) {
-      let currentHeadSha: string | null = null;
-      try {
-        const pr = await connector.fetchPR(item.ref, item.number);
-        currentHeadSha = pr.headSha;
-      } catch (err) {
-        logger.warn(
-          { err, repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
-          "Round-2 gate: could not fetch current head SHA — proceeding anyway",
-        );
-      }
-      if (
-        currentHeadSha !== null &&
-        currentHeadSha === state.lastReviewedHeadSha
-      ) {
+    // ── Re-review gate: round 2+ requires explicit author request ───────────
+    // Zanuda acts ONLY on request, re-request, or @mention. Round 2 does NOT
+    // auto-trigger when the author pushes new commits.
+    //
+    // Two paths to round 2:
+    //   1. Author re-requests on GitHub → dismiss (after round 1) removes the
+    //      PR from pending; re-request adds it back → appears in connector's
+    //      pollPendingReviews (NOT from state store).
+    //   2. Author posts "@reviewer re-review" → mention path sets
+    //      reReviewRequested → state-store scan picks it up.
+    if (nextRound >= 2) {
+      const isReReview =
+        state?.reReviewRequested === true ||
+        !fromStateStore.has(item.platformId);
+      if (!isReReview) {
         logger.debug(
           { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
-          "Round 2 withheld — no new commits since round 1",
+          "Round 2 withheld — author has not requested re-review",
         );
         continue;
+      }
+    }
+
+    // ── Commit dedup gate (round 1 only) ───────────────────────────────────
+    // If every commit in this PR was already reviewed in a previous PR,
+    // skip — nothing new to check. Catches develop→main sync PRs where
+    // all feature-PR commits were already reviewed individually.
+    if (nextRound === 1) {
+      try {
+        const shas = await connector.listCommitShas(item.ref, item.number);
+        if (
+          shas.length > 0 &&
+          commitLog.hasAll(item.ref.owner, item.ref.repo, shas)
+        ) {
+          logger.info(
+            {
+              repo: `${item.ref.owner}/${item.ref.repo}`,
+              pr: item.number,
+              commits: shas.length,
+            },
+            "All commits already reviewed in prior PRs — skipping",
+          );
+          await connector
+            .postComment(
+              item.ref,
+              item.number,
+              `⏭️ **Skipping review** — all ${shas.length} commit(s) in this PR were already reviewed in earlier PRs. Nothing new to check.`,
+            )
+            .catch((err: unknown) =>
+              logger.warn({ err }, "Failed to post skip-review comment"),
+            );
+          continue;
+        }
+      } catch (err) {
+        logger.warn(
+          {
+            err,
+            repo: `${item.ref.owner}/${item.ref.repo}`,
+            pr: item.number,
+          },
+          "Commit dedup check failed — proceeding with review anyway",
+        );
       }
     }
 
@@ -250,6 +324,7 @@ async function pollReviewRequests(opts: {
                 consecutiveFailures: 0,
                 lastReviewedHeadSha: null,
                 failedAwaitingRetry: false,
+                reReviewRequested: false,
               }),
               progressCommentId: result.progressCommentId,
               consecutiveFailures: 0,
@@ -281,7 +356,37 @@ async function pollReviewRequests(opts: {
           consecutiveFailures: 0,
           lastReviewedHeadSha: result.headSha,
           failedAwaitingRetry: false,
+          reReviewRequested: false,
         });
+
+        // Record reviewed commits so future merge/sync PRs with the same
+        // commits are skipped. Fire-and-forget — a failure here is non-fatal.
+        connector
+          .listCommitShas(item.ref, item.number)
+          .then((shas) => {
+            if (shas.length > 0) {
+              commitLog.addAll(item.ref.owner, item.ref.repo, shas);
+            }
+          })
+          .catch((err: unknown) =>
+            logger.warn({ err }, "Failed to record reviewed commits"),
+          );
+
+        // After round 1, dismiss the review request so the PR stops
+        // appearing in pollPendingReviews. Round 2 only happens when
+        // the author explicitly re-requests (GitHub) or uses an @mention.
+        if (nextRound === 1) {
+          connector
+            .dismissReviewRequest(item.ref, item.number, reviewerLogin)
+            .catch((err: unknown) =>
+              logger.warn(
+                { err },
+                "Failed to dismiss review request after round 1 — " +
+                  "re-review via GitHub re-request may not work",
+              ),
+            );
+        }
+
         logger.info(
           {
             repo: `${item.ref.owner}/${item.ref.repo}`,
@@ -318,6 +423,7 @@ async function pollReviewRequests(opts: {
             consecutiveFailures: failures,
             failedAwaitingRetry: true,
             lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
+            reReviewRequested: state?.reReviewRequested ?? false,
           });
         } finally {
           inProgress.delete(item.platformId);
@@ -426,6 +532,46 @@ async function pollMentions(opts: {
           ...current,
           failedAwaitingRetry: false,
           consecutiveFailures: 0,
+          repliedCommentIds: new Set([
+            ...current.repliedCommentIds,
+            mention.id,
+          ]),
+        });
+        continue;
+      }
+
+      // ── Re-review command ─────────────────────────────────────────────────
+      // Detected when the author posts @reviewer with one of the re-review
+      // trigger words. Sets the reReviewRequested flag so the next
+      // pollReviewRequests tick picks the PR up for round 2+.
+      // Only applies when the PR has completed at least one round.
+      if (
+        current.rounds >= 1 &&
+        current.rounds < MAX_REVIEW_ROUNDS &&
+        /\b(?:re-?review|review again|round\s*2|re-?check)\b/i.test(
+          mention.body,
+        )
+      ) {
+        logger.info(
+          {
+            repo: `${state.ref.owner}/${state.ref.repo}`,
+            pr: state.number,
+          },
+          "Re-review command received",
+        );
+        try {
+          await connector.replyToComment(
+            state.ref,
+            state.number,
+            mention,
+            "Starting re-review.",
+          );
+        } catch (err) {
+          logger.warn({ err }, "Failed to post re-review acknowledgement");
+        }
+        store.set(id, {
+          ...current,
+          reReviewRequested: true,
           repliedCommentIds: new Set([
             ...current.repliedCommentIds,
             mention.id,

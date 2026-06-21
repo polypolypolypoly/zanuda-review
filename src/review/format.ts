@@ -54,6 +54,10 @@ export function buildReviewCommentBody(
      * When provided, used instead of the model-generated filesSummary.length
      * for the scope line — the engine always knows exactly what was sent. */
     reviewedFiles?: number;
+    /** Review round (1 or 2). When >= 2, the PR overview (prSummary) is
+     * suppressed — round 2 should assess whether round-1 issues were
+     * addressed, not re-describe the PR. */
+    round?: number;
   } = {},
 ): string {
   // Verdicts are recommendations to humans — not GitHub review actions.
@@ -102,9 +106,12 @@ export function buildReviewCommentBody(
   if (truncationNote) subParts.push(truncationNote);
   if (subParts.length > 0) parts.push(`<sub>${subParts.join(" · ")}</sub>`, "");
 
-  parts.push(`${icon} **Review complete** · ${label}`);
+  const round = opts.round ?? 1;
+  parts.push(
+    `${icon} **Review complete**${round >= 2 ? ` (round ${round} of 2)` : ""} · ${label}`,
+  );
 
-  if (result.prSummary) {
+  if (round < 2 && result.prSummary) {
     parts.push("", `**What this PR does**`, "", result.prSummary);
   }
 

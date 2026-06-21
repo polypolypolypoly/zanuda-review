@@ -24,6 +24,11 @@ import { formatDiscussion, buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
+import {
+  filterReviewComments,
+  filterReviewVerdict,
+  formatFilterSummary,
+} from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { buildPromptDiff, includedPaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
@@ -350,7 +355,9 @@ export async function reviewPullRequest(
       model: config.models[config.provider],
       temperature: config.generation.temperature,
       maxTokens: outputTokens,
-      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
+      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars, {
+        round,
+      }),
     });
     log.info(
       { provider: completion.provider, model: completion.model },
@@ -377,6 +384,24 @@ export async function reviewPullRequest(
       ...parsed,
       comments: verifiedComments,
     };
+
+    // ── Hard output filters (non-LLM) ───────────────────────────────────────
+    const filtered = filterReviewComments(result.comments, {
+      maxCommentChars: config.review.maxCommentChars,
+    });
+    if (filtered.dropped.length > 0 || filtered.mutated.length > 0) {
+      log.warn(formatFilterSummary(filtered));
+    }
+    result.comments = filtered.kept;
+
+    // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+    // Mutates result.action in place — the same object reference flows to
+    // buildReviewCommentBody and postReview below.
+    const verdictReason = filterReviewVerdict(result);
+    if (verdictReason) {
+      log.warn(`Verdict adjusted: ${verdictReason}`);
+    }
+
     const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
@@ -435,6 +460,7 @@ export async function reviewPullRequest(
             buildReviewCommentBody(result, pr.changedFiles.length, {
               diffTruncated,
               reviewedFiles: promptDiff.includedFiles.length,
+              round,
             }),
           );
           progressCommentUpdated = true;

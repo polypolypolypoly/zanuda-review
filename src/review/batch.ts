@@ -11,6 +11,11 @@ import { buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
+import {
+  filterReviewComments,
+  filterReviewVerdict,
+  formatFilterSummary,
+} from "./filters.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
 import { assembleBatchDiff, batchFilePaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
@@ -245,7 +250,9 @@ export async function reviewBatched(
       model: config.models[config.provider],
       temperature: config.generation.temperature,
       maxTokens: batchOutputTokens,
-      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars),
+      jsonSchema: buildReviewResultJsonSchema(config.review.maxCommentChars, {
+        round,
+      }),
     });
 
     const parsed = parseReviewResult(completion.text, {
@@ -361,6 +368,23 @@ export async function reviewBatched(
         : finalResult.summary,
   };
 
+  // ── Hard output filters (non-LLM) ───────────────────────────────────────
+  const filtered = filterReviewComments(result.comments, {
+    maxCommentChars: config.review.maxCommentChars,
+  });
+  if (filtered.dropped.length > 0 || filtered.mutated.length > 0) {
+    log.warn(formatFilterSummary(filtered));
+  }
+  result.comments = filtered.kept;
+
+  // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+  // Mutates result.action in place — the same object reference flows to
+  // buildReviewCommentBody and postReview below.
+  const verdictReason = filterReviewVerdict(result);
+  if (verdictReason) {
+    log.warn(`Verdict adjusted: ${verdictReason}`);
+  }
+
   // ── Stale-commit guard ──────────────────────────────────────────
   if (!dryRun) {
     let currentHead: string | null = null;
@@ -407,6 +431,7 @@ export async function reviewBatched(
             reviewedFiles: new Set(
               effectiveBatches.flatMap((b) => b.files.map((f) => f.filename)),
             ).size,
+            round,
           }),
         );
         progressUpdated = true;

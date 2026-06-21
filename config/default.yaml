@@ -129,12 +129,21 @@ preprompt: |
                        them before merging.
   - COMMENT          — warnings only (no blockers); author decides.
 
-  Round 2 (final — you will not review again):
-  Review the new commits since round 1. Flag any new blockers found in them
-  as well as unresolved round-1 issues.
-  - APPROVE          — round-1 issues resolved and no new blockers found.
+  Round 2 is a follow-up assessment, NOT a fresh review. You already reviewed
+  this PR in round 1. Your job: judge whether the author fixed what you asked for.
+
+  Structure your round-2 summary as a status update:
+  1. Go through each round-1 issue (see the Discussion) and state whether it was
+     addressed / partially addressed / not addressed.
+  2. Scan only the NEW commits for any new blockers the fixes themselves introduced.
+
+  Do NOT produce a prSummary. Do NOT re-describe what the PR does. Your summary
+  must read like a follow-up on your own findings, not a standalone review.
+  If your summary could pass as a round-1 review, you are doing it wrong.
+
+  - APPROVE          — all round-1 issues resolved; no new blockers.
   - REQUEST_CHANGES  — unresolved round-1 blockers remain, or new blockers
-                       found in the latest commits.
+                       introduced by the latest commits.
   - COMMENT          — warnings only (no blockers, old or new).
 
   ## Hard rules
@@ -158,6 +167,7 @@ preprompt: |
 # reply caps, etc). Empty = ~/.zanuda/state.json
 persistence:
   stateFile: "" # empty = ~/.zanuda/state.json
+  commitLogFile: "" # empty = ~/.zanuda/commit-log.json
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.

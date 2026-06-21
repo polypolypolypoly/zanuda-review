@@ -13,11 +13,36 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
   → build prompt (preprompt + memory + context + diff)
   → LLM provider (Anthropic | OpenAI | OpenRouter | Ollama | DeepSeek | Gemini)
   → parse structured JSON result
-  → post review via SCMConnector (inline comments + COMMENT event; progress comment updated with recommendation)
+  → apply hard output filters (non-LLM: drop garbage, downgrade speculative blockers,
+    enforce verdict consistency)
+  → post review via SCMConnector (inline comments + COMMENT event; progress comment
+    updated with recommendation)
   → (async) maybe update repo memory based on what the PR revealed
 ```
 
 **No webhook / no public endpoint required.** The entrypoint (`index.ts`) runs only the poller.
+
+### Round 2 (re-review)
+
+Round 2 does NOT auto-trigger on commit push. The author must explicitly request it:
+- **GitHub re-request:** click "Re-request review" in the PR sidebar
+- **@mention:** post `@ZlayaZanuda re-review` (or `review again`, `round 2`, `recheck`)
+
+After round 1, the review request is dismissed so the PR stops appearing in the
+search. The poller also scans the state store for PRs with `reReviewRequested`
+flags (set by the mention path).
+
+### Output filters
+
+Hard (non-LLM) filters run on the parsed review result before posting:
+- **minBodyLength** (15 chars): drops "Test", empty strings, markdown-only garbage
+- **selfDebate**: drops comments where the model argues with itself and concludes
+  "it's fine" without a clear finding
+- **speculativeBlocker**: downgrades 🛑→⚠️ when the model hedges ("in theory",
+  "practically impossible")
+- **maxBodyLength**: belt-and-suspenders truncation
+- **filterReviewVerdict**: REQUEST_CHANGES with no blocker comments → COMMENT
+- **commit dedup**: skips PRs whose commits were all already reviewed
 
 ## Tech stack
 
@@ -66,10 +91,20 @@ context/
 review/
   types.ts            ReviewComment, ReviewResult types
   prompt.ts           assemble final prompt
-  engine.ts           orchestrate: context → prompt → LLM → parse → post
+  engine.ts           orchestrate: context → prompt → LLM → parse → filters → post
   replyEngine.ts      generate and post @mention replies
+  filters.ts          hard (non-LLM) output filters: minBodyLength, selfDebate,
+                      speculativeBlocker, maxBodyLength, filterReviewVerdict
+  format.ts           review comment body formatting (markdown)
+  diff.ts             diff assembly and budget management
+  chunk.ts            dependency-aware file clustering for large PRs
+  batch.ts            multi-batch sequential review for large PRs
+  parse.ts            parse LLM text output into ReviewResult
+  verify.ts           self-verification pass (LLM checks own findings)
+  budget.ts           token budget management
 state/
-  store.ts            atomic persistent PR state (rounds, mention caps)
+  store.ts            atomic persistent PR state (rounds, mention caps, re-review)
+  commitLog.ts        per-repo reviewed commit SHA log (dedup gate)
 ```
 
 ## Key files outside `src/`
@@ -219,3 +254,7 @@ pause and ask:
    Add a defensive fallback.
 4. **Tests for new rendering/output functions:** Even simple formatters on
    security-relevant paths need tests. Check if a test file already exists.
+
+When the model drifts in production, prefer a hard (non-LLM) output filter over
+another prompt tweak. See `src/review/filters.ts` for the pattern: regex-based
+drop/mutate gates that run post-parse, pre-post, with zero additional LLM cost.
