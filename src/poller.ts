@@ -372,21 +372,10 @@ async function pollReviewRequests(opts: {
             logger.warn({ err }, "Failed to record reviewed commits"),
           );
 
-        // After round 1, dismiss the review request so the PR stops
-        // appearing in pollPendingReviews. Round 2 only happens when
-        // the author explicitly re-requests (GitHub) or uses an @mention.
-        if (nextRound === 1) {
-          connector
-            .dismissReviewRequest(item.ref, item.number, reviewerLogin)
-            .catch((err: unknown) =>
-              logger.warn(
-                { err },
-                "Failed to dismiss review request after round 1 — " +
-                  "re-review via GitHub re-request may not work",
-              ),
-            );
-        }
-
+        // After round 1, the review itself (COMMENT event) fulfills the
+        // review request on GitHub — Zanuda naturally disappears from the
+        // sidebar with no timeline event. Round 2 only happens when the
+        // author explicitly re-requests or uses an @mention.
         logger.info(
           {
             repo: `${item.ref.owner}/${item.ref.repo}`,

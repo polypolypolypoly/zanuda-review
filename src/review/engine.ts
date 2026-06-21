@@ -20,7 +20,7 @@ import {
   saveReviewHistory,
   type ReviewHistory,
 } from "../context/reviewHistory.js";
-import { formatDiscussion, buildReviewCommentBody } from "./format.js";
+import { formatDiscussion } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
@@ -402,8 +402,6 @@ export async function reviewPullRequest(
       log.warn(`Verdict adjusted: ${verdictReason}`);
     }
 
-    const diffTruncated = promptDiff.truncated;
-
     // ── Stale-commit guard ──────────────────────────────────────────────────
     // The LLM call can take 30-60 s. If the author pushed new commits in that
     // window, pr.headSha is now outdated. Posting a review anchored to the old
@@ -450,38 +448,15 @@ export async function reviewPullRequest(
     }
 
     if (!opts.dryRun) {
-      // Try to edit the progress comment to show the final verdict.
-      let progressCommentUpdated = false;
-      if (startingCommentId !== null) {
-        try {
-          await connector.editComment(
-            ref,
-            startingCommentId,
-            buildReviewCommentBody(result, pr.changedFiles.length, {
-              diffTruncated,
-              reviewedFiles: promptDiff.includedFiles.length,
-              round,
-            }),
-          );
-          progressCommentUpdated = true;
-        } catch (err) {
-          log.warn({ err }, "Failed to update starting comment");
-        }
-      }
-
-      // Post the review. If the progress comment wasn't updated (either because
-      // it never existed or the edit failed), postReview will include the summary
-      // in the review body as a fallback.
-      // Pass the set of file paths whose diff was visible so the connector can
-      // strip comments on unseen files before anchoring, preventing 422s.
+      // Post the review. The summary is always included in the review body
+      // so the review is self-contained (not split across an issue comment).
       await connector.postReview(pr, result, config, {
-        summaryPostedElsewhere: progressCommentUpdated,
+        summaryPostedElsewhere: false,
         visibleFilePaths: includedPaths(promptDiff),
       });
       log.info(
         {
           comments: result.comments.length,
-          summaryPostedElsewhere: progressCommentUpdated,
         },
         "Review posted",
       );
