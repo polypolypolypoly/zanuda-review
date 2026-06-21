@@ -38,6 +38,16 @@ export function formatDiscussion(
   return lines.join("\n\n---\n\n");
 }
 
+// ── Verdict display mapping ───────────────────────────────────────────────────
+
+// Verdicts are recommendations to humans — not GitHub review actions.
+// Language reflects that Zanuda is advising, not deciding.
+const VERDICT_DISPLAY: Record<string, { icon: string; label: string }> = {
+  APPROVE: { icon: "✅", label: "recommend merging" },
+  REQUEST_CHANGES: { icon: "🛑", label: "address issues" },
+  COMMENT: { icon: "💬", label: "observations" },
+};
+
 // ── Review comment body builder ───────────────────────────────────────────────
 
 /**
@@ -60,14 +70,6 @@ export function buildReviewCommentBody(
     round?: number;
   } = {},
 ): string {
-  // Verdicts are recommendations to humans — not GitHub review actions.
-  // Language reflects that Zanuda is advising, not deciding.
-  const VERDICT_DISPLAY: Record<string, { icon: string; label: string }> = {
-    APPROVE: { icon: "✅", label: "recommend merging" },
-    REQUEST_CHANGES: { icon: "🛑", label: "address issues" },
-    COMMENT: { icon: "💬", label: "observations" },
-  };
-
   // Use the engine-provided count when available — it's always accurate.
   // Fall back to filesSummary.length for backward compatibility (CLI dry-run).
   const reviewed = opts.reviewedFiles ?? result.filesSummary.length;
@@ -115,7 +117,12 @@ export function buildReviewCommentBody(
     parts.push("", `**What this PR does**`, "", result.prSummary);
   }
 
-  parts.push("", `**Observations**`, "", result.summary);
+  // Skip the Observations heading entirely when the model returned no summary
+  // (common in round 2 when prior issues were resolved) — an empty
+  // "**Observations**" section with no text below it looks broken.
+  if (result.summary.trim()) {
+    parts.push("", `**Observations**`, "", result.summary);
+  }
 
   if (result.filesSummary.length > 0) {
     parts.push(
