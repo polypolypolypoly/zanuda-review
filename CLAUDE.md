@@ -28,9 +28,10 @@ Round 2 does NOT auto-trigger on commit push. The author must explicitly request
 - **GitHub re-request:** click "Re-request review" in the PR sidebar
 - **@mention:** post `@ZlayaZanuda re-review` (or `review again`, `round 2`, `recheck`)
 
-After round 1, the review request is dismissed so the PR stops appearing in the
-search. The poller also scans the state store for PRs with `reReviewRequested`
-flags (set by the mention path).
+After round 1, the review itself (COMMENT event) fulfills the review request —
+Zanuda disappears from the sidebar with no timeline event. The poller also
+scans the state store for PRs with `reReviewRequested` flags (set by the
+mention path).
 
 ### Output filters
 
