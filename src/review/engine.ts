@@ -451,7 +451,6 @@ export async function reviewPullRequest(
 
     if (!opts.dryRun) {
       // Try to edit the progress comment to show the final verdict.
-      let progressCommentUpdated = false;
       if (startingCommentId !== null) {
         try {
           await connector.editComment(
@@ -463,7 +462,6 @@ export async function reviewPullRequest(
               round,
             }),
           );
-          progressCommentUpdated = true;
         } catch (err) {
           log.warn({ err }, "Failed to update starting comment");
         }
