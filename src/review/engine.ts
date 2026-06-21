@@ -20,7 +20,8 @@ import {
   saveReviewHistory,
   type ReviewHistory,
 } from "../context/reviewHistory.js";
-import { formatDiscussion } from "./format.js";
+import { buildReviewCommentBody, formatDiscussion } from "./format.js";
+import { ProgressComment } from "./progress.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
@@ -138,21 +139,33 @@ export async function reviewPullRequest(
     }
   }
 
+  // ── Progress-placeholder lifecycle (deterministic, not LLM-driven) ──────
+  // Exactly one placeholder is posted per round, and it must be resolved
+  // exactly once on EVERY exit path. On the happy path the placeholder is
+  // EDITED IN PLACE to become the finalized review (summary + file table); the
+  // inline comments then ride on a review event whose body is left empty
+  // (summaryPostedElsewhere), so the summary lives in exactly one place. The
+  // ProgressComment owner + its ensureResolved() safety net make it
+  // structurally impossible to orphan the placeholder as "_Starting review…_"
+  // again, even if a future return path forgets. The model decides WHAT to
+  // say; the code decides HOW MANY comments to post.
+  const progress = new ProgressComment(
+    connector,
+    ref,
+    startingCommentId,
+    opts.dryRun ?? false,
+    log,
+  );
+
   // If the engine throws after posting the progress comment, update it to
   // show an error state so the author isn't left staring at "Starting review...".
   const failSafe = async (err: unknown) => {
-    if (!opts.dryRun && startingCommentId !== null) {
-      const retryHint = deps.reviewerLogin
-        ? ` Comment \`@${deps.reviewerLogin} retry\` to try again.`
-        : "";
-      await connector
-        .editComment(
-          ref,
-          startingCommentId,
-          `⚠️ **Review failed.**${retryHint}\n\n<sub>${String(err).slice(0, 200)}</sub>`,
-        )
-        .catch(() => undefined); // best-effort; don't mask the original error
-    }
+    const retryHint = deps.reviewerLogin
+      ? ` Comment \`@${deps.reviewerLogin} retry\` to try again.`
+      : "";
+    await progress.resolve(
+      `⚠️ **Review failed.**${retryHint}\n\n<sub>${String(err).slice(0, 200)}</sub>`,
+    );
     throw err;
   };
 
@@ -285,6 +298,10 @@ export async function reviewPullRequest(
           { batches: batches.length, totalFiles: pr.files.length },
           "Large PR: using dependency-aware batch review",
         );
+        // Hand the placeholder's lifecycle off to the batch path, which
+        // resolves it on all of its own exit paths. delegate() marks it owned
+        // so the finally-guard below doesn't clobber the batch's verdict.
+        progress.delegate();
         return reviewBatched(pr, batches, {
           deps,
           ref,
@@ -429,15 +446,9 @@ export async function reviewPullRequest(
           { oldHead: pr.headSha, newHead: currentHead },
           "PR head changed during review - discarding stale result",
         );
-        if (startingCommentId !== null) {
-          await connector
-            .editComment(
-              ref,
-              startingCommentId,
-              `🔄 **New commits pushed during review** - discarding stale result. Will re-review on the next poll cycle.`,
-            )
-            .catch(() => undefined);
-        }
+        await progress.resolve(
+          `🔄 **New commits pushed during review** - discarding stale result. Will re-review on the next poll cycle.`,
+        );
         return {
           ...result,
           progressCommentId: startingCommentId,
@@ -448,15 +459,27 @@ export async function reviewPullRequest(
     }
 
     if (!opts.dryRun) {
-      // Post the review. The summary is always included in the review body
-      // so the review is self-contained (not split across an issue comment).
+      // Finalize the review by EDITING the placeholder into the full review
+      // (summary + changed-file table) — same flow as the batch path. The
+      // inline comments below ride on a review event whose body is left empty
+      // (summaryPostedElsewhere = true) so the summary is never duplicated.
+      // If the edit fails (or no placeholder exists), summaryPostedElsewhere is
+      // false and postReview falls back to carrying the summary in its body.
+      const summaryInPlaceholder = await progress.resolve(
+        buildReviewCommentBody(result, pr.changedFiles.length, {
+          diffTruncated: promptDiff.truncated,
+          reviewedFiles: promptDiff.includedFiles.length,
+          round,
+        }),
+      );
       await connector.postReview(pr, result, config, {
-        summaryPostedElsewhere: false,
+        summaryPostedElsewhere: summaryInPlaceholder,
         visibleFilePaths: includedPaths(promptDiff),
       });
       log.info(
         {
           comments: result.comments.length,
+          summaryPostedElsewhere: summaryInPlaceholder,
         },
         "Review posted",
       );
@@ -542,6 +565,14 @@ export async function reviewPullRequest(
   } catch (err) {
     await failSafe(err);
     throw err; // unreachable - failSafe always rethrows; satisfies TypeScript
+  } finally {
+    // Structural safety net: every known path above resolves the placeholder
+    // explicitly. If a future path returns without doing so, this edits it to a
+    // neutral message instead of leaving a stale "_Starting review…_", and warns
+    // so the offending path can be fixed.
+    await progress.ensureResolved(
+      "Review finished — see the review for details.",
+    );
   }
 }
 
