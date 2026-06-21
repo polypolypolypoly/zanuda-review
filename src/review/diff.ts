@@ -84,6 +84,53 @@ export function includedPaths(diff: PromptDiff): Set<string> {
   return new Set(diff.includedFiles.map((f) => f.filename));
 }
 
+/**
+ * Parse the new-file line numbers that are valid inline-anchor targets from a
+ * unified diff patch. Context lines (' ') and additions ('+') both exist in
+ * the new file; deletion lines ('-') do not.
+ *
+ * This is the ground truth for what line numbers GitHub will accept as inline
+ * comment anchors for a given file. Pre-validating model-generated line
+ * numbers against this set means the code — not the GitHub 422 response —
+ * decides which comments are postable.
+ */
+export function parseValidNewLines(patch: string): Set<number> {
+  const valid = new Set<number>();
+  let newLine = 0; // 0 = before first hunk header
+  for (const raw of patch.split("\n")) {
+    // Hunk header: @@ -old[,len] +new[,len] @@
+    const hunk = raw.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      newLine = parseInt(hunk[1]!, 10);
+      continue;
+    }
+    if (raw.startsWith("---") || raw.startsWith("+++")) continue; // file header
+    if (raw.startsWith("-")) continue; // deletion: not in new file, no increment
+    if (raw.startsWith("\\")) continue; // "No newline at end of file" marker
+    if (newLine === 0) continue; // before first hunk
+    // Context line (' ') or addition ('+'): exists in new file.
+    valid.add(newLine++);
+  }
+  return valid;
+}
+
+/**
+ * Build a map from file path to the set of valid new-file line numbers, from
+ * any collection of files that carry patches. Pass the result to
+ * filterAnchorableComments in filters.ts before posting.
+ */
+export function buildValidLineMap(
+  files: Array<{ filename: string; patch?: string }>,
+): Map<string, Set<number>> {
+  const map = new Map<string, Set<number>>();
+  for (const file of files) {
+    if (file.patch) {
+      map.set(file.filename, parseValidNewLines(file.patch));
+    }
+  }
+  return map;
+}
+
 // ── Batch-aware diff assembly ───────────────────────────────────────────────
 
 export interface BatchDiff {

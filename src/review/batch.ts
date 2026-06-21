@@ -12,12 +12,17 @@ import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
 import {
+  filterAnchorableComments,
   filterReviewComments,
   filterReviewVerdict,
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
-import { assembleBatchDiff, batchFilePaths } from "./diff.js";
+import {
+  assembleBatchDiff,
+  batchFilePaths,
+  buildValidLineMap,
+} from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 import { headeredFile, type HeaderedFile } from "./header.js";
@@ -300,7 +305,25 @@ export async function reviewBatched(
           )
         : [];
 
-    allComments.push(...batchComments);
+    // Anchor validation: drop comments whose (path, line) pair isn't in this
+    // batch's diff. The model generates line numbers from the diff text it was
+    // shown — the code has that same diff and can decide, not the 422 response.
+    const anchored = filterAnchorableComments(
+      batchComments,
+      buildValidLineMap(batch.files),
+    );
+    if (anchored.dropped.length > 0) {
+      log.warn(
+        {
+          dropped: anchored.dropped.map(
+            (d) => `${d.path}:${d.line} — ${d.reason}`,
+          ),
+        },
+        "Batch: dropped anchor-invalid inline comments (line not in diff)",
+      );
+    }
+
+    allComments.push(...anchored.kept);
     allFilesSummary.push(...parsed.filesSummary);
 
     if (isLast) {

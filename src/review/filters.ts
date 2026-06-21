@@ -254,6 +254,41 @@ export function formatFilterSummary(filtered: FilteredComments): string {
   return parts.join("\n");
 }
 
+// ── Filter: invalid inline-anchor line numbers ────────────────────────────────
+//
+// The model generates line numbers from the diff text it was shown. The code
+// has that same diff and can compute the exact set of valid anchor lines per
+// file. Dropping anchor-invalid comments here means the 422 fallback in
+// postReview is a true last resort, not the primary gate — code decides which
+// comments are postable, not GitHub's API response.
+//
+// Call this BEFORE filterReviewVerdict so the verdict and inline count in the
+// placeholder comment reflect only the comments that will actually post.
+
+export function filterAnchorableComments(
+  comments: ReviewComment[],
+  validLineMap: Map<string, Set<number>>,
+): { kept: ReviewComment[]; dropped: DroppedComment[] } {
+  const kept: ReviewComment[] = [];
+  const dropped: DroppedComment[] = [];
+  for (const c of comments) {
+    const validLines = validLineMap.get(c.path);
+    if (validLines?.has(c.line)) {
+      kept.push(c);
+    } else {
+      dropped.push({
+        path: c.path,
+        line: c.line,
+        body: c.body,
+        reason: validLines
+          ? `line ${c.line} not in diff hunks for ${c.path}`
+          : `${c.path} not in diff`,
+      });
+    }
+  }
+  return { kept, dropped };
+}
+
 // ── Result-level filter: verdict consistency ──────────────────────────────────
 //
 // REQUEST_CHANGES with zero inline comments is a broken state — the author
