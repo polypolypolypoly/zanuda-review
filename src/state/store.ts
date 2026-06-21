@@ -43,6 +43,12 @@ export interface PRState {
    * and let the next poll tick pick the PR up again.
    */
   failedAwaitingRetry: boolean;
+  /**
+   * Set to true when the author explicitly requests a re-review via
+   * @mention ("re-review", "review again", etc.). Round 2+ only proceeds
+   * when this flag is true or the author re-requests on GitHub.
+   */
+  reReviewRequested: boolean;
   /** Wall-clock time of last write; used to prune stale entries on load. */
   lastUpdatedAt: string;
 }
@@ -185,6 +191,7 @@ export class PRStateStore {
         consecutiveFailures: s.consecutiveFailures ?? 0,
         lastReviewedHeadSha: s.lastReviewedHeadSha ?? null,
         failedAwaitingRetry: s.failedAwaitingRetry ?? false,
+        reReviewRequested: s.reReviewRequested ?? false,
       });
     }
 

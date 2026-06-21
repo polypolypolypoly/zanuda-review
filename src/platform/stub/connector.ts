@@ -204,4 +204,12 @@ export class StubConnector implements SCMConnector {
   async listCommitShas(_ref: RepoRef, _number: number): Promise<string[]> {
     throw new Error("StubConnector.listCommitShas: not implemented");
   }
+
+  async dismissReviewRequest(
+    _ref: RepoRef,
+    _number: number,
+    _reviewerLogin: string,
+  ): Promise<void> {
+    throw new Error("StubConnector.dismissReviewRequest: not implemented");
+  }
 }

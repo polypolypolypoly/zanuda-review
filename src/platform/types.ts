@@ -212,4 +212,16 @@ export interface SCMConnector {
    * already reviewed in a previous PR.
    */
   listCommitShas(ref: RepoRef, number: number): Promise<string[]>;
+
+  /**
+   * Dismiss the review request for the given reviewer on a PR.
+   * After round 1, the review request is dismissed so the PR stops
+   * appearing in pollPendingReviews. Round 2 only happens when the
+   * author explicitly re-requests or uses an @mention.
+   */
+  dismissReviewRequest(
+    ref: RepoRef,
+    number: number,
+    reviewerLogin: string,
+  ): Promise<void>;
 }

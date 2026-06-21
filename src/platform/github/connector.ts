@@ -153,6 +153,18 @@ export class GitHubConnector implements SCMConnector {
     );
     return commits.map((c) => c.sha);
   }
+
+  async dismissReviewRequest(
+    ref: RepoRef,
+    number: number,
+    reviewerLogin: string,
+  ): Promise<void> {
+    await this.octokit.pulls.removeRequestedReviewers({
+      ...ref,
+      pull_number: number,
+      reviewers: [reviewerLogin],
+    });
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

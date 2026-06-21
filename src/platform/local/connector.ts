@@ -176,6 +176,14 @@ export class LocalConnector implements SCMConnector {
     return [];
   }
 
+  async dismissReviewRequest(
+    _ref: RepoRef,
+    _number: number,
+    _reviewerLogin: string,
+  ): Promise<void> {
+    // No-op — no remote review requests in local mode.
+  }
+
   // ── Private helpers ──────────────────────────────────────────────────────────
 
   /** Cache for stdin read — getDiff and getChangedFiles both call it. */
