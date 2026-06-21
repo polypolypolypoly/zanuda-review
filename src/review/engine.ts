@@ -26,12 +26,13 @@ import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import {
+  filterAnchorableComments,
   filterReviewComments,
   filterReviewVerdict,
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
-import { buildPromptDiff, includedPaths } from "./diff.js";
+import { buildPromptDiff, buildValidLineMap, includedPaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 import { batchChangedFiles } from "./chunk.js";
@@ -410,6 +411,28 @@ export async function reviewPullRequest(
       log.warn(formatFilterSummary(filtered));
     }
     result.comments = filtered.kept;
+
+    // ── Anchor validation (non-LLM) ─────────────────────────────────────────
+    // The model generates line numbers from the diff text it was shown. We have
+    // that same diff, so we can compute exactly which (path, line) pairs are
+    // valid before posting — code decides, not the GitHub 422 response.
+    // Must run BEFORE filterReviewVerdict so the verdict and the inline-comment
+    // count in the placeholder are based on what will actually post.
+    const anchored = filterAnchorableComments(
+      result.comments,
+      buildValidLineMap(promptDiff.includedFiles),
+    );
+    if (anchored.dropped.length > 0) {
+      log.warn(
+        {
+          dropped: anchored.dropped.map(
+            (d) => `${d.path}:${d.line} — ${d.reason}`,
+          ),
+        },
+        "Dropped anchor-invalid inline comments (line not in diff)",
+      );
+    }
+    result.comments = anchored.kept;
 
     // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
     // Mutates result.action in place — the same object reference flows to

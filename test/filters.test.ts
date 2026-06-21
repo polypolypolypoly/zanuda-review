@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   filterReviewComments,
+  filterAnchorableComments,
   filterReviewVerdict,
   formatFilterSummary,
 } from "../src/review/filters.js";
@@ -440,5 +441,59 @@ describe("filterReviewVerdict", () => {
     const r = makeResult("REQUEST_CHANGES", [blocker("a.ts", 1)]);
     assert.equal(filterReviewVerdict(r), null);
     assert.equal(r.action, "REQUEST_CHANGES");
+  });
+});
+
+// ── filterAnchorableComments ──────────────────────────────────────────────────
+
+describe("filterAnchorableComments", () => {
+  function makeComment(path: string, line: number): ReviewComment {
+    return { path, line, severity: "warning", body: "Some finding here." };
+  }
+
+  it("keeps comments whose (path, line) is in the valid map", () => {
+    const map = new Map([["a.ts", new Set([10, 20])]]);
+    const { kept, dropped } = filterAnchorableComments(
+      [makeComment("a.ts", 10), makeComment("a.ts", 20)],
+      map,
+    );
+    assert.equal(kept.length, 2);
+    assert.equal(dropped.length, 0);
+  });
+
+  it("drops comments whose line is not in the valid set", () => {
+    const map = new Map([["a.ts", new Set([10])]]);
+    const { kept, dropped } = filterAnchorableComments(
+      [makeComment("a.ts", 10), makeComment("a.ts", 99)],
+      map,
+    );
+    assert.equal(kept.length, 1);
+    assert.equal(dropped.length, 1);
+    assert.equal(dropped[0]!.path, "a.ts");
+    assert.equal(dropped[0]!.line, 99);
+    assert.match(dropped[0]!.reason, /not in diff/);
+  });
+
+  it("drops comments whose path is not in the valid map at all", () => {
+    const map = new Map([["a.ts", new Set([1])]]);
+    const { kept, dropped } = filterAnchorableComments(
+      [makeComment("b.ts", 1)],
+      map,
+    );
+    assert.equal(kept.length, 0);
+    assert.equal(dropped[0]!.path, "b.ts");
+    assert.match(dropped[0]!.reason, /not in diff/);
+  });
+
+  it("drops comments on paths absent from the map (no patch available for that file)", () => {
+    // buildValidLineMap only produces entries for files with patches. A model
+    // comment on a file with no patch in the map means no diff was visible for
+    // it — any line number is unverifiable and will 422. Drop it.
+    const { kept, dropped } = filterAnchorableComments(
+      [makeComment("a.ts", 5)],
+      new Map(), // a.ts has no entry → no valid lines → dropped
+    );
+    assert.equal(kept.length, 0);
+    assert.equal(dropped.length, 1);
   });
 });

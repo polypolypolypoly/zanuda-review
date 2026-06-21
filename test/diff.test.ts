@@ -5,6 +5,8 @@ import {
   includedPaths,
   assembleBatchDiff,
   batchFilePaths,
+  parseValidNewLines,
+  buildValidLineMap,
 } from "../src/review/diff.js";
 import type { FileChange } from "../src/platform/types.js";
 import type { HeaderedFile } from "../src/review/header.js";
@@ -215,5 +217,101 @@ describe("batchFilePaths", () => {
   it("returns empty set for empty batch", () => {
     const batch = assembleBatchDiff([]);
     assert.equal(batchFilePaths(batch).size, 0);
+  });
+});
+
+// ── parseValidNewLines ────────────────────────────────────────────────────────
+
+describe("parseValidNewLines", () => {
+  it("extracts context and addition lines, skips deletions", () => {
+    const patch = [
+      "@@ -1,4 +1,5 @@",
+      " context", // line 1 — valid
+      "+added", // line 2 — valid
+      " context2", // line 3 — valid
+      "-deleted", // not in new file
+      " context3", // line 4 — valid
+    ].join("\n");
+    const valid = parseValidNewLines(patch);
+    assert.deepEqual(
+      [...valid].sort((a, b) => a - b),
+      [1, 2, 3, 4],
+    );
+  });
+
+  it("handles multiple hunks with correct line offsets", () => {
+    const patch = [
+      "@@ -1,2 +1,2 @@",
+      " line1", // new line 1
+      "+line2", // new line 2
+      "@@ -10,2 +10,3 @@",
+      " line10", // new line 10
+      "+line11", // new line 11
+      " line12", // new line 12
+    ].join("\n");
+    const valid = parseValidNewLines(patch);
+    assert.deepEqual(
+      [...valid].sort((a, b) => a - b),
+      [1, 2, 10, 11, 12],
+    );
+  });
+
+  it("handles new-file patch (@@ -0,0 +1,3 @@)", () => {
+    const patch = ["@@ -0,0 +1,3 @@", "+line1", "+line2", "+line3"].join("\n");
+    const valid = parseValidNewLines(patch);
+    assert.deepEqual(
+      [...valid].sort((a, b) => a - b),
+      [1, 2, 3],
+    );
+  });
+
+  it("skips file header lines (--- / +++)", () => {
+    const patch = [
+      "--- a/file.ts",
+      "+++ b/file.ts",
+      "@@ -1,1 +1,1 @@",
+      "-old",
+      "+new",
+    ].join("\n");
+    const valid = parseValidNewLines(patch);
+    assert.deepEqual(
+      [...valid].sort((a, b) => a - b),
+      [1],
+    );
+  });
+
+  it("returns empty set for patch with only deletions", () => {
+    const patch = ["@@ -1,2 +0,0 @@", "-line1", "-line2"].join("\n");
+    assert.equal(parseValidNewLines(patch).size, 0);
+  });
+
+  it("returns empty set for empty patch", () => {
+    assert.equal(parseValidNewLines("").size, 0);
+  });
+});
+
+// ── buildValidLineMap ─────────────────────────────────────────────────────────
+
+describe("buildValidLineMap", () => {
+  it("builds a map from filename to valid lines", () => {
+    const files = [
+      { filename: "a.ts", patch: "@@ -1,1 +1,2 @@\n context\n+added" },
+      { filename: "b.ts", patch: "@@ -1,1 +1,1 @@\n context" },
+    ];
+    const map = buildValidLineMap(files);
+    assert.ok(map.get("a.ts")?.has(1));
+    assert.ok(map.get("a.ts")?.has(2));
+    assert.ok(map.get("b.ts")?.has(1));
+    assert.equal(map.get("b.ts")?.has(2), false);
+  });
+
+  it("skips files with no patch", () => {
+    const files = [
+      { filename: "a.ts" },
+      { filename: "b.ts", patch: "@@ -1,1 +1,1 @@\n line" },
+    ];
+    const map = buildValidLineMap(files);
+    assert.equal(map.has("a.ts"), false);
+    assert.ok(map.has("b.ts"));
   });
 });
