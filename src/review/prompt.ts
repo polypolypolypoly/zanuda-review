@@ -43,7 +43,7 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
   "filesSummary": [
     {
       "path": "repo-relative file path",
-      "description": "one-line description of what changed in this file"
+      "description": "one-line description of what changed in this file (≤100 chars)"
     }
   ],
   "comments": [
@@ -486,7 +486,7 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
   "filesSummary": [
     {
       "path": "repo-relative file path",
-      "description": "one-line description of what changed in this file"
+      "description": "one-line description of what changed in this file (≤100 chars)"
     }
   ],
   "comments": [

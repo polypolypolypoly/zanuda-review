@@ -44,9 +44,9 @@ const ConfigSchema = z.object({
     stateFile: z.string(),
     /**
      * Path to the commit log file (reviewed commit SHAs per repo).
-     * Empty string = ~/.zanuda/commit-log.json
+     * Empty string or absent = ~/.zanuda/commit-log.json
      */
-    commitLogFile: z.string(),
+    commitLogFile: z.string().optional(),
   }),
   access: z.object({
     /**
@@ -100,10 +100,16 @@ export const RepoConfigSchema = ConfigSchema.partial().extend({
   // Convenience: a repo can append extra instructions without replacing the
   // whole preprompt.
   prepromptAppend: z.string().optional(),
+  // Make nested objects partial so overlay/repo configs can specify only the
+  // fields they need, without restating every field from defaults.
+  // Note: access and models are intentionally NOT overridable by repo config
+  // — access is security-sensitive, models affect operator cost.
+  persistence: ConfigSchema.shape.persistence.partial().optional(),
   memory: ConfigSchema.shape.memory.partial().optional(),
   context: ConfigSchema.shape.context.partial().optional(),
   review: ConfigSchema.shape.review.partial().optional(),
   generation: ConfigSchema.shape.generation.partial().optional(),
+  limits: ConfigSchema.shape.limits.partial().optional(),
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -168,17 +174,32 @@ function applyEnvOverrides(config: Config): Config {
 /**
  * Merge a repo's `.zanuda.yml` over the global config.
  * Shallow per-section; `prepromptAppend` is concatenated onto the preprompt.
+ * Nested objects are merged field-by-field and undefined repo fields are
+ * ignored — the base config value is preserved.
  */
 export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {
   if (!repo) return base;
+
+  const mergeSection = <T extends object>(
+    baseVal: T,
+    repoVal?: Partial<T>,
+  ): T => (repoVal ? { ...baseVal, ...stripUndefined(repoVal) } : baseVal);
+
   const merged: Config = {
     ...base,
     ...stripUndefined(repo),
-    models: { ...base.models, ...repo.models },
-    generation: { ...base.generation, ...repo.generation },
-    memory: { ...base.memory, ...repo.memory },
-    context: { ...base.context, ...repo.context },
-    review: { ...base.review, ...repo.review },
+    // access and models are NOT merged from repo config — access is
+    // security-sensitive (a repo could widen the allowlist), and models
+    // affect operator cost. They are operator-only, set in the global
+    // config or ZANUDA_CONFIG overlay.
+    models: base.models,
+    access: base.access,
+    generation: mergeSection(base.generation, repo.generation),
+    persistence: mergeSection(base.persistence, repo.persistence),
+    memory: mergeSection(base.memory, repo.memory),
+    context: mergeSection(base.context, repo.context),
+    review: mergeSection(base.review, repo.review),
+    limits: mergeSection(base.limits, repo.limits),
   };
   if (repo.preprompt) merged.preprompt = repo.preprompt;
   if (repo.prepromptAppend) {

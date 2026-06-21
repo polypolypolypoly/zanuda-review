@@ -26,7 +26,10 @@ const FileSummarySchema = z.object({
   path: z.string().describe("Repo-relative file path."),
   description: z
     .string()
-    .describe("One-line description of what changed in this file."),
+    .max(100)
+    .describe(
+      "One-line description of what changed in this file (≤100 chars).",
+    ),
 });
 
 // ─── Resilient array helpers ─────────────────────────────────────────────────
@@ -39,6 +42,15 @@ const FileSummarySchema = z.object({
 // This is intentionally more lenient than the JSON Schema we pass to the API
 // (which still declares the strict contract): the schema tells the model what
 // to produce; this tells us what to do when it doesn't fully comply.
+//
+// Note on maxLength asymmetry:
+//   filesSummary[].description has Zod .max(100) — a single overlong
+//   description is dropped per-item by filterValidItems, which is safe.
+//   summary/prSummary do NOT have Zod .max() — they have .catch(""),
+//   which would silently drop the ENTIRE field if 1 char over the limit.
+//   Dropping the whole summary is worse than a slightly long one.
+//   The JSON schema maxLength is the enforcement mechanism for those fields;
+//   Zod is intentionally lenient as a safety net.
 
 function filterValidItems<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
   return items.flatMap((item) => {
@@ -66,9 +78,12 @@ export const ReviewResultSchema = z.object({
     .string()
     .default("")
     .describe(
-      "Short neutral description of what this PR does — 1-3 sentences from the author's perspective (what changed and why). Not a review assessment. Round 1 only; omit in round 2.",
+      "Short neutral description of what this PR does — 1-2 sentences from the author's perspective. Round 1 only; omit in round 2.",
     ),
-  summary: z.string().catch("").describe("Overall assessment, 1-4 sentences."),
+  summary: z
+    .string()
+    .catch("")
+    .describe("Overall assessment, 1-3 short sentences."),
   action: z
     .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
     .catch("COMMENT")
@@ -114,7 +129,7 @@ export function buildReviewResultJsonSchema(
   // The model cannot produce it even if it ignores the prompt instructions.
   // (Round 1 keeps it: the model fills it for the first-review overview.)
   const properties: Record<string, unknown> = {
-    summary: { type: "string" },
+    summary: { type: "string", maxLength: 400 },
     action: {
       type: "string",
       enum: ["APPROVE", "REQUEST_CHANGES", "COMMENT"],
@@ -127,8 +142,8 @@ export function buildReviewResultJsonSchema(
         required: ["path", "description"],
         additionalProperties: false,
         properties: {
-          path: { type: "string" },
-          description: { type: "string" },
+          path: { type: "string", maxLength: 200 },
+          description: { type: "string", maxLength: 100 },
         },
       },
     },
@@ -150,7 +165,7 @@ export function buildReviewResultJsonSchema(
   };
 
   if (round < 2) {
-    properties.prSummary = { type: "string" };
+    properties.prSummary = { type: "string", maxLength: 200 };
   }
 
   return {
