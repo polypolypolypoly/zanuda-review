@@ -11,6 +11,7 @@ import { buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
+import { filterReviewComments, formatFilterSummary } from "./filters.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
 import { assembleBatchDiff, batchFilePaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
@@ -360,6 +361,15 @@ export async function reviewBatched(
             : "")
         : finalResult.summary,
   };
+
+  // ── Hard output filters (non-LLM) ───────────────────────────────────────
+  const filtered = filterReviewComments(result.comments, {
+    maxCommentChars: config.review.maxCommentChars,
+  });
+  if (filtered.dropped.length > 0 || filtered.mutated.length > 0) {
+    log.warn(formatFilterSummary(filtered));
+  }
+  result.comments = filtered.kept;
 
   // ── Stale-commit guard ──────────────────────────────────────────
   if (!dryRun) {

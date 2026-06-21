@@ -24,6 +24,7 @@ import { formatDiscussion, buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
+import { filterReviewComments, formatFilterSummary } from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { buildPromptDiff, includedPaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
@@ -377,6 +378,16 @@ export async function reviewPullRequest(
       ...parsed,
       comments: verifiedComments,
     };
+
+    // ── Hard output filters (non-LLM) ───────────────────────────────────────
+    const filtered = filterReviewComments(result.comments, {
+      maxCommentChars: config.review.maxCommentChars,
+    });
+    if (filtered.dropped.length > 0 || filtered.mutated.length > 0) {
+      log.warn(formatFilterSummary(filtered));
+    }
+    result.comments = filtered.kept;
+
     const diffTruncated = promptDiff.truncated;
 
     // ── Stale-commit guard ──────────────────────────────────────────────────
