@@ -10,7 +10,7 @@
  * are debuggable.
  */
 
-import type { ReviewComment } from "./types.js";
+import type { ReviewComment, ReviewResult } from "./types.js";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -252,4 +252,34 @@ export function formatFilterSummary(filtered: FilteredComments): string {
   }
 
   return parts.join("\n");
+}
+
+// ── Result-level filter: verdict consistency ──────────────────────────────────
+//
+// REQUEST_CHANGES with zero inline comments is a broken state — the author
+// is told to fix things but given no specific things to fix. Downgrade to
+// COMMENT so the review is still visible but doesn't falsely block the PR.
+//
+// More subtly: REQUEST_CHANGES without any blocker-severity inline comments
+// is equally unjustified. A warning alone doesn't warrant blocking.
+//
+// Returns a reason string if the action was changed, null otherwise.
+// Mutates result.action in place.
+
+export function filterReviewVerdict(result: ReviewResult): string | null {
+  if (result.action !== "REQUEST_CHANGES") return null;
+
+  const hasBlocker = result.comments.some((c) => c.severity === "blocker");
+
+  if (result.comments.length === 0) {
+    (result as { action: ReviewResult["action"] }).action = "COMMENT";
+    return "REQUEST_CHANGES→COMMENT (zero inline comments — no specific issues to address)";
+  }
+
+  if (!hasBlocker) {
+    (result as { action: ReviewResult["action"] }).action = "COMMENT";
+    return "REQUEST_CHANGES→COMMENT (no blocker-severity comments — warnings alone don't justify blocking)";
+  }
+
+  return null;
 }

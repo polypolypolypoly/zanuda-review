@@ -24,7 +24,11 @@ import { formatDiscussion, buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
-import { filterReviewComments, formatFilterSummary } from "./filters.js";
+import {
+  filterReviewComments,
+  filterReviewVerdict,
+  formatFilterSummary,
+} from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
 import { buildPromptDiff, includedPaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
@@ -389,6 +393,12 @@ export async function reviewPullRequest(
       log.warn(formatFilterSummary(filtered));
     }
     result.comments = filtered.kept;
+
+    // Verdict consistency: REQUEST_CHANGES needs at least one blocker comment.
+    const verdictReason = filterReviewVerdict(result);
+    if (verdictReason) {
+      log.warn(`Verdict adjusted: ${verdictReason}`);
+    }
 
     const diffTruncated = promptDiff.truncated;
 

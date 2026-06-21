@@ -2,9 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   filterReviewComments,
+  filterReviewVerdict,
   formatFilterSummary,
 } from "../src/review/filters.js";
-import type { ReviewComment } from "../src/review/types.js";
+import type { ReviewComment, ReviewResult } from "../src/review/types.js";
 
 function makeComment(
   overrides: Partial<ReviewComment> & { path?: string; line?: number } = {},
@@ -341,5 +342,83 @@ describe("formatFilterSummary", () => {
     const summary = formatFilterSummary(result);
     assert.match(summary, /dropped/);
     assert.match(summary, /mutated/);
+  });
+});
+
+// ── filterReviewVerdict ──────────────────────────────────────────────────────
+
+describe("filterReviewVerdict", () => {
+  function makeResult(
+    action: ReviewResult["action"],
+    comments: ReviewComment[],
+  ): ReviewResult {
+    return {
+      prSummary: "",
+      summary: "Test summary.",
+      action,
+      filesSummary: [],
+      comments,
+    };
+  }
+
+  function blocker(path: string, line: number): ReviewComment {
+    return {
+      path,
+      line,
+      severity: "blocker",
+      body: "This will crash on null input. Add a null check.",
+    };
+  }
+
+  function warn(path: string, line: number): ReviewComment {
+    return {
+      path,
+      line,
+      severity: "warning",
+      body: "Consider adding a timeout here for resilience.",
+    };
+  }
+
+  it("returns null for APPROVE (no change needed)", () => {
+    const r = makeResult("APPROVE", []);
+    assert.equal(filterReviewVerdict(r), null);
+    assert.equal(r.action, "APPROVE");
+  });
+
+  it("returns null for COMMENT (no change needed)", () => {
+    const r = makeResult("COMMENT", []);
+    assert.equal(filterReviewVerdict(r), null);
+    assert.equal(r.action, "COMMENT");
+  });
+
+  it("downgrades REQUEST_CHANGES with zero inline comments to COMMENT", () => {
+    const r = makeResult("REQUEST_CHANGES", []);
+    const reason = filterReviewVerdict(r);
+    assert.ok(reason);
+    assert.match(reason!, /zero inline/);
+    assert.equal(r.action, "COMMENT");
+  });
+
+  it("downgrades REQUEST_CHANGES with only warnings to COMMENT", () => {
+    const r = makeResult("REQUEST_CHANGES", [warn("a.ts", 1), warn("b.ts", 2)]);
+    const reason = filterReviewVerdict(r);
+    assert.ok(reason);
+    assert.match(reason!, /no blocker/);
+    assert.equal(r.action, "COMMENT");
+  });
+
+  it("keeps REQUEST_CHANGES when at least one blocker exists", () => {
+    const r = makeResult("REQUEST_CHANGES", [
+      warn("a.ts", 1),
+      blocker("b.ts", 2),
+    ]);
+    assert.equal(filterReviewVerdict(r), null);
+    assert.equal(r.action, "REQUEST_CHANGES");
+  });
+
+  it("keeps REQUEST_CHANGES with a single blocker", () => {
+    const r = makeResult("REQUEST_CHANGES", [blocker("a.ts", 1)]);
+    assert.equal(filterReviewVerdict(r), null);
+    assert.equal(r.action, "REQUEST_CHANGES");
   });
 });

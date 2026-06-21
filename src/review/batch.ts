@@ -11,7 +11,11 @@ import { buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
-import { filterReviewComments, formatFilterSummary } from "./filters.js";
+import {
+  filterReviewComments,
+  filterReviewVerdict,
+  formatFilterSummary,
+} from "./filters.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
 import { assembleBatchDiff, batchFilePaths } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
@@ -372,6 +376,12 @@ export async function reviewBatched(
     log.warn(formatFilterSummary(filtered));
   }
   result.comments = filtered.kept;
+
+  // Verdict consistency: REQUEST_CHANGES needs at least one blocker comment.
+  const verdictReason = filterReviewVerdict(result);
+  if (verdictReason) {
+    log.warn(`Verdict adjusted: ${verdictReason}`);
+  }
 
   // ── Stale-commit guard ──────────────────────────────────────────
   if (!dryRun) {
