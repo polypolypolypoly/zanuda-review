@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import {
   filterReviewComments,
   filterReviewVerdict,
-  truncateReviewSummary,
   formatFilterSummary,
 } from "../src/review/filters.js";
 import type { ReviewComment, ReviewResult } from "../src/review/types.js";
@@ -421,54 +420,5 @@ describe("filterReviewVerdict", () => {
     const r = makeResult("REQUEST_CHANGES", [blocker("a.ts", 1)]);
     assert.equal(filterReviewVerdict(r), null);
     assert.equal(r.action, "REQUEST_CHANGES");
-  });
-});
-
-// ── truncateReviewSummary ────────────────────────────────────────────────────
-
-describe("truncateReviewSummary", () => {
-  function makeResult(prSummary: string, summary: string): ReviewResult {
-    return {
-      prSummary,
-      summary,
-      action: "COMMENT",
-      filesSummary: [],
-      comments: [],
-    };
-  }
-
-  it("returns null when both fields are within limits", () => {
-    const r = makeResult("Short.", "Also short.");
-    assert.equal(truncateReviewSummary(r), null);
-  });
-
-  it("truncates prSummary > 200 chars", () => {
-    const long = "A".repeat(250);
-    const r = makeResult(long, "ok");
-    const reason = truncateReviewSummary(r);
-    assert.ok(reason);
-    assert.match(reason!, /prSummary truncated/);
-    assert.ok(r.prSummary.length <= 201); // 200 + "…"
-    assert.ok(r.prSummary.endsWith("…"));
-    assert.equal(r.summary, "ok"); // unchanged
-  });
-
-  it("truncates summary > 400 chars", () => {
-    const long = "B".repeat(500);
-    const r = makeResult("short", long);
-    const reason = truncateReviewSummary(r);
-    assert.ok(reason);
-    assert.match(reason!, /summary truncated/);
-    assert.ok(r.summary.length <= 401);
-    assert.ok(r.summary.endsWith("…"));
-    assert.equal(r.prSummary, "short"); // unchanged
-  });
-
-  it("truncates both when both exceed limits", () => {
-    const r = makeResult("A".repeat(300), "B".repeat(500));
-    const reason = truncateReviewSummary(r);
-    assert.ok(reason);
-    assert.match(reason!, /prSummary truncated/);
-    assert.match(reason!, /summary truncated/);
   });
 });

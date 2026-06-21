@@ -67,14 +67,12 @@ function filterValidItems<T>(schema: z.ZodType<T>, items: unknown[]): T[] {
 export const ReviewResultSchema = z.object({
   prSummary: z
     .string()
-    .max(200)
     .default("")
     .describe(
       "Short neutral description of what this PR does — 1-2 sentences from the author's perspective. Round 1 only; omit in round 2.",
     ),
   summary: z
     .string()
-    .max(400)
     .catch("")
     .describe("Overall assessment, 1-3 short sentences."),
   action: z

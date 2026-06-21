@@ -283,37 +283,3 @@ export function filterReviewVerdict(result: ReviewResult): string | null {
 
   return null;
 }
-
-// ── Result-level filter: summary length caps ──────────────────────────────────
-//
-// The JSON schema enforces maxLength on prSummary (200) and summary (400),
-// but models with structured-output disabled may ignore it. Hard-truncate
-// so the progress comment stays readable.
-//
-// Mutates result in place. Returns a reason string if truncation occurred.
-
-export function truncateReviewSummary(result: ReviewResult): string | null {
-  const reasons: string[] = [];
-
-  if (result.prSummary && result.prSummary.length > 200) {
-    const cut = result.prSummary.lastIndexOf(" ", 200);
-    const end = cut > 0 ? cut : 200;
-    (result as { prSummary: string }).prSummary =
-      result.prSummary.slice(0, end) + "…";
-    reasons.push(
-      `prSummary truncated (${result.prSummary.length} → ${end + 1} chars)`,
-    );
-  }
-
-  if (result.summary.length > 400) {
-    const cut = result.summary.lastIndexOf(" ", 400);
-    const end = cut > 0 ? cut : 400;
-    (result as { summary: string }).summary =
-      result.summary.slice(0, end) + "…";
-    reasons.push(
-      `summary truncated (${result.summary.length} → ${end + 1} chars)`,
-    );
-  }
-
-  return reasons.length > 0 ? reasons.join("; ") : null;
-}
