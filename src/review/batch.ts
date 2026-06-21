@@ -377,7 +377,9 @@ export async function reviewBatched(
   }
   result.comments = filtered.kept;
 
-  // Verdict consistency: REQUEST_CHANGES needs at least one blocker comment.
+  // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+  // Mutates result.action in place — the same object reference flows to
+  // buildReviewCommentBody and postReview below.
   const verdictReason = filterReviewVerdict(result);
   if (verdictReason) {
     log.warn(`Verdict adjusted: ${verdictReason}`);

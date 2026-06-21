@@ -18,24 +18,43 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { homedir } from "node:os";
+import { z } from "zod";
 import { logger } from "../logger.js";
 
 const PRUNE_AFTER_DAYS = 60;
 
-interface CommitLogFile {
-  /** Bumped on schema changes. */
-  version: 1;
-  repos: Record<string, { shas: string[]; updatedAt: string }>;
-}
+// ── On-disk schema ────────────────────────────────────────────────────────────
+
+const CommitLogEntrySchema = z.object({
+  shas: z.array(z.string()),
+  updatedAt: z.string(),
+});
+
+const CommitLogFileSchema = z.object({
+  version: z.literal(1),
+  repos: z.record(z.string(), z.unknown()),
+});
+
+type CommitLogFile = z.infer<typeof CommitLogFileSchema>;
+
+// ── Store ─────────────────────────────────────────────────────────────────────
 
 export class CommitLog {
   private readonly path: string;
+  /** Reviewed SHAs per `owner/repo` key. */
   private readonly data: Map<string, Set<string>>;
+  /**
+   * Per-repo last-mutation timestamps. Only the repo being written gets
+   * a fresh stamp — other repos' timestamps are preserved across saves
+   * so the 60-day prune actually works.
+   */
+  private readonly updatedAt: Map<string, string>;
 
   constructor(logPath?: string) {
     this.path = resolve(
       logPath || join(homedir(), ".zanuda", "commit-log.json"),
     );
+    this.updatedAt = new Map();
     this.data = this.load();
   }
 
@@ -59,6 +78,7 @@ export class CommitLog {
     const seen = this.data.get(key) ?? new Set<string>();
     for (const sha of shas) seen.add(sha);
     this.data.set(key, seen);
+    this.updatedAt.set(key, new Date().toISOString());
     this.save();
   }
 
@@ -74,30 +94,42 @@ export class CommitLog {
       return new Map();
     }
 
-    let file: CommitLogFile;
+    let json: unknown;
     try {
-      file = JSON.parse(raw) as CommitLogFile;
+      json = JSON.parse(raw);
     } catch {
       return new Map();
     }
 
-    if (file.version !== 1) return new Map();
+    const parsed = CommitLogFileSchema.safeParse(json);
+    if (!parsed.success) {
+      logger.warn(
+        { path: this.path, issues: parsed.error.issues },
+        "Commit log file failed schema validation — starting fresh",
+      );
+      return new Map();
+    }
 
+    const file = parsed.data;
     const cutoff = Date.now() - PRUNE_AFTER_DAYS * 24 * 60 * 60 * 1000;
     const map = new Map<string, Set<string>>();
     let pruned = 0;
 
     for (const [key, entry] of Object.entries(file.repos)) {
-      // Verify data types — the Set constructor wants an iterable.
-      if (!Array.isArray(entry.shas)) {
+      // Per-entry validation: a single malformed entry doesn't discard
+      // the entire file.
+      const validated = CommitLogEntrySchema.safeParse(entry);
+      if (!validated.success) {
         pruned++;
         continue;
       }
-      if (new Date(entry.updatedAt).getTime() < cutoff) {
+      const e = validated.data;
+      if (new Date(e.updatedAt).getTime() < cutoff) {
         pruned++;
         continue;
       }
-      map.set(key, new Set(entry.shas));
+      map.set(key, new Set(e.shas));
+      this.updatedAt.set(key, e.updatedAt);
     }
 
     if (pruned > 0) {
@@ -118,7 +150,7 @@ export class CommitLog {
       for (const [key, shas] of this.data) {
         repos[key] = {
           shas: [...shas],
-          updatedAt: new Date().toISOString(),
+          updatedAt: this.updatedAt.get(key) ?? new Date().toISOString(),
         };
       }
 
