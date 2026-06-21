@@ -166,8 +166,11 @@ export async function postReview(
   const inlineFallback = result.comments
     .map((c) => renderCommentSummary(c))
     .join("\n");
+  // When the summary lives in the progress comment (summaryPostedElsewhere),
+  // the fallback body has no summary to lean on — add an explicit header so
+  // the author isn't dropped into a raw comment dump with no context.
   const fallbackBody = opts.summaryPostedElsewhere
-    ? `${inlineFallback}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`
+    ? `**Inline comments** (could not be anchored to the diff — see the summary comment above):\n\n${inlineFallback}\n\n<sub>Inline comment anchoring failed.</sub>`
     : `${body}\n\n---\n\n${inlineFallback}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`;
   await octokit.pulls.createReview({
     ...pr.ref,
