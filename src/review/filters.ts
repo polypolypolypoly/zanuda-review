@@ -213,9 +213,10 @@ function speculativeBlocker(comment: ReviewComment): string | null {
 
 // ── Filter: maximum body length (belt-and-suspenders) ─────────────────────────
 //
-// The JSON schema already enforces maxLength on the body field, but a
-// model with structured-output disabled could bypass it. Hard-truncate
-// instead of dropping so the signal isn't lost.
+// The JSON schema maxLength is advisory for providers like Anthropic that
+// don't hard-enforce string length in tool_use input_schema. This is the real
+// backstop. Instead of dropping (losing the signal), we trim the body — but
+// at a sentence boundary, never mid-word, so the result is still readable.
 
 function maxBodyLength(
   comment: ReviewComment,
@@ -223,10 +224,52 @@ function maxBodyLength(
 ): string | null {
   if (comment.body.length <= maxChars) return null;
 
-  const cut = comment.body.lastIndexOf(" ", maxChars);
-  const end = cut > 0 ? cut : maxChars;
-  (comment as { body: string }).body = comment.body.slice(0, end) + "…";
-  return `body truncated (${comment.body.length} → ${end + 1} chars)`;
+  const originalLength = comment.body.length;
+  const trimmed = trimToBoundary(comment.body, maxChars);
+  (comment as { body: string }).body = trimmed;
+  return `body trimmed (${originalLength} → ${trimmed.length} chars)`;
+}
+
+/**
+ * Trim `body` to <= maxChars at the best readable boundary found at or before
+ * the limit, preferring: end of a sentence (`.`/`!`/`?`), then end of a line,
+ * then a word boundary. Falls back to a hard cut only if none exist.
+ * Always appends an ellipsis so the trim is visible to the reader.
+ */
+function trimToBoundary(body: string, maxChars: number): string {
+  // Reserve one char for the trailing ellipsis.
+  const budget = maxChars - 1;
+  const slice = body.slice(0, budget);
+
+  // Prefer the last sentence terminator (followed by space/end) in the budget.
+  // Matches `.`, `!`, `?` optionally followed by a closing quote/paren.
+  const matches = slice.match(/[.!?]["')\]]?(?:\s|$)/g);
+  if (matches && matches.length > 0) {
+    // Include the terminator itself; pick the LAST match within the budget.
+    let idx = 0;
+    let end = 0;
+    for (const m of matches) {
+      idx = slice.indexOf(m, idx);
+      end = idx + m.length;
+      idx = end;
+    }
+    return slice.slice(0, end).trimEnd() + "…";
+  }
+
+  // Then prefer a newline boundary.
+  const nl = slice.lastIndexOf("\n");
+  if (nl > budget * 0.5) {
+    return slice.slice(0, nl).trimEnd() + "…";
+  }
+
+  // Then a word boundary (space).
+  const space = slice.lastIndexOf(" ");
+  if (space > budget * 0.5) {
+    return slice.slice(0, space).trimEnd() + "…";
+  }
+
+  // Nothing usable — hard cut.
+  return slice.trimEnd() + "…";
 }
 
 // ── Descriptive summary for logging ───────────────────────────────────────────

@@ -51,7 +51,7 @@ Respond with a single JSON object and nothing else (no markdown fences). Shape:
       "path": "repo-relative file path",
       "line": 123,                        // line in the NEW file (the '+' side of the diff)
       "severity": "blocker|warning",
-      "body": "markdown comment about this specific line (≤${maxCommentChars} chars)"${suggestionField}
+      "body": "markdown comment about this specific line (ceiling ${maxCommentChars} chars — use the fewest that make the point clearly; do not pad to fill)"${suggestionField}
     }
   ]
 }
