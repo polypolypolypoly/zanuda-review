@@ -243,19 +243,15 @@ function trimToBoundary(body: string, maxChars: number): string {
 
   // Prefer the last sentence terminator (followed by space/end) in the budget.
   // Matches `.`, `!`, `?` optionally followed by a closing quote/paren.
-  const sentenceEnd = slice.search(/[.!?]["')\]]?(?:\s|$)/g);
-  if (sentenceEnd !== -1) {
-    // Include the terminator itself.
-    const match = slice.match(/[.!?]["')\]]?(?:\s|$)/g);
-    let end = sentenceEnd;
-    if (match) {
-      // Find the last match's end offset.
-      let idx = 0;
-      for (const m of match) {
-        idx = slice.indexOf(m, idx);
-        end = idx + m.length;
-        idx = end;
-      }
+  const matches = slice.match(/[.!?]["')\]]?(?:\s|$)/g);
+  if (matches && matches.length > 0) {
+    // Include the terminator itself; pick the LAST match within the budget.
+    let idx = 0;
+    let end = 0;
+    for (const m of matches) {
+      idx = slice.indexOf(m, idx);
+      end = idx + m.length;
+      idx = end;
     }
     return slice.slice(0, end).trimEnd() + "…";
   }
