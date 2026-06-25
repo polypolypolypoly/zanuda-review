@@ -163,8 +163,10 @@ export class GitHubConnector implements SCMConnector {
       ...ref,
       pull_number: number,
     });
-    return (data.requested_reviewers ?? []).some(
-      (r) => r.login.toLowerCase() === reviewerLogin.toLowerCase(),
+    const reviewers = data.requested_reviewers ?? [];
+    const target = reviewerLogin.toLowerCase();
+    return reviewers.some(
+      (r) => typeof r?.login === "string" && r.login.toLowerCase() === target,
     );
   }
 }

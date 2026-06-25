@@ -204,4 +204,33 @@ describe("GitHubConnector.isReviewRequested", () => {
       false,
     );
   });
+
+  it("skips entries with a missing/undefined login without throwing", async () => {
+    const connector = new GitHubConnector(
+      makeOctokit([
+        { login: undefined } as unknown as { login: string },
+        { login: "ZlayaZanuda" },
+      ]),
+    );
+    assert.equal(
+      await connector.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "zlayazanuda",
+      ),
+      true,
+    );
+
+    const allBroken = new GitHubConnector(
+      makeOctokit([{ login: undefined } as unknown as { login: string }]),
+    );
+    assert.equal(
+      await allBroken.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "ZlayaZanuda",
+      ),
+      false,
+    );
+  });
 });
