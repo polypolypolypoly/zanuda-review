@@ -107,8 +107,9 @@ preprompt: |
 
   ## Comment style
   - Short and technical. One issue per comment.
-  - ABSOLUTE LIMIT per comment body. If you cannot fit your point
-    in the character budget, you are being too verbose. Shorten aggressively.
+  - The per-comment character limit is a HARD CEILING, not a target. Use the
+    fewest characters that state the problem clearly. Most comments should be
+    1-3 sentences. Do NOT pad or add filler to approach the limit.
   - State the problem, then (if non-obvious) why it matters in one sentence.
   - Suggest a concrete fix only when you have one. One sentence max.
   - No filler: no "great job", no "I noticed that", no "this looks good but".
@@ -253,8 +254,11 @@ review:
   # with the corrected code.
   suggestions: false
   # Maximum characters per inline comment body. Hard floor: 400.
-  # Repos and orgs may raise this but never lower it below 400.
-  maxCommentChars: 400
+  # This is a CEILING, not a target — the prompt tells the model to use the
+  # fewest characters that make the point clearly. 400 is too tight for real
+  # findings (problem + why + fix) and causes mid-sentence truncation, so the
+  # default is 800. Repos and orgs may raise this but never lower below 400.
+  maxCommentChars: 800
   # Self-verification: after review, a second LLM call checks each
   # finding against the diff before posting. Filtered findings are logged
   # as retracted. Disable for budget-constrained self-hosted setups.

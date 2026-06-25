@@ -210,8 +210,9 @@ describe("speculativeBlocker filter", () => {
 // ── Filter 4: max body length (MUTATE — always keeps) ────────────────────────
 
 describe("maxBodyLength filter", () => {
-  it("truncates body exceeding maxCommentChars", () => {
-    const longBody = "x".repeat(500);
+  it("trims body exceeding maxCommentChars at a sentence boundary", () => {
+    const longBody =
+      "This is the first sentence. " + "x".repeat(300) + " trailing text";
     const comment = makeComment({ body: longBody });
     const result = filterReviewComments([comment], {
       maxCommentChars: 200,
@@ -220,10 +221,21 @@ describe("maxBodyLength filter", () => {
     assert.equal(result.mutated.length, 1);
     assert.ok(result.kept[0].body.length <= 201);
     assert.ok(result.kept[0].body.endsWith("…"));
-    assert.match(result.mutated[0].reason, /truncated/);
+    // Should cut after the first sentence, not in the middle of the padding.
+    assert.match(result.kept[0].body, /first sentence\.…$/);
+    assert.match(result.mutated[0].reason, /trimmed/);
   });
 
-  it("does NOT truncate body within limit", () => {
+  it("logs original length before trimming (not both identical)", () => {
+    const longBody = "a".repeat(500);
+    const comment = makeComment({ body: longBody });
+    const result = filterReviewComments([comment], {
+      maxCommentChars: 100,
+    });
+    assert.match(result.mutated[0].reason, /500 → \d+ chars/);
+  });
+
+  it("does NOT trim body within limit", () => {
     const comment = makeComment({
       body: "This body is within the character limit.",
     });
@@ -237,7 +249,30 @@ describe("maxBodyLength filter", () => {
     assert.equal(result.mutated.length, 0);
   });
 
-  it("handles body with no word boundary before limit", () => {
+  it("falls back to word boundary when no sentence terminator exists", () => {
+    const longBody = "word ".repeat(200); // no punctuation
+    const comment = makeComment({ body: longBody });
+    const result = filterReviewComments([comment], {
+      maxCommentChars: 100,
+    });
+    assert.equal(result.kept.length, 1);
+    assert.ok(result.kept[0].body.endsWith("…"));
+    // The cut must land at a space in the ORIGINAL body, not mid-word.
+    // trimEnd() removes that space, so the kept body ends with a full word + ….
+    const kept = result.kept[0].body;
+    const ellipsisIdx = kept.length - 1;
+    const wordBeforeEllipsis = kept.slice(0, ellipsisIdx).match(/\w+$/)?.[0];
+    assert.ok(
+      wordBeforeEllipsis,
+      "should end with a complete word, not a fragment",
+    );
+    assert.ok(
+      longBody.includes(wordBeforeEllipsis + " "),
+      "the final word should be a complete token from the original",
+    );
+  });
+
+  it("handles body with no word boundary before limit (hard cut)", () => {
     const longBody = "a".repeat(500);
     const comment = makeComment({ body: longBody });
     const result = filterReviewComments([comment], {
