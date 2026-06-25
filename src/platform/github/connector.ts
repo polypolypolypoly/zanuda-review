@@ -137,6 +137,13 @@ export class GitHubConnector implements SCMConnector {
     });
   }
 
+  async deleteComment(ref: RepoRef, commentId: number): Promise<void> {
+    await this.octokit.issues.deleteComment({
+      ...ref,
+      comment_id: commentId,
+    });
+  }
+
   async replyToComment(
     ref: RepoRef,
     number: number,

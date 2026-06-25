@@ -14,10 +14,15 @@ const noopLog = { warn: () => undefined };
 
 function fakeConnector() {
   const edits: { commentId: number; body: string }[] = [];
+  const deletes: { commentId: number }[] = [];
   return {
     edits,
+    deletes,
     editComment: async (_ref: RepoRef, commentId: number, body: string) => {
       edits.push({ commentId, body });
+    },
+    deleteComment: async (_ref: RepoRef, commentId: number) => {
+      deletes.push({ commentId });
     },
   };
 }
@@ -84,6 +89,7 @@ describe("ProgressComment", () => {
     const edits: unknown[] = [];
     const conn = {
       edits,
+      deleteComment: async () => {},
       editComment: async () => {
         throw new Error("API 500");
       },
@@ -99,6 +105,50 @@ describe("ProgressComment", () => {
       p.isResolved,
       true,
       "still resolved — safety net won't refire",
+    );
+  });
+
+  it("delete() removes the placeholder and counts as resolved", async () => {
+    const conn = fakeConnector();
+    const p = new ProgressComment(conn, ref, 42, false, noopLog);
+    await p.delete();
+    assert.equal(p.isResolved, true);
+    assert.deepEqual(conn.deletes, [{ commentId: 42 }]);
+    assert.equal(conn.edits.length, 0, "delete path never edits");
+  });
+
+  it("delete() is a no-op with no placeholder and stays resolved", async () => {
+    const conn = fakeConnector();
+    const p = new ProgressComment(conn, ref, null, false, noopLog);
+    await p.delete();
+    assert.equal(p.isResolved, true);
+    assert.equal(conn.deletes.length, 0);
+  });
+
+  it("delete() swallows errors and stays resolved (stray placeholder is cosmetic)", async () => {
+    const conn = {
+      edits: [] as unknown[],
+      deletes: [] as unknown[],
+      deleteComment: async () => {
+        throw new Error("API 500");
+      },
+      editComment: async () => {},
+    };
+    const p = new ProgressComment(conn, ref, 42, false, noopLog);
+    await p.delete();
+    assert.equal(p.isResolved, true);
+  });
+
+  it("ensureResolved() does not clobber after delete() (delete is a resolution)", async () => {
+    const conn = fakeConnector();
+    const p = new ProgressComment(conn, ref, 42, false, noopLog);
+    await p.delete();
+    await p.ensureResolved("FALLBACK");
+    assert.equal(conn.deletes.length, 1);
+    assert.equal(
+      conn.edits.length,
+      0,
+      "fallback must not resurrect a deleted placeholder",
     );
   });
 });

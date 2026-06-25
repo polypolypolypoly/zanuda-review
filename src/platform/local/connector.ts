@@ -164,6 +164,11 @@ export class LocalConnector implements SCMConnector {
     process.stderr.write(`\r${body}\n`);
   }
 
+  async deleteComment(_ref: RepoRef, _commentId: number): Promise<void> {
+    // No-op — local mode prints progress to stderr transiently; nothing to
+    // delete. The final review is written to stdout/outputFile regardless.
+  }
+
   async replyToComment(): Promise<void> {
     // No-op — no discussion in local mode.
   }

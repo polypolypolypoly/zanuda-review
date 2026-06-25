@@ -7,7 +7,6 @@
  * hallucination propagation.
  */
 
-import { buildReviewCommentBody } from "./format.js";
 import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
@@ -442,27 +441,6 @@ export async function reviewBatched(
   }
 
   if (!dryRun) {
-    // Update progress comment with final verdict. postReview also carries the
-    // summary in the review-event body (intentional duplication — see
-    // postReview) so a `createReview` event is always submitted.
-    if (startingCommentId !== null) {
-      try {
-        await deps.connector.editComment(
-          ref,
-          startingCommentId,
-          buildReviewCommentBody(result, pr.changedFiles.length, {
-            diffTruncated: false,
-            reviewedFiles: new Set(
-              effectiveBatches.flatMap((b) => b.files.map((f) => f.filename)),
-            ).size,
-            round,
-          }),
-        );
-      } catch (err) {
-        log.warn({ err }, "Failed to update progress comment");
-      }
-    }
-
     // Collect all visible file paths across all batches
     const allVisiblePaths = new Set<string>();
     for (const batch of batches) {
@@ -472,9 +450,20 @@ export async function reviewBatched(
       }
     }
 
+    // Post the review event FIRST (summary lives in its body), then delete the
+    // transient placeholder. Same ordering as the single-batch engine path:
+    // if postReview fails the placeholder survives for the failSafe to edit
+    // into an error; on success there is one canonical summary, no duplicate.
     await deps.connector.postReview(pr, result, config, {
       visibleFilePaths: allVisiblePaths,
     });
+    if (startingCommentId !== null) {
+      try {
+        await deps.connector.deleteComment(ref, startingCommentId);
+      } catch (err) {
+        log.warn({ err }, "Failed to delete progress comment");
+      }
+    }
     log.info(
       { comments: allComments.length, batches: effectiveBatches.length },
       "Batch review posted",

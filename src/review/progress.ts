@@ -23,7 +23,10 @@ export class ProgressComment {
   private resolved = false;
 
   constructor(
-    private readonly connector: Pick<SCMConnector, "editComment">,
+    private readonly connector: Pick<
+      SCMConnector,
+      "editComment" | "deleteComment"
+    >,
     private readonly ref: RepoRef,
     /** null when no placeholder was posted (dry-run, or the post failed). */
     private readonly commentId: number | null,
@@ -41,10 +44,10 @@ export class ProgressComment {
    * still counts as resolved (we tried — the safety net is for forgotten paths,
    * not transient API errors). No-op when there is no placeholder to edit.
    *
-   * Returns true only when an edit actually landed on a real comment. (The
-   * return value no longer gates whether the summary is duplicated into the
-   * review-event body — postReview always carries it now — but is kept for
-   * callers that want to know whether the placeholder edit succeeded.)
+   * Used on non-success exit paths (failure / stale) where the placeholder
+   * is KEPT as a status indicator showing the error or discard reason.
+   *
+   * Returns true only when an edit actually landed on a real comment.
    */
   async resolve(body: string): Promise<boolean> {
     this.resolved = true;
@@ -55,6 +58,26 @@ export class ProgressComment {
     } catch (err) {
       this.log.warn({ err }, "Failed to resolve progress comment");
       return false;
+    }
+  }
+
+  /**
+   * Resolve the placeholder by DELETING it. Used on the success path once the
+   * review has been posted as a review event — the review event is the
+   * canonical home of the summary, so the transient "Starting review…"
+   * placeholder is removed instead of being edited into a duplicate summary.
+   *
+   * Best-effort: a failed delete still counts as resolved (a stray
+   * placeholder is cosmetic; the review itself already posted). No-op when
+   * there is no placeholder.
+   */
+  async delete(): Promise<void> {
+    this.resolved = true;
+    if (this.dryRun || this.commentId === null) return;
+    try {
+      await this.connector.deleteComment(this.ref, this.commentId);
+    } catch (err) {
+      this.log.warn({ err }, "Failed to delete progress comment");
     }
   }
 
