@@ -117,6 +117,18 @@ describe("applyEvent: ROUND_STALE", () => {
     });
     assert.equal(s.failedAwaitingRetry, false);
   });
+
+  it("preserves reReviewRequested so a stale round-2 retry still re-fires", () => {
+    // A stale discard is not a completion — the mention-driven re-review
+    // request must survive so the next poll still proceeds to round 2.
+    const s = applyEvent(state({ rounds: 1, reReviewRequested: true }), {
+      type: "ROUND_STALE",
+      progressCommentId: null,
+      headSha: null,
+    });
+    assert.equal(s.reReviewRequested, true);
+    assert.equal(s.rounds, 1);
+  });
 });
 
 // ── ROUND_FAILED ─────────────────────────────────────────────────────────────

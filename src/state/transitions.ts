@@ -23,8 +23,9 @@
 
 import type { PRState } from "./store.js";
 
-/** The maximum number of full review rounds per PR (mirrors poller.ts). */
-const MAX_REVIEW_ROUNDS = 2;
+/** The maximum number of full review rounds per PR. Single source of truth —
+ * imported by the poller so the latch math and the gate can never drift. */
+export const MAX_REVIEW_ROUNDS = 2;
 
 // ── Events ───────────────────────────────────────────────────────────────────
 

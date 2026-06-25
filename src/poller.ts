@@ -8,13 +8,14 @@ import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
 import { PRStateStore } from "./state/store.js";
-import { applyEvent, freshState } from "./state/transitions.js";
+import {
+  applyEvent,
+  freshState,
+  MAX_REVIEW_ROUNDS,
+} from "./state/transitions.js";
 import { CommitLog } from "./state/commitLog.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
-
-/** Maximum number of full review rounds per PR. */
-const MAX_REVIEW_ROUNDS = 2;
 
 /** Maximum number of @mention replies per PR before going silent. */
 const MAX_MENTION_REPLIES = 5;
