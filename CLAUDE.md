@@ -15,8 +15,8 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
   → parse structured JSON result
   → apply hard output filters (non-LLM: drop garbage, downgrade speculative blockers,
     enforce verdict consistency)
-  → post review via SCMConnector (inline comments + COMMENT event; progress comment
-    updated with recommendation)
+  → post review via SCMConnector (inline comments + COMMENT event carrying the
+    summary; progress comment also updated with the recommendation)
   → (async) maybe update repo memory based on what the PR revealed
 ```
 
@@ -28,10 +28,26 @@ Round 2 does NOT auto-trigger on commit push. The author must explicitly request
 - **GitHub re-request:** click "Re-request review" in the PR sidebar
 - **@mention:** post `@ZlayaZanuda re-review` (or `review again`, `round 2`, `recheck`)
 
-After round 1, the review itself (COMMENT event) fulfills the review request —
-Zanuda disappears from the sidebar with no timeline event. The poller also
-scans the state store for PRs with `reReviewRequested` flags (set by the
-mention path).
+After each round, the poller **always submits a `createReview` COMMENT event**
+with a non-empty body. Submitting the review is the natural GitHub mechanism that
+clears `requested_reviewers` (Zanuda disappears from the sidebar). The summary
+is carried in BOTH the review-event body and the progress comment — the small
+duplication is the cost of guaranteeing `createReview` always fires (GitHub 422s
+an empty-body no-comment review, and skipping the event would leave the request
+open so the PR keeps matching the search every tick).
+
+The round-2 gate is **authoritative, not inferential**: it never treats "PR appears in
+the search/poll results" as a re-request, because the search index is eventually
+consistent and lags behind the REST mutation that cleared the request (this caused
+spurious round-2 reviews in production). Instead, round 2 proceeds only on a
+strongly-consistent signal:
+
+- **GitHub re-request** → reviewer is back in `requested_reviewers`, verified via
+  `pulls.get` (`SCMConnector.isReviewRequested`), NOT the search API.
+- **@mention** → `reReviewRequested` flag in the state store (set by the mention path).
+
+If the `isReviewRequested` check fails (API error), round 2 is withheld until the
+next tick rather than falling back to the search-index heuristic.
 
 ### Output filters
 
@@ -253,7 +269,13 @@ pause and ask:
 3. **Happy-path thinking:** "The prompt tells the model not to do X" is not a
    security boundary. Always ask: what happens if the model ignores the instruction?
    Add a defensive fallback.
-4. **Tests for new rendering/output functions:** Even simple formatters on
+4. **Inferential gates over eventually-consistent data:** "PR showed up in the
+   search results, so the author must have re-requested" is not a safe
+   inference — the search index lags behind REST mutations. Gates that drive
+   side effects (round 2, retries) must check a strongly-consistent source
+   (`pulls.get`, not the search API). See the round-2 re-review gate in
+   `src/poller.ts` and `SCMConnector.isReviewRequested`.
+5. **Tests for new rendering/output functions:** Even simple formatters on
    security-relevant paths need tests. Check if a test file already exists.
 
 When the model drifts in production, prefer a hard (non-LLM) output filter over

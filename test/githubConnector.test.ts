@@ -154,3 +154,83 @@ describe("replyToComment: thread root ID resolution", () => {
     assert.equal(capturedCommentId, 123, "root comment: must use own id");
   });
 });
+
+describe("GitHubConnector.isReviewRequested", () => {
+  const makeOctokit = (reviewers: { login: string }[] | null) =>
+    ({
+      pulls: {
+        get: async () => ({
+          data: { requested_reviewers: reviewers },
+        }),
+      },
+    }) as unknown as Octokit;
+
+  it("returns true when the reviewer is in requested_reviewers (case-insensitive)", async () => {
+    const connector = new GitHubConnector(
+      makeOctokit([{ login: "ZlayaZanuda" }]),
+    );
+    assert.equal(
+      await connector.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "zlayazanuda",
+      ),
+      true,
+    );
+  });
+
+  it("returns false when the reviewer is NOT requested", async () => {
+    const connector = new GitHubConnector(
+      makeOctokit([{ login: "someone-else" }]),
+    );
+    assert.equal(
+      await connector.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "ZlayaZanuda",
+      ),
+      false,
+    );
+  });
+
+  it("returns false when requested_reviewers is null/undefined", async () => {
+    const connector = new GitHubConnector(makeOctokit(null));
+    assert.equal(
+      await connector.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "ZlayaZanuda",
+      ),
+      false,
+    );
+  });
+
+  it("skips entries with a missing/undefined login without throwing", async () => {
+    const connector = new GitHubConnector(
+      makeOctokit([
+        { login: undefined } as unknown as { login: string },
+        { login: "ZlayaZanuda" },
+      ]),
+    );
+    assert.equal(
+      await connector.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "zlayazanuda",
+      ),
+      true,
+    );
+
+    const allBroken = new GitHubConnector(
+      makeOctokit([{ login: undefined } as unknown as { login: string }]),
+    );
+    assert.equal(
+      await allBroken.isReviewRequested(
+        { owner: "acme", repo: "r" },
+        7,
+        "ZlayaZanuda",
+      ),
+      false,
+    );
+  });
+});

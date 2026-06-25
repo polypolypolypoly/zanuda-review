@@ -107,7 +107,7 @@ export class GitHubConnector implements SCMConnector {
     pr: PullRequest,
     result: ReviewResult,
     config: Config,
-    opts?: { summaryPostedElsewhere?: boolean; visibleFilePaths?: Set<string> },
+    opts?: { visibleFilePaths?: Set<string> },
   ): Promise<void> {
     return ghPostReview(this.octokit, pr, result, config, opts);
   }
@@ -154,16 +154,20 @@ export class GitHubConnector implements SCMConnector {
     return commits.map((c) => c.sha);
   }
 
-  async dismissReviewRequest(
+  async isReviewRequested(
     ref: RepoRef,
     number: number,
     reviewerLogin: string,
-  ): Promise<void> {
-    await this.octokit.pulls.removeRequestedReviewers({
+  ): Promise<boolean> {
+    const { data } = await this.octokit.pulls.get({
       ...ref,
       pull_number: number,
-      reviewers: [reviewerLogin],
     });
+    const reviewers = data.requested_reviewers ?? [];
+    const target = reviewerLogin.toLowerCase();
+    return reviewers.some(
+      (r) => typeof r?.login === "string" && r.login.toLowerCase() === target,
+    );
   }
 }
 

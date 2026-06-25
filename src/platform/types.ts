@@ -166,9 +166,11 @@ export interface SCMConnector {
    * If inline anchoring fails, fall back to a summary comment so no feedback
    * is silently lost.
    *
-   * @param opts.summaryPostedElsewhere - If true, the review summary has already
-   *   been posted elsewhere (e.g., in a progress comment) and the review body can
-   *   be left empty. If false, the summary must be included in the review body.
+   * The review body is ALWAYS non-empty (it carries the summary). Submitting
+   * the COMMENT review is what clears `requested_reviewers` on GitHub — never
+   * skip it, or the PR keeps matching pollPendingReviews and the round-2 gate
+   * misreads the lag as a re-request.
+   *
    * @param opts.visibleFilePaths - The set of file paths whose diff was actually
    *   sent to the model. Comments on paths outside this set are anchored to lines
    *   the model never saw and will 422; the connector should handle them specially.
@@ -177,7 +179,7 @@ export interface SCMConnector {
     pr: PullRequest,
     result: ReviewResult,
     config: Config,
-    opts?: { summaryPostedElsewhere?: boolean; visibleFilePaths?: Set<string> },
+    opts?: { visibleFilePaths?: Set<string> },
   ): Promise<void>;
 
   /**
@@ -214,14 +216,20 @@ export interface SCMConnector {
   listCommitShas(ref: RepoRef, number: number): Promise<string[]>;
 
   /**
-   * Dismiss the review request for the given reviewer on a PR.
-   * After round 1, the review request is dismissed so the PR stops
-   * appearing in pollPendingReviews. Round 2 only happens when the
-   * author explicitly re-requests or uses an @mention.
+   * Is the reviewer currently in the PR's `requested_reviewers`?
+   *
+   * This is the AUTHORITATIVE signal for "the author re-requested review."
+   * The search/poll API is eventually consistent and can still return a PR
+   * whose request was just fulfilled (by a submitted COMMENT review clearing
+   * `requested_reviewers`); this method MUST be strongly consistent (a direct
+   * PR fetch, not a search index) so the round-2 gate does not mistake lag
+   * for a re-request.
+   *
+   * GitHub reference: octokit.pulls.get() → data.requested_reviewers
    */
-  dismissReviewRequest(
+  isReviewRequested(
     ref: RepoRef,
     number: number,
     reviewerLogin: string,
-  ): Promise<void>;
+  ): Promise<boolean>;
 }

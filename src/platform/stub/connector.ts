@@ -145,10 +145,7 @@ export class StubConnector implements SCMConnector {
     _pr: PullRequest,
     _result: ReviewResult,
     _config: Config,
-    _opts?: {
-      summaryPostedElsewhere?: boolean;
-      visibleFilePaths?: Set<string>;
-    },
+    _opts?: { visibleFilePaths?: Set<string> },
   ): Promise<void> {
     throw new Error("StubConnector.postReview: not implemented");
   }
@@ -205,11 +202,11 @@ export class StubConnector implements SCMConnector {
     throw new Error("StubConnector.listCommitShas: not implemented");
   }
 
-  async dismissReviewRequest(
+  async isReviewRequested(
     _ref: RepoRef,
     _number: number,
     _reviewerLogin: string,
-  ): Promise<void> {
-    throw new Error("StubConnector.dismissReviewRequest: not implemented");
+  ): Promise<boolean> {
+    throw new Error("StubConnector.isReviewRequested: not implemented");
   }
 }
