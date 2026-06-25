@@ -134,10 +134,7 @@ export class LocalConnector implements SCMConnector {
     _pr: PullRequest,
     result: ReviewResult,
     _config: Config,
-    _opts?: {
-      summaryPostedElsewhere?: boolean;
-      visibleFilePaths?: Set<string>;
-    },
+    _opts?: { visibleFilePaths?: Set<string> },
   ): Promise<void> {
     const output = renderReview(result);
     if (this.outputFile) {
@@ -176,12 +173,13 @@ export class LocalConnector implements SCMConnector {
     return [];
   }
 
-  async dismissReviewRequest(
+  async isReviewRequested(
     _ref: RepoRef,
     _number: number,
     _reviewerLogin: string,
-  ): Promise<void> {
-    // No-op — no remote review requests in local mode.
+  ): Promise<boolean> {
+    // No remote review requests in local mode.
+    return false;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────

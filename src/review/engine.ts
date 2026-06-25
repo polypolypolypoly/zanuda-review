@@ -143,10 +143,11 @@ export async function reviewPullRequest(
   // ── Progress-placeholder lifecycle (deterministic, not LLM-driven) ──────
   // Exactly one placeholder is posted per round, and it must be resolved
   // exactly once on EVERY exit path. On the happy path the placeholder is
-  // EDITED IN PLACE to become the finalized review (summary + file table); the
-  // inline comments then ride on a review event whose body is left empty
-  // (summaryPostedElsewhere), so the summary lives in exactly one place. The
-  // ProgressComment owner + its ensureResolved() safety net make it
+  // EDITED IN PLACE to become the finalized review (summary + file table).
+  // postReview also carries the summary in the review-event body (the summary
+  // appears in two places by design — see postReview) so a `createReview` event
+  // is always submitted, which is what clears `requested_reviewers` on GitHub.
+  // The ProgressComment owner + its ensureResolved() safety net make it
   // structurally impossible to orphan the placeholder as "_Starting review…_"
   // again, even if a future return path forgets. The model decides WHAT to
   // say; the code decides HOW MANY comments to post.
@@ -483,12 +484,11 @@ export async function reviewPullRequest(
 
     if (!opts.dryRun) {
       // Finalize the review by EDITING the placeholder into the full review
-      // (summary + changed-file table) — same flow as the batch path. The
-      // inline comments below ride on a review event whose body is left empty
-      // (summaryPostedElsewhere = true) so the summary is never duplicated.
-      // If the edit fails (or no placeholder exists), summaryPostedElsewhere is
-      // false and postReview falls back to carrying the summary in its body.
-      const summaryInPlaceholder = await progress.resolve(
+      // (summary + changed-file table) — same flow as the batch path. postReview
+      // also carries the summary in the review-event body; the duplication is
+      // intentional (see postReview) so a `createReview` event is always
+      // submitted, clearing `requested_reviewers` on GitHub.
+      await progress.resolve(
         buildReviewCommentBody(result, pr.changedFiles.length, {
           diffTruncated: promptDiff.truncated,
           reviewedFiles: promptDiff.includedFiles.length,
@@ -496,13 +496,11 @@ export async function reviewPullRequest(
         }),
       );
       await connector.postReview(pr, result, config, {
-        summaryPostedElsewhere: summaryInPlaceholder,
         visibleFilePaths: includedPaths(promptDiff),
       });
       log.info(
         {
           comments: result.comments.length,
-          summaryPostedElsewhere: summaryInPlaceholder,
         },
         "Review posted",
       );

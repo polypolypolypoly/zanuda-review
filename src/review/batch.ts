@@ -442,8 +442,9 @@ export async function reviewBatched(
   }
 
   if (!dryRun) {
-    // Update progress comment with final verdict
-    let progressUpdated = false;
+    // Update progress comment with final verdict. postReview also carries the
+    // summary in the review-event body (intentional duplication — see
+    // postReview) so a `createReview` event is always submitted.
     if (startingCommentId !== null) {
       try {
         await deps.connector.editComment(
@@ -457,7 +458,6 @@ export async function reviewBatched(
             round,
           }),
         );
-        progressUpdated = true;
       } catch (err) {
         log.warn({ err }, "Failed to update progress comment");
       }
@@ -473,7 +473,6 @@ export async function reviewBatched(
     }
 
     await deps.connector.postReview(pr, result, config, {
-      summaryPostedElsewhere: progressUpdated,
       visibleFilePaths: allVisiblePaths,
     });
     log.info(

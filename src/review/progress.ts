@@ -41,9 +41,10 @@ export class ProgressComment {
    * still counts as resolved (we tried — the safety net is for forgotten paths,
    * not transient API errors). No-op when there is no placeholder to edit.
    *
-   * Returns true only when an edit actually landed on a real comment — callers
-   * use this to decide whether the summary now lives in the placeholder
-   * (summaryPostedElsewhere) or must fall back into the review-event body.
+   * Returns true only when an edit actually landed on a real comment. (The
+   * return value no longer gates whether the summary is duplicated into the
+   * review-event body — postReview always carries it now — but is kept for
+   * callers that want to know whether the placeholder edit succeeded.)
    */
   async resolve(body: string): Promise<boolean> {
     this.resolved = true;

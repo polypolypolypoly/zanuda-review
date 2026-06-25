@@ -50,12 +50,16 @@ function renderCommentSummary(c: ReviewComment): string {
 /**
  * Post the review back to GitHub.
  *
- * If `summaryPostedElsewhere` is true, the review body is intentionally empty —
- * the full summary lives in the progress comment that was edited with the final
- * verdict. This avoids posting duplicate content and keeps the PR timeline clean.
- *
- * If false (progress comment was never posted or failed to update), includes
- * the summary in the review body so the author always sees the verdict.
+ * The review body is ALWAYS non-empty: it carries the summary (verdict +
+ * file table). The progress comment is also edited with the summary for
+ * timeline visibility, so the summary appears in two places by design — the
+ * small duplication is the cost of guaranteeing a `createReview` event is
+ * always submitted. Submitting the COMMENT review is what clears
+ * `requested_reviewers` on GitHub; skipping it (e.g. an empty body when the
+ * summary lived only in the progress comment) leaves the request open, the PR
+ * keeps matching pollPendingReviews, and the round-2 gate misreads the
+ * search-index lag as a re-request. GitHub 422s an empty-body no-comment
+ * review anyway.
  *
  * `visibleFilePaths` — when the diff was assembled from a subset of files (large
  * PR), this is the set of paths the model actually saw. On a 422 we first retry
@@ -68,24 +72,27 @@ export async function postReview(
   pr: PullRequest,
   result: ReviewResult,
   config: Config,
-  opts: {
-    summaryPostedElsewhere?: boolean;
-    visibleFilePaths?: Set<string>;
-  } = {},
+  opts: { visibleFilePaths?: Set<string> } = {},
 ): Promise<void> {
   // Zanuda never blocks or approves via GitHub — the review event is always
   // COMMENT so the PR pipeline is never affected. The verdict (APPROVE /
   // REQUEST_CHANGES / COMMENT) is expressed verbally in the summary comment.
+  //
+  // The review body is ALWAYS non-empty. Submitting a COMMENT review is the
+  // natural GitHub mechanism that clears `requested_reviewers` (Zanuda
+  // disappears from the sidebar). If we ever skip createReview — e.g. by
+  // sending an empty body when the summary lives in the progress comment —
+  // the request stays open, the PR keeps matching pollPendingReviews, and the
+  // round-2 gate misreads the lag as a re-request. GitHub 422s a COMMENT
+  // review with an empty body and no comments anyway, so we always carry the
+  // summary here. The progress comment still gets the summary too (for
+  // visibility in the timeline); the small duplication is intentional and
+  // cheaper than the alternative of a second code path that can forget to
+  // submit a review.
   const event = "COMMENT" as const;
-  const body = opts.summaryPostedElsewhere
-    ? ""
-    : buildReviewCommentBody(result, pr.changedFiles.length);
+  const body = buildReviewCommentBody(result, pr.changedFiles.length);
 
   if (!config.review.inlineComments || result.comments.length === 0) {
-    // If the summary was already posted in the progress comment and there are
-    // no inline comments to anchor, there is nothing left to post — a review
-    // with an empty body and no comments is rejected by GitHub with a 422.
-    if (!body) return;
     await octokit.pulls.createReview({
       ...pr.ref,
       pull_number: pr.number,
@@ -139,9 +146,7 @@ export async function postReview(
               hiddenComments.map((c) => renderCommentSummary(c)).join("\n")
             : "";
 
-        const partialBody = opts.summaryPostedElsewhere
-          ? hiddenFallback.trimStart()
-          : `${body}${hiddenFallback}`;
+        const partialBody = `${body}${hiddenFallback}`;
 
         await octokit.pulls.createReview({
           ...pr.ref,
@@ -166,12 +171,8 @@ export async function postReview(
   const inlineFallback = result.comments
     .map((c) => renderCommentSummary(c))
     .join("\n");
-  // When the summary lives in the progress comment (summaryPostedElsewhere),
-  // the fallback body has no summary to lean on — add an explicit header so
-  // the author isn't dropped into a raw comment dump with no context.
-  const fallbackBody = opts.summaryPostedElsewhere
-    ? `**Inline comments** (could not be anchored to the diff — see the summary comment above):\n\n${inlineFallback}\n\n<sub>Inline comment anchoring failed.</sub>`
-    : `${body}\n\n---\n\n${inlineFallback}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`;
+  // The summary is always in `body` now, so the fallback always has context.
+  const fallbackBody = `${body}\n\n---\n\n${inlineFallback}\n\n<sub>Inline comment anchoring failed; comments shown above.</sub>`;
   await octokit.pulls.createReview({
     ...pr.ref,
     pull_number: pr.number,

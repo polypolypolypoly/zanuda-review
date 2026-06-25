@@ -33,8 +33,10 @@ export interface PRState {
   consecutiveFailures: number;
   /**
    * Head SHA of the PR as it was when the last review round completed.
-   * Round 2 is withheld until the PR's current head SHA differs from this
-   * value — i.e. until the author pushes new commits.
+   * Diagnostic only — recorded for inspection and future heuristics. The
+   * round-2 gate is driven by explicit re-request signals
+   * (`reReviewRequested` / `isReviewRequested`), NOT by a SHA-change check,
+   * because a legitimate re-request can happen on an unchanged head.
    */
   lastReviewedHeadSha: string | null;
   /**

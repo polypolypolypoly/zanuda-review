@@ -106,8 +106,7 @@ async function pollReviewRequests(opts: {
   // Also scan the state store for PRs with explicit re-review requests
   // (set by the mention path when the author posts "@reviewer re-review").
   // These may not appear in pollPendingReviews if the original review
-  // request was already fulfilled.
-  const fromStateStore = new Set<number>();
+  // request was already fulfilled (submitted review / dismiss).
   for (const [platformId, s] of store.entries()) {
     if (
       s.reReviewRequested &&
@@ -125,7 +124,6 @@ async function pollReviewRequests(opts: {
         title: `PR #${s.number}`,
         platformId,
       });
-      fromStateStore.add(platformId);
     }
   }
 
@@ -221,27 +219,55 @@ async function pollReviewRequests(opts: {
 
     const nextRound = completedRounds + 1;
 
-    // ── Re-review gate: round 2+ requires explicit author request ───────────
-    // Zanuda acts ONLY on request, re-request, or @mention. Round 2 does NOT
-    // auto-trigger when the author pushes new commits.
+    // ── Re-review gate: round 2+ requires an EXPLICIT author request ──────
+    // Zanuda acts ONLY on a real re-request or @mention. Round 2 does NOT
+    // auto-trigger when the author pushes new commits, and it does NOT
+    // infer a re-request from the PR appearing in pollPendingReviews —
+    // the search/poll API is eventually consistent and can still return a
+    // PR whose request was just fulfilled (by a submitted review or a
+    // dismiss), which previously caused spurious round-2 reviews.
     //
-    // Two paths to round 2:
-    //   1. Author re-requests on GitHub → dismiss (after round 1) removes the
-    //      PR from pending; re-request adds it back → appears in connector's
-    //      pollPendingReviews (NOT from state store).
+    // Two authoritative paths to round 2:
+    //   1. Author re-requests on GitHub → reviewer is back in
+    //      `requested_reviewers` (verified via a strongly-consistent
+    //      pulls.get, NOT the lagging search index).
     //   2. Author posts "@reviewer re-review" → mention path sets
     //      reReviewRequested → state-store scan picks it up.
     if (nextRound >= 2) {
-      const isReReview =
-        state?.reReviewRequested === true ||
-        !fromStateStore.has(item.platformId);
-      if (!isReReview) {
+      let explicitReRequest = state?.reReviewRequested === true;
+      if (!explicitReRequest) {
+        try {
+          explicitReRequest = await connector.isReviewRequested(
+            item.ref,
+            item.number,
+            reviewerLogin,
+          );
+        } catch (err) {
+          // If the authoritative check fails, do NOT fall back to the
+          // search-index heuristic — that caused spurious round-2 reviews.
+          // Withhold and retry next tick when the API is healthy.
+          logger.warn(
+            {
+              err,
+              repo: `${item.ref.owner}/${item.ref.repo}`,
+              pr: item.number,
+            },
+            "Re-review check failed — withholding round 2 until next cycle",
+          );
+          continue;
+        }
+      }
+      if (!explicitReRequest) {
         logger.debug(
           { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
-          "Round 2 withheld — author has not requested re-review",
+          "Round 2 withheld — author has not re-requested review",
         );
         continue;
       }
+      // Consume the mention-driven flag once we've acted on it; the GitHub
+      // re-request is self-clearing (the round's dismiss removes the reviewer
+      // again, and the next round requires another explicit re-request).
+      // The state write below persists reReviewRequested=false.
     }
 
     // ── Commit dedup gate (round 1 only) ───────────────────────────────────
@@ -372,10 +398,12 @@ async function pollReviewRequests(opts: {
             logger.warn({ err }, "Failed to record reviewed commits"),
           );
 
-        // After round 1, the review itself (COMMENT event) fulfills the
-        // review request on GitHub — Zanuda naturally disappears from the
-        // sidebar with no timeline event. Round 2 only happens when the
-        // author explicitly re-requests or uses an @mention.
+        // After a round completes, submitting the COMMENT review event on
+        // GitHub naturally clears `requested_reviewers` — Zanuda disappears
+        // from the sidebar with no timeline event. Round 2 only happens when
+        // the author explicitly re-requests (verified via
+        // isReviewRequested, NOT the lagging search index) or uses an
+        // @mention (reReviewRequested in the state store).
         logger.info(
           {
             repo: `${item.ref.owner}/${item.ref.repo}`,
