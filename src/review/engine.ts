@@ -20,7 +20,7 @@ import {
   saveReviewHistory,
   type ReviewHistory,
 } from "../context/reviewHistory.js";
-import { buildReviewCommentBody, formatDiscussion } from "./format.js";
+import { formatDiscussion } from "./format.js";
 import { ProgressComment } from "./progress.js";
 import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
@@ -483,21 +483,17 @@ export async function reviewPullRequest(
     }
 
     if (!opts.dryRun) {
-      // Finalize the review by EDITING the placeholder into the full review
-      // (summary + changed-file table) — same flow as the batch path. postReview
-      // also carries the summary in the review-event body; the duplication is
-      // intentional (see postReview) so a `createReview` event is always
-      // submitted, clearing `requested_reviewers` on GitHub.
-      await progress.resolve(
-        buildReviewCommentBody(result, pr.changedFiles.length, {
-          diffTruncated: promptDiff.truncated,
-          reviewedFiles: promptDiff.includedFiles.length,
-          round,
-        }),
-      );
+      // Post the review event FIRST (summary + inline comments), then delete
+      // the transient placeholder. Ordering matters: if postReview fails, the
+      // placeholder still exists so the failSafe can edit it into an error.
+      // On success the review event is the single canonical home of the
+      // summary — the placeholder was only a "working on it" indicator, so we
+      // remove it instead of editing it into a duplicate summary (which is
+      // what caused the double-summary on tg-bot#23).
       await connector.postReview(pr, result, config, {
         visibleFilePaths: includedPaths(promptDiff),
       });
+      await progress.delete();
       log.info(
         {
           comments: result.comments.length,

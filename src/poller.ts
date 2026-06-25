@@ -8,6 +8,7 @@ import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
 import { PRStateStore } from "./state/store.js";
+import { applyEvent, freshState } from "./state/transitions.js";
 import { CommitLog } from "./state/commitLog.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
@@ -198,21 +199,11 @@ async function pollReviewRequests(opts: {
           .catch((err: unknown) =>
             logger.warn({ err }, "Failed to post max-rounds notification"),
           );
-        // state is guaranteed non-null here (guarded above);
-        // spread then override only the changed fields.
-        store.set(item.platformId, {
-          ref: state.ref,
-          number: state.number,
-          rounds: state.rounds,
-          mentionReplies: state.mentionReplies,
-          repliedCommentIds: state.repliedCommentIds,
-          progressCommentId: state.progressCommentId,
-          consecutiveFailures: state.consecutiveFailures,
-          maxRoundsNotified: true,
-          lastReviewedHeadSha: state.lastReviewedHeadSha,
-          failedAwaitingRetry: false,
-          reReviewRequested: false,
-        });
+        // state is guaranteed non-null here (guarded above).
+        store.set(
+          item.platformId,
+          applyEvent(state, { type: "MAX_ROUNDS_REACHED" }),
+        );
       }
       continue;
     }
@@ -337,27 +328,18 @@ async function pollReviewRequests(opts: {
         if (result.stale) {
           // New commits arrived during the LLM call. The round was discarded —
           // do not increment rounds so the next poll starts a fresh review on
-          // the updated HEAD. Only update the progressCommentId if we have one.
+          // the updated HEAD. Only persist if the engine created/edited a
+          // placeholder mid-flight (otherwise there's nothing state-worthy to
+          // write — a stale discard with no placeholder change is a no-op).
           if (result.progressCommentId !== null) {
-            store.set(item.platformId, {
-              ...(state ?? {
-                ref: item.ref,
-                number: item.number,
-                rounds: 0,
-                mentionReplies: 0,
-                repliedCommentIds: new Set(),
-                maxRoundsNotified: false,
-                consecutiveFailures: 0,
-                lastReviewedHeadSha: null,
-                failedAwaitingRetry: false,
-                reReviewRequested: false,
+            store.set(
+              item.platformId,
+              applyEvent(state ?? freshState(item.ref, item.number), {
+                type: "ROUND_STALE",
+                progressCommentId: result.progressCommentId,
+                headSha: result.headSha || state?.lastReviewedHeadSha || null,
               }),
-              progressCommentId: result.progressCommentId,
-              consecutiveFailures: 0,
-              lastReviewedHeadSha:
-                result.headSha || state?.lastReviewedHeadSha || null,
-              failedAwaitingRetry: false,
-            });
+            );
           }
           logger.info(
             { repo: `${item.ref.owner}/${item.ref.repo}`, pr: item.number },
@@ -371,19 +353,14 @@ async function pollReviewRequests(opts: {
         // A concurrent poll tick arriving between delete() and set() would
         // see rounds=0 and start a duplicate review. Writing first means any
         // concurrent poll sees the updated round count and skips the PR.
-        store.set(item.platformId, {
-          ref: item.ref,
-          number: item.number,
-          rounds: nextRound,
-          mentionReplies: state?.mentionReplies ?? 0,
-          repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-          maxRoundsNotified: nextRound >= MAX_REVIEW_ROUNDS,
-          progressCommentId: null,
-          consecutiveFailures: 0,
-          lastReviewedHeadSha: result.headSha,
-          failedAwaitingRetry: false,
-          reReviewRequested: false,
-        });
+        store.set(
+          item.platformId,
+          applyEvent(state ?? freshState(item.ref, item.number), {
+            type: "ROUND_COMPLETED",
+            round: nextRound,
+            headSha: result.headSha,
+          }),
+        );
 
         // Record reviewed commits so future merge/sync PRs with the same
         // commits are skipped. Fire-and-forget — a failure here is non-fatal.
@@ -415,33 +392,24 @@ async function pollReviewRequests(opts: {
         inProgress.delete(item.platformId);
       })
       .catch(async (err) => {
-        const failures = (state?.consecutiveFailures ?? 0) + 1;
         logger.error(
           {
             err,
             repo: `${item.ref.owner}/${item.ref.repo}`,
             pr: item.number,
             round: nextRound,
-            consecutiveFailures: failures,
           },
           "Review failed — waiting for @mention retry command",
         );
         try {
           // The engine's failSafe already updated the progress comment with
-          // the error and the retry hint. Just record the failure in state.
-          store.set(item.platformId, {
-            ref: item.ref,
-            number: item.number,
-            rounds: state?.rounds ?? 0,
-            mentionReplies: state?.mentionReplies ?? 0,
-            repliedCommentIds: state?.repliedCommentIds ?? new Set(),
-            maxRoundsNotified: state?.maxRoundsNotified ?? false,
-            progressCommentId: null,
-            consecutiveFailures: failures,
-            failedAwaitingRetry: true,
-            lastReviewedHeadSha: state?.lastReviewedHeadSha ?? null,
-            reReviewRequested: state?.reReviewRequested ?? false,
-          });
+          // the error and the retry hint. Record the failure in state.
+          store.set(
+            item.platformId,
+            applyEvent(state ?? freshState(item.ref, item.number), {
+              type: "ROUND_FAILED",
+            }),
+          );
         } finally {
           inProgress.delete(item.platformId);
         }
@@ -545,15 +513,13 @@ async function pollMentions(opts: {
         } catch (err) {
           logger.warn({ err }, "Failed to post retry acknowledgement");
         }
-        store.set(id, {
-          ...current,
-          failedAwaitingRetry: false,
-          consecutiveFailures: 0,
-          repliedCommentIds: new Set([
-            ...current.repliedCommentIds,
-            mention.id,
-          ]),
-        });
+        store.set(
+          id,
+          applyEvent(current, {
+            type: "RETRY_REQUESTED",
+            repliedCommentId: mention.id,
+          }),
+        );
         continue;
       }
 
@@ -586,14 +552,13 @@ async function pollMentions(opts: {
         } catch (err) {
           logger.warn({ err }, "Failed to post re-review acknowledgement");
         }
-        store.set(id, {
-          ...current,
-          reReviewRequested: true,
-          repliedCommentIds: new Set([
-            ...current.repliedCommentIds,
-            mention.id,
-          ]),
-        });
+        store.set(
+          id,
+          applyEvent(current, {
+            type: "RE_REVIEW_REQUESTED",
+            repliedCommentId: mention.id,
+          }),
+        );
         continue;
       }
 
@@ -615,14 +580,13 @@ async function pollMentions(opts: {
           prTitle,
           discussion,
         );
-        store.set(id, {
-          ...current,
-          repliedCommentIds: new Set([
-            ...current.repliedCommentIds,
-            mention.id,
-          ]),
-          mentionReplies: current.mentionReplies + 1,
-        });
+        store.set(
+          id,
+          applyEvent(current, {
+            type: "MENTION_REPLIED",
+            repliedCommentId: mention.id,
+          }),
+        );
       } catch (err) {
         logger.error(
           { err, commentId: mention.id },

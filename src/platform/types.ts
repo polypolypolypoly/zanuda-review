@@ -191,10 +191,19 @@ export interface SCMConnector {
 
   /**
    * Edit an existing comment by ID.
-   * Used to update the "Starting review\u2026" placeholder with the final summary
-   * once the review is complete.
+   * Used to update the "Starting review\u2026" placeholder with an error / stale
+   * status when a round fails or is discarded.
    */
   editComment(ref: RepoRef, commentId: number, body: string): Promise<void>;
+
+  /**
+   * Delete a comment by ID.
+   * Used to delete the transient "Starting review\u2026" placeholder once the
+   * review has been posted as a review event (the canonical home of the
+   * summary). The placeholder is a pure progress indicator; on success it is
+   * removed so the summary is not duplicated in the timeline.
+   */
+  deleteComment(ref: RepoRef, commentId: number): Promise<void>;
 
   /**
    * Reply to a specific comment.

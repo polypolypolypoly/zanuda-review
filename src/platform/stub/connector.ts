@@ -179,6 +179,10 @@ export class StubConnector implements SCMConnector {
     throw new Error("StubConnector.editComment: not implemented");
   }
 
+  async deleteComment(_ref: RepoRef, _commentId: number): Promise<void> {
+    throw new Error("StubConnector.deleteComment: not implemented");
+  }
+
   /**
    * Reply to a specific comment.
    * - Inline comments: reply should appear in the same diff thread.
