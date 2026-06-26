@@ -32,14 +32,6 @@ export interface PRState {
    */
   consecutiveFailures: number;
   /**
-   * Head SHA of the PR as it was when the last review round completed.
-   * Diagnostic only — recorded for inspection and future heuristics. The
-   * round-2 gate is driven by explicit re-request signals
-   * (`reReviewRequested` / `isReviewRequested`), NOT by a SHA-change check,
-   * because a legitimate re-request can happen on an unchanged head.
-   */
-  lastReviewedHeadSha: string | null;
-  /**
    * Set to true after a review attempt fails. Poller will not retry
    * automatically; it waits for an @reviewer retry comment to clear this flag
    * and let the next poll tick pick the PR up again.
@@ -186,14 +178,21 @@ export class PRStateStore {
         continue;
       }
       map.set(Number(key), {
-        ...s,
+        ref: s.ref,
+        number: s.number,
+        rounds: s.rounds,
+        mentionReplies: s.mentionReplies,
         repliedCommentIds: new Set(s.repliedCommentIds),
+        maxRoundsNotified: s.maxRoundsNotified,
         // Defaults for fields added after initial release.
         progressCommentId: s.progressCommentId ?? null,
         consecutiveFailures: s.consecutiveFailures ?? 0,
-        lastReviewedHeadSha: s.lastReviewedHeadSha ?? null,
         failedAwaitingRetry: s.failedAwaitingRetry ?? false,
         reReviewRequested: s.reReviewRequested ?? false,
+        lastUpdatedAt: s.lastUpdatedAt,
+        // Note: explicitly enumerate fields rather than `...s` so dropped
+        // fields (e.g. lastReviewedHeadSha) don't get re-persisted forever
+        // from old state files.
       });
     }
 

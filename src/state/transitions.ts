@@ -33,14 +33,11 @@ export type PRStateEvent =
   | {
       type: "ROUND_COMPLETED";
       round: number;
-      headSha: string;
     }
   | {
       type: "ROUND_STALE";
       /** Progress comment created/edited during the discarded round, if any. */
       progressCommentId: number | null;
-      /** Head SHA observed when staleness was detected (the old, reviewed HEAD). */
-      headSha: string | null;
     }
   | {
       type: "ROUND_FAILED";
@@ -80,7 +77,6 @@ export function freshState(
     maxRoundsNotified: false,
     progressCommentId: null,
     consecutiveFailures: 0,
-    lastReviewedHeadSha: null,
     failedAwaitingRetry: false,
     reReviewRequested: false,
     // lastUpdatedAt is set by the store on write; give it a sentinel here so
@@ -113,7 +109,6 @@ export function applyEvent(prev: PRState, event: PRStateEvent): PRState {
         consecutiveFailures: 0,
         failedAwaitingRetry: false,
         reReviewRequested: false,
-        lastReviewedHeadSha: event.headSha,
         maxRoundsNotified:
           prev.maxRoundsNotified || event.round >= MAX_REVIEW_ROUNDS,
       };
@@ -128,7 +123,6 @@ export function applyEvent(prev: PRState, event: PRStateEvent): PRState {
         progressCommentId: event.progressCommentId,
         consecutiveFailures: 0,
         failedAwaitingRetry: false,
-        lastReviewedHeadSha: event.headSha ?? prev.lastReviewedHeadSha,
       };
     }
 

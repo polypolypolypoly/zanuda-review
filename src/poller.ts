@@ -338,7 +338,6 @@ async function pollReviewRequests(opts: {
               applyEvent(state ?? freshState(item.ref, item.number), {
                 type: "ROUND_STALE",
                 progressCommentId: result.progressCommentId,
-                headSha: result.headSha || state?.lastReviewedHeadSha || null,
               }),
             );
           }
@@ -359,7 +358,6 @@ async function pollReviewRequests(opts: {
           applyEvent(state ?? freshState(item.ref, item.number), {
             type: "ROUND_COMPLETED",
             round: nextRound,
-            headSha: result.headSha,
           }),
         );
 

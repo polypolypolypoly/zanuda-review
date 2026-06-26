@@ -23,7 +23,6 @@ function makeState(
     maxRoundsNotified: false,
     progressCommentId: null,
     consecutiveFailures: 0,
-    lastReviewedHeadSha: null,
     failedAwaitingRetry: false,
     ...overrides,
   };
@@ -175,7 +174,7 @@ describe("PRStateStore: corrupt/unknown file handling", () => {
   });
 });
 
-// ── new PRState fields: lastReviewedHeadSha + failedAwaitingRetry ─────────────
+// ── new PRState fields: failedAwaitingRetry ──────────────────────────────────
 
 describe("PRStateStore: new PRState fields", () => {
   let dir: string;
@@ -184,15 +183,15 @@ describe("PRStateStore: new PRState fields", () => {
   });
   after(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("persists and reloads lastReviewedHeadSha", () => {
+  it("persists and reloads failedAwaitingRetry", () => {
     const filePath = join(dir, "sha.json");
     const store1 = new PRStateStore(filePath);
-    store1.set(1, makeState({ lastReviewedHeadSha: "abc123" }));
+    store1.set(1, makeState({ failedAwaitingRetry: true }));
     const store2 = new PRStateStore(filePath);
-    assert.equal(store2.get(1)?.lastReviewedHeadSha, "abc123");
+    assert.equal(store2.get(1)?.failedAwaitingRetry, true);
   });
 
-  it("defaults missing lastReviewedHeadSha to null for old state files", () => {
+  it("defaults missing failedAwaitingRetry to false for old state files", () => {
     const filePath = join(dir, "old-sha.json");
     writeFileSync(
       filePath,
@@ -209,13 +208,13 @@ describe("PRStateStore: new PRState fields", () => {
             progressCommentId: null,
             consecutiveFailures: 0,
             lastUpdatedAt: new Date().toISOString(),
-            // lastReviewedHeadSha intentionally absent
+            // failedAwaitingRetry intentionally absent
           },
         },
       }),
     );
     const store = new PRStateStore(filePath);
-    assert.equal(store.get(5)?.lastReviewedHeadSha, null);
+    assert.equal(store.get(5)?.failedAwaitingRetry, false);
   });
 
   it("defaults failedAwaitingRetry to false on fresh state", () => {
