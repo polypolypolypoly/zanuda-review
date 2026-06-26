@@ -19,14 +19,12 @@ function state(overrides: Partial<PRState> = {}): PRState {
 // ── ROUND_COMPLETED ──────────────────────────────────────────────────────────
 
 describe("applyEvent: ROUND_COMPLETED", () => {
-  it("advances rounds and stamps the reviewed head SHA", () => {
+  it("advances rounds", () => {
     const s = applyEvent(state({ rounds: 0 }), {
       type: "ROUND_COMPLETED",
       round: 1,
-      headSha: "aaa",
     });
     assert.equal(s.rounds, 1);
-    assert.equal(s.lastReviewedHeadSha, "aaa");
   });
 
   it("clears failedAwaitingRetry and consumes reReviewRequested", () => {
@@ -41,7 +39,7 @@ describe("applyEvent: ROUND_COMPLETED", () => {
         consecutiveFailures: 3,
         progressCommentId: 99,
       }),
-      { type: "ROUND_COMPLETED", round: 2, headSha: "bbb" },
+      { type: "ROUND_COMPLETED", round: 2 },
     );
     assert.equal(s.failedAwaitingRetry, false);
     assert.equal(s.reReviewRequested, false);
@@ -54,7 +52,6 @@ describe("applyEvent: ROUND_COMPLETED", () => {
     const s = applyEvent(state({ rounds: 1, maxRoundsNotified: false }), {
       type: "ROUND_COMPLETED",
       round: 2,
-      headSha: "bbb",
     });
     assert.equal(s.maxRoundsNotified, true);
   });
@@ -63,7 +60,6 @@ describe("applyEvent: ROUND_COMPLETED", () => {
     const s = applyEvent(state({ rounds: 0, maxRoundsNotified: false }), {
       type: "ROUND_COMPLETED",
       round: 1,
-      headSha: "aaa",
     });
     assert.equal(s.maxRoundsNotified, false);
   });
@@ -76,7 +72,7 @@ describe("applyEvent: ROUND_COMPLETED", () => {
       { type: "RE_REVIEW_REQUESTED", repliedCommentId: 2 },
       { type: "MENTION_REPLIED", repliedCommentId: 3 },
       { type: "MAX_ROUNDS_REACHED" },
-      { type: "ROUND_STALE", progressCommentId: null, headSha: "aaa" },
+      { type: "ROUND_STALE", progressCommentId: null },
     ];
     for (const e of nonAdvancing) {
       assert.equal(
@@ -95,7 +91,6 @@ describe("applyEvent: ROUND_STALE", () => {
     const s = applyEvent(state({ rounds: 1 }), {
       type: "ROUND_STALE",
       progressCommentId: null,
-      headSha: "old",
     });
     assert.equal(s.rounds, 1);
   });
@@ -104,7 +99,6 @@ describe("applyEvent: ROUND_STALE", () => {
     const s = applyEvent(state({ rounds: 1, progressCommentId: null }), {
       type: "ROUND_STALE",
       progressCommentId: 77,
-      headSha: null,
     });
     assert.equal(s.progressCommentId, 77);
   });
@@ -113,7 +107,6 @@ describe("applyEvent: ROUND_STALE", () => {
     const s = applyEvent(state({ failedAwaitingRetry: true }), {
       type: "ROUND_STALE",
       progressCommentId: null,
-      headSha: null,
     });
     assert.equal(s.failedAwaitingRetry, false);
   });
@@ -124,7 +117,6 @@ describe("applyEvent: ROUND_STALE", () => {
     const s = applyEvent(state({ rounds: 1, reReviewRequested: true }), {
       type: "ROUND_STALE",
       progressCommentId: null,
-      headSha: null,
     });
     assert.equal(s.reReviewRequested, true);
     assert.equal(s.rounds, 1);
@@ -248,7 +240,6 @@ describe("freshState", () => {
     assert.equal(s.reReviewRequested, false);
     assert.equal(s.maxRoundsNotified, false);
     assert.equal(s.progressCommentId, null);
-    assert.equal(s.lastReviewedHeadSha, null);
     assert.equal(s.mentionReplies, 0);
     assert.equal(s.consecutiveFailures, 0);
     assert.equal(s.repliedCommentIds.size, 0);
