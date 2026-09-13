@@ -139,6 +139,7 @@ review/
 state/
   store.ts            atomic persistent PR state (rounds, mention caps, re-review)
   commitLog.ts        per-repo reviewed commit SHA log (dedup gate)
+  dailyBudget.ts      global per-day review-round counter (spend backstop)
 ```
 
 ## Key files outside `src/`
@@ -270,6 +271,12 @@ limits:
   maxNewPrsPerCycle: 5      # max new PRs started per poll tick
 ```
 
+Global spend backstops:
+- `limits.tokenBudgetPerPR` (400 000) — enforced between batches of a large-PR review
+- `limits.maxReviewRoundsPerDay` (50) — review rounds started per UTC day across
+  every repo, persisted in `daily-budget.json` so a restart cannot reset it.
+  Deferred PRs keep their open review request and run the next day.
+
 Per-PR caps (hardcoded in `poller.ts`):
 - `MAX_REVIEW_ROUNDS = 2` — Zanuda does at most 2 full review rounds per PR
 - `MAX_MENTION_REPLIES = 5` — at most 5 @mention replies per PR
@@ -290,11 +297,20 @@ All caps survive process restarts (persisted in `state.json`).
   never overlap — a tick outlives the interval whenever an @mention reply is
   generated inline.
 
+### Quota and growth
+
+- `fetchPRDiscussion` sends `If-None-Match`; GitHub answers 304 for an unchanged
+  discussion and does not charge it against the core quota. The ETag cache is
+  in-memory and per PR; multi-page discussions fall back to full pagination.
+- The poll loop prunes stale PR state once an hour (`store.prune()`) — pruning
+  on load alone never fires in a process that stays up for months.
+- The commit log caps each repo at 5 000 SHAs, oldest dropped first. Its 60-day
+  prune keys off repo inactivity, which never triggers for an active repo.
+
 ## Roadmap / not yet built
 
 - Context caching between reviews (currently re-fetches on every review)
 - Tool-use / function-calling output parsing instead of JSON-in-text
-- Per-repo daily LLM call budget cap
 
 ## Defensive coding — check before shipping
 

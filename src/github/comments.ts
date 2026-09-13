@@ -1,5 +1,6 @@
 import type { Octokit } from "@octokit/rest";
 import type { RepoRef, SCMComment } from "../platform/types.js";
+import { logger } from "../logger.js";
 
 // PRComment is an alias kept for internal use within the github/ layer.
 export type PRComment = SCMComment;
@@ -7,6 +8,77 @@ export type PRComment = SCMComment;
 // formatDiscussion lives in review/format.ts (platform-agnostic); re-exported
 // here so existing imports inside github/ continue to resolve without changes.
 export { formatDiscussion } from "../review/format.js";
+
+// ── Conditional-request cache ─────────────────────────────────────────────────
+//
+// The mention scan re-fetches every tracked PR's discussion every tick: two
+// requests per PR per minute, almost always returning bytes we already have.
+// A conditional request answers 304 when nothing changed, and GitHub does not
+// charge 304s against the core quota.
+//
+// In-memory only: a restart just pays one full fetch per PR.
+
+interface CachedList {
+  etag: string;
+  items: unknown[];
+}
+
+/** Bounds memory when many PRs are tracked; eviction costs one full fetch. */
+const MAX_CACHE_ENTRIES = 200;
+
+const listCache = new Map<string, CachedList>();
+
+/** Exported for tests — a fresh process starts with an empty cache. */
+export function clearDiscussionCache(): void {
+  listCache.clear();
+}
+
+/**
+ * Fetch a comment list, using the stored ETag when we have one.
+ *
+ * Only single-page results are cached: an ETag covers one page, so once a PR
+ * exceeds 100 comments of a kind we fall back to full pagination. That is the
+ * rare case; the common one is a handful of comments that never change.
+ */
+async function listWithEtag<T>(
+  key: string,
+  fetchFirstPage: (headers: Record<string, string>) => Promise<{
+    headers: { etag?: string; link?: string };
+    data: T[];
+  }>,
+  fetchAllPages: () => Promise<T[]>,
+): Promise<T[]> {
+  const cached = listCache.get(key);
+  try {
+    const res = await fetchFirstPage(
+      cached ? { "if-none-match": cached.etag } : {},
+    );
+    const hasMorePages = (res.headers.link ?? "").includes('rel="next"');
+    if (hasMorePages) {
+      listCache.delete(key);
+      return fetchAllPages();
+    }
+    if (res.headers.etag) {
+      if (listCache.size >= MAX_CACHE_ENTRIES && !listCache.has(key)) {
+        // Evict the oldest-inserted key. Plain FIFO, not LRU: re-setting an
+        // existing key on a refresh does not move it to the back, so a hot PR
+        // inserted early can be evicted before a cold one inserted later.
+        // Fine for a hint cache — eviction just costs one full fetch.
+        const oldest = listCache.keys().next().value;
+        if (oldest !== undefined) listCache.delete(oldest);
+      }
+      listCache.set(key, { etag: res.headers.etag, items: res.data });
+    }
+    return res.data;
+  } catch (err) {
+    if ((err as { status?: number }).status === 304 && cached) {
+      // Safe: `items` was stored verbatim from this same endpoint's `res.data`
+      // (typed T[]) on the last 200, so the cached array is exactly a T[].
+      return cached.items as T[];
+    }
+    throw err;
+  }
+}
 
 /**
  * Fetch all comments on a PR: inline review comments + general discussion,
@@ -17,20 +89,49 @@ export async function fetchPRDiscussion(
   ref: RepoRef,
   prNumber: number,
 ): Promise<SCMComment[]> {
+  const prKey = `${ref.owner}/${ref.repo}#${prNumber}`;
+
   // Two concurrent fetches is fine; this is not the N-file fan-out that hits
   // secondary rate limits.
   const [reviewComments, issueComments] = await Promise.all([
-    octokit.paginate(octokit.pulls.listReviewComments, {
-      ...ref,
-      pull_number: prNumber,
-      per_page: 100,
-    }),
-    octokit.paginate(octokit.issues.listComments, {
-      ...ref,
-      issue_number: prNumber,
-      per_page: 100,
-    }),
+    listWithEtag(
+      `${prKey}/review`,
+      (headers) =>
+        octokit.pulls.listReviewComments({
+          ...ref,
+          pull_number: prNumber,
+          per_page: 100,
+          headers,
+        }),
+      () =>
+        octokit.paginate(octokit.pulls.listReviewComments, {
+          ...ref,
+          pull_number: prNumber,
+          per_page: 100,
+        }),
+    ),
+    listWithEtag(
+      `${prKey}/issue`,
+      (headers) =>
+        octokit.issues.listComments({
+          ...ref,
+          issue_number: prNumber,
+          per_page: 100,
+          headers,
+        }),
+      () =>
+        octokit.paginate(octokit.issues.listComments, {
+          ...ref,
+          issue_number: prNumber,
+          per_page: 100,
+        }),
+    ),
   ]);
+
+  logger.debug(
+    { pr: prKey, review: reviewComments.length, issue: issueComments.length },
+    "Fetched PR discussion",
+  );
 
   const comments: SCMComment[] = [
     ...reviewComments.map((c) => ({

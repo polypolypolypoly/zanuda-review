@@ -15,11 +15,15 @@ import {
   MAX_REVIEW_ROUNDS,
 } from "./state/transitions.js";
 import { CommitLog } from "./state/commitLog.js";
+import { DailyBudget } from "./state/dailyBudget.js";
 
 const DEFAULT_INTERVAL_MS = 60_000;
 
 /** Maximum number of @mention replies per PR before going silent. */
 const MAX_MENTION_REPLIES = 5;
+
+/** How often the poll loop prunes stale PR state entries. */
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 /** Author-only commands recognised in an @mention. */
 const RETRY_PATTERN = /\bretry\b/i;
@@ -53,6 +57,9 @@ export async function startPoller(opts: {
     config.persistence.commitLogFile || undefined,
   );
 
+  /** Global daily cap on review rounds — the outermost spend backstop. */
+  const budget = new DailyBudget(config.persistence.budgetFile || undefined);
+
   /**
    * Single provider instance shared across both review rounds and mention
    * replies. Creating it once avoids allocating a new HTTP client on every
@@ -65,6 +72,9 @@ export async function startPoller(opts: {
     "Poller started — watching for review requests and mentions",
   );
 
+  /** State is pruned on load; a long-lived process needs it periodically too. */
+  let lastPrunedAt = Date.now();
+
   const tick = async () => {
     await pollReviewRequests({
       config,
@@ -73,8 +83,14 @@ export async function startPoller(opts: {
       inProgress,
       store,
       commitLog,
+      budget,
     });
     await pollMentions({ config, reviewerLogin, connector, store, provider });
+
+    if (Date.now() - lastPrunedAt >= PRUNE_INTERVAL_MS) {
+      lastPrunedAt = Date.now();
+      store.prune();
+    }
   };
 
   runPollLoop(tick, intervalMs);
@@ -117,16 +133,25 @@ export function runPollLoop(
 
 // ── Review-request polling ────────────────────────────────────────────────────
 
-async function pollReviewRequests(opts: {
+/** Exported for tests — the poller's only entry point is startPoller. */
+export async function pollReviewRequests(opts: {
   config: Config;
   reviewerLogin: string;
   connector: SCMConnector;
   inProgress: Set<number>;
   store: PRStateStore;
   commitLog: CommitLog;
+  budget: DailyBudget;
 }): Promise<void> {
-  const { config, reviewerLogin, connector, inProgress, store, commitLog } =
-    opts;
+  const {
+    config,
+    reviewerLogin,
+    connector,
+    inProgress,
+    store,
+    commitLog,
+    budget,
+  } = opts;
 
   logger.debug("Polling for review requests…");
 
@@ -336,6 +361,23 @@ async function pollReviewRequests(opts: {
           "Commit dedup check failed — proceeding with review anyway",
         );
       }
+    }
+
+    // ── Daily spend cap ───────────────────────────────────────────────────
+    // The last gate before an LLM call: every cheaper check has passed, so a
+    // slot consumed here is a round that would really have run. The PR keeps
+    // its open review request and is picked up when the counter rolls over.
+    if (!budget.tryConsume(config.limits.maxReviewRoundsPerDay)) {
+      logger.warn(
+        {
+          repo: `${item.ref.owner}/${item.ref.repo}`,
+          pr: item.number,
+          used: budget.used,
+          cap: config.limits.maxReviewRoundsPerDay,
+        },
+        "Daily review budget exhausted — deferring until tomorrow",
+      );
+      break;
     }
 
     logger.info(

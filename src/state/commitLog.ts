@@ -23,6 +23,14 @@ import { logger } from "../logger.js";
 
 const PRUNE_AFTER_DAYS = 60;
 
+/**
+ * Cap on remembered SHAs per repo. The 60-day prune keys off repo inactivity,
+ * and every write refreshes that stamp — so an ACTIVE repo was never pruned and
+ * its set grew forever, rewritten in full on every review. Sets iterate in
+ * insertion order, so the oldest SHAs are the ones dropped.
+ */
+const MAX_SHAS_PER_REPO = 5_000;
+
 // ── On-disk schema ────────────────────────────────────────────────────────────
 
 const CommitLogEntrySchema = z.object({
@@ -77,7 +85,7 @@ export class CommitLog {
     const key = `${owner}/${repo}`;
     const seen = this.data.get(key) ?? new Set<string>();
     for (const sha of shas) seen.add(sha);
-    this.data.set(key, seen);
+    this.data.set(key, capOldest(seen, MAX_SHAS_PER_REPO));
     this.updatedAt.set(key, new Date().toISOString());
     this.save();
   }
@@ -129,7 +137,7 @@ export class CommitLog {
         pruned++;
         continue;
       }
-      map.set(key, new Set(e.shas));
+      map.set(key, capOldest(new Set(e.shas), MAX_SHAS_PER_REPO));
       this.updatedAt.set(key, e.updatedAt);
     }
 
@@ -164,4 +172,12 @@ export class CommitLog {
       logger.error({ err, path: this.path }, "Failed to persist commit log");
     }
   }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/** Keep the newest `max` entries of an insertion-ordered Set. */
+function capOldest(shas: Set<string>, max: number): Set<string> {
+  if (shas.size <= max) return shas;
+  return new Set([...shas].slice(shas.size - max));
 }

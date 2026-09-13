@@ -63,6 +63,12 @@ access:
 
 persistence:
   stateFile: "/var/lib/zanuda/state.json"
+  commitLogFile: "/var/lib/zanuda/commit-log.json"
+  budgetFile: "/var/lib/zanuda/daily-budget.json"
+
+limits:
+  # Review rounds per UTC day across every repo. 0 = no limit.
+  maxReviewRoundsPerDay: 50
 
 memory:
   dir: "/var/lib/zanuda/memory"

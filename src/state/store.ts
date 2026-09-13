@@ -105,6 +105,33 @@ export class PRStateStore {
     return this.data.entries();
   }
 
+  // ── Maintenance ────────────────────────────────────────────────────────────
+
+  /**
+   * Drop entries older than PRUNE_AFTER_DAYS. Returns how many were removed.
+   *
+   * Also runs on load, but a long-lived process never reloads: the poller calls
+   * this periodically so a service that stays up for months does not keep every
+   * PR it has ever seen in memory and rewrite them all on every state write.
+   */
+  prune(): number {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - PRUNE_AFTER_DAYS);
+
+    let pruned = 0;
+    for (const [id, state] of this.data) {
+      if (new Date(state.lastUpdatedAt) < cutoff) {
+        this.data.delete(id);
+        pruned++;
+      }
+    }
+    if (pruned > 0) {
+      logger.info({ path: this.path, pruned }, "Pruned stale PR state entries");
+      this.saveToDisk();
+    }
+    return pruned;
+  }
+
   // ── Write API ──────────────────────────────────────────────────────────────
 
   /**
