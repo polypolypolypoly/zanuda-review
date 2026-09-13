@@ -8,11 +8,38 @@
 import type { SCMComment } from "../platform/types.js";
 import type { ReviewResult } from "./types.js";
 
+// ── Fenced code blocks ────────────────────────────────────────────────────────
+
+/**
+ * Wrap `content` in a fenced code block that no line inside it can close.
+ * GFM closes a fence with a line of at least as many backticks as the opener,
+ * indented up to three spaces — so the fence is one backtick longer than the
+ * longest backtick run that starts a line. Content is never modified: a
+ * suggestion must apply byte-for-byte.
+ */
+export function fencedBlock(content: string, info = ""): string {
+  const runs = content.match(/^ {0,3}`+/gm) ?? [];
+  const longest = runs.reduce(
+    (max, run) => Math.max(max, run.trim().length),
+    0,
+  );
+  const fence = "`".repeat(Math.max(3, longest + 1));
+  return `${fence}${info}\n${content}\n${fence}`;
+}
+
 // ── Discussion formatter ──────────────────────────────────────────────────────
 
 /**
+ * Per-comment character cap. The count cap alone is not a size bound: a single
+ * GitHub comment holds up to 65 536 chars, so 20 of them can carry ~1 MB of
+ * attacker-controlled text into the prompt.
+ */
+const MAX_COMMENT_CHARS = 2000;
+
+/**
  * Format comments as a readable block for the model.
- * Takes the most recent `maxComments` entries so we stay within token budget.
+ * Takes the most recent `maxComments` entries so we stay within token budget,
+ * and truncates each one to MAX_COMMENT_CHARS.
  */
 export function formatDiscussion(
   comments: SCMComment[],
@@ -32,7 +59,12 @@ export function formatDiscussion(
     const location = c.path
       ? ` [\`${c.path}${c.line !== null && c.line !== undefined ? `:${c.line}` : ""}\`]`
       : "";
-    lines.push(`**${c.author}**${location}:\n${c.body.trim()}`);
+    const body = c.body.trim();
+    const truncated =
+      body.length > MAX_COMMENT_CHARS
+        ? `${body.slice(0, MAX_COMMENT_CHARS)}\n_(comment truncated)_`
+        : body;
+    lines.push(`**${c.author}**${location}:\n${truncated}`);
   }
 
   return lines.join("\n\n---\n\n");

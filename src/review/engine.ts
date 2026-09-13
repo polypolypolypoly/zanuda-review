@@ -27,6 +27,8 @@ import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import {
   filterAnchorableComments,
+  filterFilesSummary,
+  filterResultSummaries,
   filterReviewComments,
   filterReviewVerdict,
   formatFilterSummary,
@@ -165,8 +167,11 @@ export async function reviewPullRequest(
     const retryHint = deps.reviewerLogin
       ? ` Comment \`@${deps.reviewerLogin} retry\` to try again.`
       : "";
+    // The error text stays in the operator's logs. Provider messages and model
+    // IDs are internals, and the PR comment is public.
+    log.error({ err }, "Review failed — see logs for the provider error");
     await progress.resolve(
-      `⚠️ **Review failed.**${retryHint}\n\n<sub>${String(err).slice(0, 200)}</sub>`,
+      `⚠️ **Review failed.**${retryHint}\n\n<sub>The error is in the reviewer's logs.</sub>`,
     );
     throw err;
   };
@@ -412,6 +417,20 @@ export async function reviewPullRequest(
       log.warn(formatFilterSummary(filtered));
     }
     result.comments = filtered.kept;
+
+    // ── Result-level caps (non-LLM) ─────────────────────────────────────────
+    // Same reason as maxBodyLength on comments: the schema's maxLength is
+    // advisory on the Anthropic path, so the trim happens in code.
+    const trimmed = filterResultSummaries(result);
+    if (trimmed.length > 0) log.warn(`Hard filters: ${trimmed.join("; ")}`);
+
+    const fabricatedPaths = filterFilesSummary(result, pr.changedFiles);
+    if (fabricatedPaths.length > 0) {
+      log.warn(
+        { paths: fabricatedPaths },
+        "Dropped filesSummary rows for paths not in the PR",
+      );
+    }
 
     // ── Anchor validation (non-LLM) ─────────────────────────────────────────
     // The model generates line numbers from the diff text it was shown. We have

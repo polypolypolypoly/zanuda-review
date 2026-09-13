@@ -40,6 +40,7 @@ export async function fetchPullRequest(
     number,
     title: pr.title,
     body: pr.body ?? "",
+    author: pr.user?.login ?? null,
     baseSha: pr.base.sha,
     headSha: pr.head.sha,
     diff: diffRes.data as unknown as string,

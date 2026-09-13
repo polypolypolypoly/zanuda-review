@@ -3,6 +3,7 @@ import type { SCMComment, SCMConnector, RepoRef } from "../platform/types.js";
 import type { LLMProvider } from "../llm/types.js";
 import { completeWithRetry } from "../llm/retry.js";
 import { logger } from "../logger.js";
+import { filterMentionReply } from "./filters.js";
 import { escapeXml } from "./prompt.js";
 
 export interface ReplyDeps {
@@ -36,7 +37,20 @@ export async function replyToMention(
     maxTokens: 512,
   });
 
-  const replyBody = completion.text.trim();
+  const replyBody = filterMentionReply(completion.text);
+  if (replyBody === null) {
+    logger.warn(
+      {
+        repo: `${ref.owner}/${ref.repo}`,
+        pr: prNumber,
+        commentId: comment.id,
+        text: completion.text.slice(0, 80),
+      },
+      "Mention reply dropped by hard filters — posting nothing",
+    );
+    return;
+  }
+
   await connector.replyToComment(ref, prNumber, comment, replyBody);
 
   logger.info(
@@ -75,7 +89,8 @@ export function buildReplyUserPrompt(
     : "";
 
   return [
-    `## PR: ${prTitle}`,
+    // The title is author-controlled — escaped and tagged like everywhere else.
+    `## PR: <pr_title>${escapeXml(prTitle)}</pr_title>`,
     "",
     // Wrap in XML — discussion contains user-controlled comment bodies.
     "## Recent discussion (for context)",

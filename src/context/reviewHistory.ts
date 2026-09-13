@@ -22,10 +22,10 @@ export const CommentOutcomeSchema = z.object({
   line: z.number().int().positive().optional(),
   severity: z.enum(["blocker", "warning"]),
   /** 5-10 word description of what was flagged. */
-  summary: z.string(),
+  summary: z.string().max(200),
   outcome: z.enum(["addressed", "dismissed", "ignored"]),
   /** Developer's explanation — only present for dismissed outcomes. */
-  dismissalReason: z.string().optional(),
+  dismissalReason: z.string().max(300).optional(),
 });
 
 export const ReviewHistoryEntrySchema = z.object({
@@ -236,6 +236,9 @@ const ACTION_ICON: Record<string, string> = {
   COMMENT: "💬",
 };
 
+/** PR titles are author-controlled; they go into every future review prompt. */
+const MAX_TITLE_CHARS = 120;
+
 const OUTCOME_LABEL: Record<string, string> = {
   addressed: "fixed",
   dismissed: "dismissed",
@@ -261,8 +264,12 @@ export function formatReviewHistory(
 
   for (const entry of entries) {
     const icon = ACTION_ICON[entry.finalAction] ?? "💬";
+    const title =
+      entry.prTitle.length > MAX_TITLE_CHARS
+        ? `${entry.prTitle.slice(0, MAX_TITLE_CHARS)}…`
+        : entry.prTitle;
     lines.push(
-      `**PR #${entry.prNumber}** — "${entry.prTitle}" — ${icon} ${entry.finalAction} (${entry.date})`,
+      `**PR #${entry.prNumber}** — "${title}" — ${icon} ${entry.finalAction} (${entry.date})`,
     );
 
     if (entry.outcomes.length === 0) {

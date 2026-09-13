@@ -272,6 +272,94 @@ function trimToBoundary(body: string, maxChars: number): string {
   return slice.trimEnd() + "…";
 }
 
+// ── Result-level filter: summary caps ─────────────────────────────────────────
+//
+// The JSON schema declares maxLength on summary/prSummary, but Anthropic's
+// tool_use input_schema does not enforce it — the same reason comment bodies
+// get maxBodyLength. Without a cap here, a drifting model posts up to its whole
+// output budget (~32 KB) into the PR comment. The cap is 3x the declared schema
+// limit: generous enough that a merely verbose summary survives intact.
+
+const MAX_SUMMARY_CHARS = 1200;
+const MAX_PR_SUMMARY_CHARS = 600;
+
+/** Trim overlong summary fields in place. Returns a reason per trimmed field. */
+export function filterResultSummaries(result: ReviewResult): string[] {
+  const reasons: string[] = [];
+
+  if (result.summary.length > MAX_SUMMARY_CHARS) {
+    const before = result.summary.length;
+    (result as { summary: string }).summary = trimToBoundary(
+      result.summary,
+      MAX_SUMMARY_CHARS,
+    );
+    reasons.push(
+      `summary trimmed (${before} → ${result.summary.length} chars)`,
+    );
+  }
+
+  if (result.prSummary.length > MAX_PR_SUMMARY_CHARS) {
+    const before = result.prSummary.length;
+    (result as { prSummary: string }).prSummary = trimToBoundary(
+      result.prSummary,
+      MAX_PR_SUMMARY_CHARS,
+    );
+    reasons.push(
+      `prSummary trimmed (${before} → ${result.prSummary.length} chars)`,
+    );
+  }
+
+  return reasons;
+}
+
+// ── Result-level filter: filesSummary paths ───────────────────────────────────
+//
+// filesSummary rows render straight into the markdown file table. Inline
+// comments are anchor-validated against the diff; these were not, so a model
+// that invents (or is talked into inventing) a path prints it to the PR as
+// though Zanuda had reviewed it. The platform's changed-file list is the
+// authority — anything outside it was never in this PR.
+
+/** Drop filesSummary rows whose path is not a changed file. Mutates in place. */
+export function filterFilesSummary(
+  result: ReviewResult,
+  changedFiles: Iterable<string>,
+): string[] {
+  const known = new Set(changedFiles);
+  const kept = result.filesSummary.filter((f) => known.has(f.path));
+  const droppedPaths = result.filesSummary
+    .filter((f) => !known.has(f.path))
+    .map((f) => f.path);
+  if (droppedPaths.length > 0) {
+    (result as { filesSummary: ReviewResult["filesSummary"] }).filesSummary =
+      kept;
+  }
+  return droppedPaths;
+}
+
+// ── Mention replies ───────────────────────────────────────────────────────────
+//
+// @mention replies are generated from a prompt that carries attacker-reachable
+// comment bodies and post straight to the PR. They get the same two hard gates
+// as review comments: drop the garbage, trim the rest.
+
+// Intentionally ~2.5x the "MAX 400 CHARACTERS" instruction in the reply
+// prompt: the hard cap only catches a drifting model, so it stays generous
+// enough not to truncate a legitimate reply mid-sentence.
+const MAX_REPLY_CHARS = 1000;
+
+/**
+ * Gate an @mention reply before posting. Returns the body to post, or null
+ * when the model produced nothing worth posting.
+ */
+export function filterMentionReply(text: string): string | null {
+  const body = text.trim();
+  if (stripMarkdown(body).length < MIN_BODY_CHARS) return null;
+  return body.length > MAX_REPLY_CHARS
+    ? trimToBoundary(body, MAX_REPLY_CHARS)
+    : body;
+}
+
 // ── Descriptive summary for logging ───────────────────────────────────────────
 
 export function formatFilterSummary(filtered: FilteredComments): string {

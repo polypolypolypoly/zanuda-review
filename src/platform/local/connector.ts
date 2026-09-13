@@ -13,6 +13,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
 import type { Config } from "../../config.js";
+import { fencedBlock } from "../../review/format.js";
 import type { ReviewResult } from "../../review/types.js";
 import type {
   FileChange,
@@ -62,7 +63,13 @@ export class LocalConnector implements SCMConnector {
   }
 
   async getReviewerLogin(): Promise<string> {
-    return git(this.repoPath, ["config", "user.name"]).trim() || "zanuda-local";
+    return this.gitUserName() || "zanuda-local";
+  }
+
+  /** Single source for the local git identity, used by both the reviewer
+   *  login and the PR author field so the two lookups cannot drift. */
+  private gitUserName(): string {
+    return git(this.repoPath, ["config", "user.name"]).trim();
   }
 
   // Not used — local reviews are triggered directly from the CLI, not polled.
@@ -81,6 +88,7 @@ export class LocalConnector implements SCMConnector {
       number: 0,
       title,
       body,
+      author: this.gitUserName() || "local",
       // For local reviews baseSha/headSha are git refs, not SHAs —
       // readFile() handles them accordingly.
       baseSha: this.diffRef === "staged" ? "HEAD" : this.diffRef,
@@ -370,13 +378,12 @@ function renderReview(result: ReviewResult): string {
       lines.push(`### ${emoji} \`${c.path}:${c.line}\``, "", c.body, "");
       if (c.suggestion) {
         const ext = c.path.match(/\.(\w+)$/)?.[1] ?? "";
-        // Sanitise: prepend space to lines starting with ``` to prevent
-        // fence-break in the markdown output.
-        const safe = c.suggestion
-          .split("\n")
-          .map((l) => (l.trimStart().startsWith("```") ? " " + l : l))
-          .join("\n");
-        lines.push("**Suggested fix:**", "", `\`\`\`${ext}`, safe, "```", "");
+        lines.push(
+          "**Suggested fix:**",
+          "",
+          fencedBlock(c.suggestion, ext),
+          "",
+        );
       }
     }
   }

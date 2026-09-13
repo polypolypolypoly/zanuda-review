@@ -28,6 +28,11 @@ Round 2 does NOT auto-trigger on commit push. The author must explicitly request
 - **GitHub re-request:** click "Re-request review" in the PR sidebar
 - **@mention:** post `@ZlayaZanuda re-review` (or `review again`, `round 2`, `recheck`)
 
+The `re-review` and `retry` commands are **author-only** — they each cost a
+review round, and on a public repo anyone can comment. A command from anyone
+else gets a one-line refusal (no LLM call). Plain @mentions stay open to
+everyone, capped by `MAX_MENTION_REPLIES`.
+
 After each round, the poller **always submits a `createReview` COMMENT event**
 with a non-empty body. Submitting the review is the natural GitHub mechanism that
 clears `requested_reviewers` (Zanuda disappears from the sidebar). The summary
@@ -49,6 +54,15 @@ strongly-consistent signal:
 If the `isReviewRequested` check fails (API error), round 2 is withheld until the
 next tick rather than falling back to the search-index heuristic.
 
+### Prompt trust boundaries
+
+Every section built from PR-author or commenter input is XML-tagged and
+`escapeXml`-ed before it reaches the model: `<pr_title>`, `<pr_description>`,
+`<diff>`, `<discussion>`, `<comment>`, `<repo_memory>`, `<review_history>`.
+Only `.zanuda/instructions.md` is injected raw — it comes from the base branch
+and is meant to be followed. The same rule applies to the side prompts:
+repo-memory updates, outcome classification, and @mention replies.
+
 ### Output filters
 
 Hard (non-LLM) filters run on the parsed review result before posting:
@@ -59,6 +73,9 @@ Hard (non-LLM) filters run on the parsed review result before posting:
   "practically impossible")
 - **maxBodyLength**: belt-and-suspenders truncation
 - **filterReviewVerdict**: REQUEST_CHANGES with no blocker comments → COMMENT
+- **filterResultSummaries**: trims runaway `summary` / `prSummary`
+- **filterFilesSummary**: drops file-table rows for paths not in the PR
+- **filterMentionReply**: same min/max length gates on @mention replies
 - **commit dedup**: skips PRs whose commits were all already reviewed
 
 ## Tech stack
@@ -188,12 +205,22 @@ influence Zanuda's behaviour by editing them in their branch.
 ```yaml
 prepromptAppend: |
   All repos here are TypeScript. Treat any use of `any` as a warning.
-provider: openrouter
-models:
-  openrouter: anthropic/claude-opus-4-8
 memory:
   enabled: false
+review:
+  suggestions: true
 ```
+
+**Operator-only keys** are stripped from org/repo configs at merge time
+(`stripOperatorOnly` in `src/config.ts`) and apply only in `config/default.yaml`
+or the `ZANUDA_CONFIG` overlay: `access`, `models`, `provider`, `limits`,
+`generation.maxTokens`, `persistence`, `memory.dir`. They control the operator's
+API spend and where the service account writes files — a repo config is written
+by whoever can commit to that repo's base branch. Everything else
+(`prepromptAppend`, `context`, `review`, `memory.enabled`) stays repo-overridable.
+
+The `ZANUDA_CONFIG` overlay is merged by `mergeOperatorConfig` and may set every
+key, including `access.allowlist`.
 
 ### `.zanuda/instructions.md` (org or repo)
 
