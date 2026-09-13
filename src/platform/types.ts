@@ -57,8 +57,10 @@ export interface PullRequest {
   /**
    * Login of the account that opened the PR. Used to gate commands that spend
    * money (re-review, retry) to the author — see pollMentions in poller.ts.
+   * `null` means the platform did not expose a login (e.g. a ghost account),
+   * which the poller treats as "author unknown" rather than a matchable name.
    */
-  author: string;
+  author: string | null;
   baseSha: string;
   headSha: string;
   /** Unified diff of the whole PR (raw blob from the platform). */

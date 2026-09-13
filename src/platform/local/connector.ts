@@ -63,7 +63,13 @@ export class LocalConnector implements SCMConnector {
   }
 
   async getReviewerLogin(): Promise<string> {
-    return git(this.repoPath, ["config", "user.name"]).trim() || "zanuda-local";
+    return this.gitUserName() || "zanuda-local";
+  }
+
+  /** Single source for the local git identity, used by both the reviewer
+   *  login and the PR author field so the two lookups cannot drift. */
+  private gitUserName(): string {
+    return git(this.repoPath, ["config", "user.name"]).trim();
   }
 
   // Not used — local reviews are triggered directly from the CLI, not polled.
@@ -82,7 +88,7 @@ export class LocalConnector implements SCMConnector {
       number: 0,
       title,
       body,
-      author: git(this.repoPath, ["config", "user.name"]).trim() || "local",
+      author: this.gitUserName() || "local",
       // For local reviews baseSha/headSha are git refs, not SHAs —
       // readFile() handles them accordingly.
       baseSha: this.diffRef === "staged" ? "HEAD" : this.diffRef,

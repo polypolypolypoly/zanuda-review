@@ -121,8 +121,10 @@ export type RepoConfig = z.infer<typeof RepoConfigSchema>;
  * Keys an untrusted `.zanuda/config.yml` (org or repo) may not set.
  *
  * Two reasons, both about the operator rather than the repo:
- *   - filesystem and process control — `persistence` and `memory.dir` decide
- *     where the service account creates directories and writes LLM output;
+ *   - filesystem and process control — `persistence` (the whole section:
+ *     `stateFile` and `commitLogFile` are both paths the service account
+ *     writes) and `memory.dir` decide where the service account creates
+ *     directories and writes LLM output;
  *   - operator cost — `provider` picks which API key gets burned, and
  *     `limits` / `generation.maxTokens` are the spend backstops.
  *
