@@ -226,3 +226,83 @@ describe("pollMentions: allowlist", () => {
     assert.equal(connector.replies.length, 0);
   });
 });
+
+// ─── Caps and dedup ───────────────────────────────────────────────────────────
+
+describe("pollMentions: caps and dedup", () => {
+  it("never answers the same comment twice", async () => {
+    const connector = makeConnector([mention({ id: 7, body: "@zanuda why?" })]);
+
+    await run(connector);
+    await run(connector);
+
+    assert.equal(connector.replies.length, 1, "second tick must stay silent");
+    assert.equal(store.get(PLATFORM_ID)!.mentionReplies, 1);
+  });
+
+  it("goes silent once the reply cap is reached", async () => {
+    const mentions = Array.from({ length: 8 }, (_, i) =>
+      mention({ id: 100 + i, body: `@zanuda question ${i}` }),
+    );
+    await run(makeConnector(mentions));
+
+    const state = store.get(PLATFORM_ID)!;
+    assert.equal(state.mentionReplies, 5, "MAX_MENTION_REPLIES");
+    assert.ok(!state.repliedCommentIds.has(105), "later mentions untouched");
+  });
+
+  it("ignores a PR that has never completed a round", async () => {
+    store.set(PLATFORM_ID, { ...freshState(REF, 42), rounds: 0 });
+    const connector = makeConnector([mention({ body: "@zanuda hello" })]);
+
+    await run(connector);
+
+    assert.equal(connector.replies.length, 0);
+  });
+
+  it("still scans a failed PR so its author can ask for a retry", async () => {
+    store.set(PLATFORM_ID, {
+      ...freshState(REF, 42),
+      rounds: 0,
+      failedAwaitingRetry: true,
+    });
+    const connector = makeConnector([
+      mention({ body: "@zanuda retry please" }),
+    ]);
+
+    await run(connector);
+
+    assert.equal(store.get(PLATFORM_ID)!.failedAwaitingRetry, false);
+    assert.deepEqual(
+      connector.replies.map((r) => r.body),
+      ["Starting a new review."],
+    );
+  });
+
+  it("skips a PR that has been quiet past the scan window", async () => {
+    const stale = {
+      ...freshState(REF, 42),
+      rounds: 1,
+      lastUpdatedAt: new Date(Date.now() - 8 * 24 * 3600 * 1000).toISOString(),
+    };
+    // Write through the store's internal map: set() stamps lastUpdatedAt.
+    store.set(PLATFORM_ID, stale);
+    (
+      store as unknown as { data: Map<number, { lastUpdatedAt: string }> }
+    ).data.get(PLATFORM_ID)!.lastUpdatedAt = stale.lastUpdatedAt;
+
+    const connector = makeConnector([mention({ body: "@zanuda hello" })]);
+    await run(connector);
+
+    assert.equal(connector.replies.length, 0, "no API call for a quiet PR");
+  });
+
+  it("does not re-request a re-review once the cap on rounds is reached", async () => {
+    store.set(PLATFORM_ID, { ...freshState(REF, 42), rounds: 2 });
+    const connector = makeConnector([mention()]);
+
+    await run(connector);
+
+    assert.equal(store.get(PLATFORM_ID)!.reReviewRequested, false);
+  });
+});

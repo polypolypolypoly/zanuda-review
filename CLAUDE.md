@@ -122,14 +122,18 @@ context/
   repoConfig.ts       fetch & merge per-repo .zanuda/config.yml
   builder.ts          build project context string (README, CONTRIBUTING, etc.)
   repoMemory.ts       generate, load, and update persistent per-repo memory
+  reviewHistory.ts    past PR outcomes: classify, persist, render for the prompt
 review/
   types.ts            ReviewComment, ReviewResult types
   prompt.ts           assemble final prompt
   engine.ts           orchestrate: context → prompt → LLM → parse → filters → post
   replyEngine.ts      generate and post @mention replies
   filters.ts          hard (non-LLM) output filters: minBodyLength, selfDebate,
-                      speculativeBlocker, maxBodyLength, filterReviewVerdict
-  format.ts           review comment body formatting (markdown)
+                      speculativeBlocker, maxBodyLength, filterReviewVerdict,
+                      filterResultSummaries, filterFilesSummary, filterMentionReply
+  format.ts           review comment body formatting (markdown), fencedBlock
+  progress.ts         "Starting review…" placeholder lifecycle (resolve exactly once)
+  header.ts           structural file skeletons (imports, signatures) for batches
   diff.ts             diff assembly and budget management
   chunk.ts            dependency-aware file clustering for large PRs
   batch.ts            multi-batch sequential review for large PRs
@@ -138,12 +142,17 @@ review/
   budget.ts           token budget management
 state/
   store.ts            atomic persistent PR state (rounds, mention caps, re-review)
+  transitions.ts      pure PR lifecycle reducer (applyEvent) — single source of
+                      truth for state math
   commitLog.ts        per-repo reviewed commit SHA log (dedup gate)
   dailyBudget.ts      global per-day review-round counter (spend backstop)
 ```
 
 ## Key files outside `src/`
 
+- `eval/` — offline evaluation harness (`harness.ts`, `extract-pr.ts`,
+  `scan-bugfixes.ts`): replays real PRs against the review pipeline. Run it
+  after any prompt or provider change.
 - `config/default.yaml` — global defaults (preprompt, models, limits, context file list)
 - `.env` / `.env.example` — secrets (GITHUB_TOKEN, LLM API keys)
 - `deploy/zanuda.service.example` — systemd unit template for deployment
@@ -310,7 +319,6 @@ All caps survive process restarts (persisted in `state.json`).
 ## Roadmap / not yet built
 
 - Context caching between reviews (currently re-fetches on every review)
-- Tool-use / function-calling output parsing instead of JSON-in-text
 
 ## Defensive coding — check before shipping
 

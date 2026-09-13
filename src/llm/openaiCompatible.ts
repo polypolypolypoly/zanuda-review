@@ -6,6 +6,22 @@ import type {
 } from "./types.js";
 
 /**
+ * Model families that reject a `temperature` other than the default. Matched as
+ * a prefix on the model id, after any vendor route prefix ("openai/gpt-5").
+ * A wrong guess here is a 400, so the list stays short and explicit; anything
+ * unlisted keeps the configured temperature.
+ */
+const FIXED_TEMPERATURE_MODELS = ["o1", "o3", "o4", "gpt-5"];
+
+/** True when the endpoint accepts `temperature` for this model. */
+export function supportsTemperature(model: string): boolean {
+  const id = (model.split("/").pop() ?? model).toLowerCase();
+  return !FIXED_TEMPERATURE_MODELS.some(
+    (family) => id === family || id.startsWith(`${family}-`),
+  );
+}
+
+/**
  * One implementation for every OpenAI-compatible Chat Completions endpoint.
  * OpenAI, OpenRouter, Ollama, and DeepSeek all speak this protocol — they
  * differ only in base URL, auth, and structured-output capability.
@@ -17,6 +33,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
   private client: OpenAI;
   /** json_object = valid JSON without schema enforcement; json_schema = strict schema */
   private jsonMode: "json_schema" | "json_object";
+  /** OpenAI renamed max_tokens; compatibility layers mostly still want the old name. */
+  private tokenParam: "max_tokens" | "max_completion_tokens";
 
   constructor(opts: {
     name: string;
@@ -26,6 +44,8 @@ export class OpenAICompatibleProvider implements LLMProvider {
     jsonMode?: "json_schema" | "json_object";
     /** Provider's effective max output token cap. Set for local models with small output windows. */
     maxOutputTokens?: number;
+    /** Which output-length parameter this endpoint expects. Defaults to max_tokens. */
+    tokenParam?: "max_tokens" | "max_completion_tokens";
   }) {
     this.name = opts.name;
     this.supportsStructuredOutput =
@@ -33,13 +53,18 @@ export class OpenAICompatibleProvider implements LLMProvider {
     this.maxOutputTokens = opts.maxOutputTokens;
     this.client = new OpenAI({ apiKey: opts.apiKey, baseURL: opts.baseURL });
     this.jsonMode = opts.jsonMode ?? "json_schema";
+    this.tokenParam = opts.tokenParam ?? "max_tokens";
   }
 
   async complete(req: CompletionRequest): Promise<CompletionResult> {
     const base = {
       model: req.model,
-      temperature: req.temperature,
-      max_tokens: req.maxTokens,
+      // Reasoning models accept only their default temperature and 400 on
+      // anything else — omit the parameter rather than guess the default.
+      ...(supportsTemperature(req.model)
+        ? { temperature: req.temperature }
+        : {}),
+      [this.tokenParam]: req.maxTokens,
       messages: [
         { role: "system" as const, content: req.system },
         { role: "user" as const, content: req.user },
@@ -87,7 +112,16 @@ export function openAIProvider(): LLMProvider {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error("OPENAI_API_KEY is not set");
   const baseURL = process.env.OPENAI_BASE_URL || undefined;
-  return new OpenAICompatibleProvider({ name: "openai", apiKey, baseURL });
+  return new OpenAICompatibleProvider({
+    name: "openai",
+    apiKey,
+    baseURL,
+    // OpenAI's own endpoint deprecated max_tokens in favour of
+    // max_completion_tokens and rejects the old name on newer models. The
+    // other providers below keep max_tokens — their compatibility layers are
+    // built against the older shape.
+    tokenParam: "max_completion_tokens",
+  });
 }
 
 export function openRouterProvider(): LLMProvider {
