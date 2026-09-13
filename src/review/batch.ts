@@ -60,6 +60,35 @@ interface BatchedReviewOpts {
   log: typeof logger;
 }
 
+/**
+ * Concurrent file reads per batch build. A 300-file PR firing 300 parallel
+ * getContent calls is the classic secondary-rate-limit trigger; a small window
+ * keeps the wall-clock win without it.
+ */
+const MAX_CONCURRENT_READS = 5;
+
+/** Map over `items` with at most `limit` calls to `fn` in flight, order kept. */
+export async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  };
+
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+
 export async function buildHeaderedFiles(
   connector: SCMConnector,
   ref: RepoRef,
@@ -67,22 +96,22 @@ export async function buildHeaderedFiles(
 ): Promise<HeaderedFile[]> {
   const result: HeaderedFile[] = [];
 
-  // Fetch full file contents in parallel for all files with patches.
+  // Fetch full file contents with a bounded number of requests in flight.
   // Use the base SHA — reading from headSha would let PR authors inject
   // misleading imports/declarations into the structural header context.
   // The diff itself still reflects the PR changes; the header is structural
   // context and must come from the maintainer-controlled base branch.
-  const contents = await Promise.all(
-    pr.files
-      .filter((f) => f.patch)
-      .map(async (f) => {
-        try {
-          const content = await connector.readFile(ref, f.filename, pr.baseSha);
-          return { filename: f.filename, content, patch: f.patch! };
-        } catch {
-          return { filename: f.filename, content: null, patch: f.patch! };
-        }
-      }),
+  const contents = await mapWithConcurrency(
+    pr.files.filter((f) => f.patch),
+    MAX_CONCURRENT_READS,
+    async (f) => {
+      try {
+        const content = await connector.readFile(ref, f.filename, pr.baseSha);
+        return { filename: f.filename, content, patch: f.patch! };
+      } catch {
+        return { filename: f.filename, content: null, patch: f.patch! };
+      }
+    },
   );
 
   for (const { filename, content, patch } of contents) {

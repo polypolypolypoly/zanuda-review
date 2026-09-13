@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   applyEvent,
   freshState,
+  MAX_TRANSIENT_RETRIES,
   type PRStateEvent,
 } from "../src/state/transitions.js";
 import type { PRState } from "../src/state/store.js";
@@ -153,6 +154,86 @@ describe("applyEvent: ROUND_FAILED", () => {
 });
 
 // ── RETRY_REQUESTED ─────────────────────────────────────────────────────────
+
+// ── ROUND_FAILED_TRANSIENT ───────────────────────────────────────────────────
+
+describe("applyEvent: ROUND_FAILED_TRANSIENT", () => {
+  it("leaves the PR retryable so the next tick picks it up", () => {
+    const s = applyEvent(state({ rounds: 0 }), {
+      type: "ROUND_FAILED_TRANSIENT",
+    });
+    assert.equal(s.failedAwaitingRetry, false);
+    assert.equal(s.consecutiveFailures, 1);
+    assert.equal(s.rounds, 0, "a failure is never a completed round");
+  });
+
+  it("falls back to awaiting a human after MAX_TRANSIENT_RETRIES in a row", () => {
+    let s = state();
+    for (let i = 0; i < MAX_TRANSIENT_RETRIES; i++) {
+      s = applyEvent(s, { type: "ROUND_FAILED_TRANSIENT" });
+    }
+    assert.equal(s.consecutiveFailures, MAX_TRANSIENT_RETRIES);
+    assert.equal(s.failedAwaitingRetry, true);
+  });
+
+  it("a content failure waits for a human immediately", () => {
+    const s = applyEvent(state(), { type: "ROUND_FAILED" });
+    assert.equal(s.failedAwaitingRetry, true);
+  });
+
+  it("a retry command clears the transient streak", () => {
+    const failed = applyEvent(state(), { type: "ROUND_FAILED_TRANSIENT" });
+    const s = applyEvent(failed, {
+      type: "RETRY_REQUESTED",
+      repliedCommentId: 1,
+    });
+    assert.equal(s.consecutiveFailures, 0);
+    assert.equal(s.failedAwaitingRetry, false);
+  });
+
+  it("a completed round clears the transient streak", () => {
+    const failed = applyEvent(state(), { type: "ROUND_FAILED_TRANSIENT" });
+    const s = applyEvent(failed, { type: "ROUND_COMPLETED", round: 1 });
+    assert.equal(s.consecutiveFailures, 0);
+    assert.equal(s.failedAwaitingRetry, false);
+  });
+});
+
+// ── PROGRESS_COMMENT_POSTED ──────────────────────────────────────────────────
+
+describe("applyEvent: PROGRESS_COMMENT_POSTED", () => {
+  it("records the id so a restart edits the placeholder instead of reposting", () => {
+    const s = applyEvent(state(), {
+      type: "PROGRESS_COMMENT_POSTED",
+      progressCommentId: 555,
+    });
+    assert.equal(s.progressCommentId, 555);
+  });
+
+  it("is cleared again once the round completes", () => {
+    const posted = applyEvent(state(), {
+      type: "PROGRESS_COMMENT_POSTED",
+      progressCommentId: 555,
+    });
+    const done = applyEvent(posted, { type: "ROUND_COMPLETED", round: 1 });
+    assert.equal(done.progressCommentId, null);
+  });
+
+  it("is cleared by either failure path", () => {
+    const posted = applyEvent(state(), {
+      type: "PROGRESS_COMMENT_POSTED",
+      progressCommentId: 555,
+    });
+    assert.equal(
+      applyEvent(posted, { type: "ROUND_FAILED" }).progressCommentId,
+      null,
+    );
+    assert.equal(
+      applyEvent(posted, { type: "ROUND_FAILED_TRANSIENT" }).progressCommentId,
+      null,
+    );
+  });
+});
 
 describe("applyEvent: RETRY_REQUESTED", () => {
   it("clears the failure gate and resets the failure streak", () => {

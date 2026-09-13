@@ -5,7 +5,7 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
 ## Flow
 
 ```
-[every 60 s] poller polls GitHub search API
+[every 60 s, measured after the previous tick finishes] poller polls GitHub search API
   → finds open PRs with review-requested:ZlayaZanuda
   → post "Starting review…" comment (edited with verdict when done)
   → fetch PR diff + repo config + project context files
@@ -275,6 +275,20 @@ Per-PR caps (hardcoded in `poller.ts`):
 - `MAX_MENTION_REPLIES = 5` — at most 5 @mention replies per PR
 
 All caps survive process restarts (persisted in `state.json`).
+
+### Failure handling
+
+- **Transport failures** (GitHub 5xx / rate limit / socket error, classified by
+  `isTransientError` in `src/llm/retry.ts`) → `ROUND_FAILED_TRANSIENT`: the PR
+  stays retryable and the next tick picks it up, bounded by
+  `MAX_TRANSIENT_RETRIES` (3) consecutive failures.
+- **Content failures** (unparseable model output, non-retryable 4xx) →
+  `ROUND_FAILED`: the PR waits for an explicit `@reviewer retry`.
+- GitHub calls go through `@octokit/plugin-throttling` and
+  `@octokit/plugin-retry` with a 30 s per-request deadline (`src/github/client.ts`).
+- The poll loop reschedules with `setTimeout` after each tick resolves, so ticks
+  never overlap — a tick outlives the interval whenever an @mention reply is
+  generated inline.
 
 ## Roadmap / not yet built
 

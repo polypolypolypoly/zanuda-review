@@ -8,6 +8,7 @@ import type { SCMConnector, PendingReview } from "./platform/types.js";
 import { reviewPullRequest } from "./review/engine.js";
 import { replyToMention } from "./review/replyEngine.js";
 import { PRStateStore } from "./state/store.js";
+import { isTransientError } from "./llm/retry.js";
 import {
   applyEvent,
   freshState,
@@ -76,14 +77,42 @@ export async function startPoller(opts: {
     await pollMentions({ config, reviewerLogin, connector, store, provider });
   };
 
-  await tick();
-  setInterval(
-    () =>
-      tick().catch((err) =>
-        logger.error({ err }, "Unhandled error in poll tick"),
-      ),
-    intervalMs,
-  );
+  runPollLoop(tick, intervalMs);
+}
+
+/**
+ * Run `tick` forever, waiting `intervalMs` AFTER each run finishes.
+ *
+ * Not setInterval: a tick that outlives the interval would overlap the next
+ * one. pollMentions awaits an LLM reply inline and persists repliedCommentIds
+ * only after the reply lands, so an overlapping tick re-fetches the same
+ * discussion mid-call and answers the same mention twice. The review path has
+ * the same shape of window between the inProgress filter and inProgress.add.
+ *
+ * Returns a stop function; the poller never calls it, tests do.
+ */
+export function runPollLoop(
+  tick: () => Promise<void>,
+  intervalMs: number,
+): () => void {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  const run = async () => {
+    try {
+      await tick();
+    } catch (err) {
+      logger.error({ err }, "Unhandled error in poll tick");
+    }
+    if (!stopped) timer = setTimeout(run, intervalMs);
+  };
+
+  void run();
+
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }
 
 // ── Review-request polling ────────────────────────────────────────────────────
@@ -321,6 +350,12 @@ async function pollReviewRequests(opts: {
 
     inProgress.add(item.platformId);
 
+    // Always read the latest persisted state: the onProgressComment callback
+    // below writes to the store while the review runs, so the `state` captured
+    // before the review is stale by the time the handlers fire.
+    const currentState = () =>
+      store.get(item.platformId) ?? state ?? freshState(item.ref, item.number);
+
     reviewPullRequest(
       { connector, baseConfig: config, reviewerLogin },
       item.ref,
@@ -328,6 +363,14 @@ async function pollReviewRequests(opts: {
       {
         round: nextRound,
         progressCommentId: state?.progressCommentId ?? undefined,
+        onProgressComment: (progressCommentId) =>
+          store.set(
+            item.platformId,
+            applyEvent(currentState(), {
+              type: "PROGRESS_COMMENT_POSTED",
+              progressCommentId,
+            }),
+          ),
       },
     )
       .then((result) => {
@@ -340,7 +383,7 @@ async function pollReviewRequests(opts: {
           if (result.progressCommentId !== null) {
             store.set(
               item.platformId,
-              applyEvent(state ?? freshState(item.ref, item.number), {
+              applyEvent(currentState(), {
                 type: "ROUND_STALE",
                 progressCommentId: result.progressCommentId,
               }),
@@ -360,7 +403,7 @@ async function pollReviewRequests(opts: {
         // concurrent poll sees the updated round count and skips the PR.
         store.set(
           item.platformId,
-          applyEvent(state ?? freshState(item.ref, item.number), {
+          applyEvent(currentState(), {
             type: "ROUND_COMPLETED",
             round: nextRound,
           }),
@@ -396,22 +439,31 @@ async function pollReviewRequests(opts: {
         inProgress.delete(item.platformId);
       })
       .catch(async (err) => {
+        // A transport failure (GitHub 5xx, rate limit, socket error) says
+        // nothing about this PR — the next tick should just try again, since
+        // the review request is still open. Only a content failure (unparseable
+        // model output, non-retryable 4xx) waits for a human. The transient
+        // path is bounded by MAX_TRANSIENT_RETRIES inside the reducer.
+        const transient = isTransientError(err);
         logger.error(
           {
             err,
             repo: `${item.ref.owner}/${item.ref.repo}`,
             pr: item.number,
             round: nextRound,
+            transient,
           },
-          "Review failed — waiting for @mention retry command",
+          transient
+            ? "Review failed on a transient error — retrying next tick"
+            : "Review failed — waiting for @mention retry command",
         );
         try {
           // The engine's failSafe already updated the progress comment with
           // the error and the retry hint. Record the failure in state.
           store.set(
             item.platformId,
-            applyEvent(state ?? freshState(item.ref, item.number), {
-              type: "ROUND_FAILED",
+            applyEvent(currentState(), {
+              type: transient ? "ROUND_FAILED_TRANSIENT" : "ROUND_FAILED",
             }),
           );
         } finally {

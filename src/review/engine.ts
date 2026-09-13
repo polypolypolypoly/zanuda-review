@@ -72,6 +72,12 @@ export async function reviewPullRequest(
      * batch path entirely; "batch" forces multi-batch even for small PRs;
      * Undefined = auto-detect based on PR size. */
     forceStrategy?: "single" | "batch";
+    /**
+     * Called as soon as the progress placeholder exists on the platform, so
+     * the caller can persist its id before the long LLM call. A crash mid-review
+     * then leaves an id the next run edits, instead of an orphaned placeholder.
+     */
+    onProgressComment?: (commentId: number) => void;
   } = {},
 ): Promise<
   ReviewResult & {
@@ -139,6 +145,8 @@ export async function reviewPullRequest(
           log.warn({ err }, "Failed to post starting comment");
           return null;
         });
+      if (startingCommentId !== null)
+        opts.onProgressComment?.(startingCommentId);
     }
   }
 
