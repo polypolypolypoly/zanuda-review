@@ -173,6 +173,7 @@ preprompt: |
 persistence:
   stateFile: "" # empty = ~/.zanuda/state.json
   commitLogFile: "" # empty = ~/.zanuda/commit-log.json
+  budgetFile: "" # empty = ~/.zanuda/daily-budget.json
 
 # ─── Access control ─────────────────────────────────────────────────
 # Allowlist of owners or owner/repo slugs that may request reviews.
@@ -200,13 +201,19 @@ limits:
   # Max new PRs picked up per poll cycle. Prevents a burst of 50 queued
   # PRs from all firing off LLM calls simultaneously after a restart.
   maxNewPrsPerCycle: 5
-  # Per-PR token budget (input + output). Stops review when exceeded.
-  # 0 = no limit. Useful as a cost backstop for large batched reviews.
-  tokenBudgetPerPR: 0
+  # Per-PR token budget (input + output), enforced between batches of a
+  # large-PR review. 0 = no limit. The default fits a full 10-batch review
+  # with its verification passes and stops a pathological PR well before it
+  # becomes expensive; raise it if you regularly review very large PRs.
+  tokenBudgetPerPR: 400000
   # Hard cap on review batches per PR. Prevents unbounded cost on
   # pathological PRs. Beyond this limit, highest-signal batches win;
   # unreviewed files are noted in the verdict. 0 = no limit.
   maxBatches: 10
+  # Global cap on review rounds started per UTC day, across every repo —
+  # the outermost spend backstop. Deferred PRs keep their open review
+  # request and are picked up when the counter rolls over. 0 = no limit.
+  maxReviewRoundsPerDay: 50
 
 # ─── Repo memory ────────────────────────────────────────────────────
 # Persistent per-repo knowledge files. On first review of a repo Zanuda

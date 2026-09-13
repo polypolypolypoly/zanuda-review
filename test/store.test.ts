@@ -310,3 +310,65 @@ describe("PRStateStore: new PRState fields", () => {
     assert.equal(state.maxRoundsNotified, false);
   });
 });
+
+// ─── Periodic pruning ─────────────────────────────────────────────────────────
+//
+// Pruning also runs on load, but a service that stays up for months never
+// reloads — without a periodic prune it keeps every PR it has ever seen and
+// rewrites them all on every state write.
+
+describe("PRStateStore: prune", () => {
+  let dir: string;
+  before(() => {
+    dir = makeTmpDir();
+  });
+  after(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("drops entries past the retention window and keeps the rest", () => {
+    const path = join(dir, "prune.json");
+    const store = new PRStateStore(path);
+    store.set(1, makeState({ number: 1 }));
+    store.set(2, makeState({ number: 2 }));
+
+    // Age entry 1 past the 30-day window.
+    const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
+    const raw = JSON.parse(readFileSync(path, "utf8"));
+    raw.prs["1"].lastUpdatedAt = old;
+    writeFileSync(path, JSON.stringify(raw), "utf8");
+
+    const reloaded = new PRStateStore(path);
+    // Reload prunes on load; re-add the stale entry to test prune() directly.
+    reloaded.set(1, makeState({ number: 1 }));
+    const inner = reloaded as unknown as {
+      data: Map<number, { lastUpdatedAt: string }>;
+    };
+    inner.data.get(1)!.lastUpdatedAt = old;
+
+    assert.equal(reloaded.prune(), 1);
+    assert.equal(reloaded.get(1), undefined);
+    assert.ok(reloaded.get(2), "recent entry survives");
+  });
+
+  it("persists the prune so a restart does not resurrect entries", () => {
+    const path = join(dir, "prune-persist.json");
+    const store = new PRStateStore(path);
+    store.set(7, makeState({ number: 7 }));
+    const inner = store as unknown as {
+      data: Map<number, { lastUpdatedAt: string }>;
+    };
+    inner.data.get(7)!.lastUpdatedAt = new Date(
+      Date.now() - 31 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+
+    store.prune();
+    assert.equal(new PRStateStore(path).get(7), undefined);
+  });
+
+  it("is a no-op when everything is recent", () => {
+    const path = join(dir, "prune-noop.json");
+    const store = new PRStateStore(path);
+    store.set(1, makeState());
+    assert.equal(store.prune(), 0);
+    assert.ok(store.get(1));
+  });
+});

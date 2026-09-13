@@ -1,6 +1,12 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -229,5 +235,43 @@ describe("CommitLog load validation", () => {
     const log = new CommitLog(logPath);
     // Zod rejects bad/repo entirely, but good/repo still loads
     assert.equal(log.hasAll("good", "repo", ["sha1"]), true);
+  });
+});
+
+// ─── Per-repo size cap ────────────────────────────────────────────────────────
+//
+// The 60-day prune keys off repo inactivity and every write refreshes that
+// stamp, so an ACTIVE repo was never pruned: its SHA set grew forever and was
+// rewritten in full on every review.
+
+describe("CommitLog: per-repo cap", () => {
+  it("keeps an active repo's SHA set bounded", () => {
+    const dir = mkdtempSync(join(tmpdir(), "zanuda-commitlog-cap-"));
+    try {
+      const log = new CommitLog(join(dir, "commit-log.json"));
+      for (let batch = 0; batch < 12; batch++) {
+        log.addAll(
+          "acme",
+          "widget",
+          Array.from({ length: 500 }, (_, i) => `sha-${batch * 500 + i}`),
+        );
+      }
+
+      const stored = JSON.parse(
+        readFileSync(join(dir, "commit-log.json"), "utf8"),
+      );
+      const shas: string[] = stored.repos["acme/widget"].shas;
+      assert.equal(shas.length, 5000, "capped at MAX_SHAS_PER_REPO");
+      assert.ok(
+        log.hasAll("acme", "widget", ["sha-5999"]),
+        "newest SHAs are kept",
+      );
+      assert.ok(
+        !log.hasAll("acme", "widget", ["sha-0"]),
+        "oldest SHAs are dropped first",
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

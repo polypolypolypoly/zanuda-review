@@ -47,6 +47,11 @@ const ConfigSchema = z.object({
      * Empty string or absent = ~/.zanuda/commit-log.json
      */
     commitLogFile: z.string().optional(),
+    /**
+     * Path to the daily-budget counter file.
+     * Empty string or absent = ~/.zanuda/daily-budget.json
+     */
+    budgetFile: z.string().optional(),
   }),
   access: z.object({
     /**
@@ -71,6 +76,12 @@ const ConfigSchema = z.object({
      * noted honestly in the verdict comment. 0 = no limit.
      */
     maxBatches: z.number().int().nonnegative().default(10),
+    /**
+     * Global cap on review rounds started per UTC day, across every repo.
+     * The outermost spend backstop; 0 = no limit. Deferred PRs are still
+     * requested on the platform, so they are picked up the next day.
+     */
+    maxReviewRoundsPerDay: z.number().int().nonnegative().default(0),
   }),
   memory: z.object({
     /** Toggle the whole feature on/off. */
