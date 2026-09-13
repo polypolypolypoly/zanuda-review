@@ -46,6 +46,7 @@ const { pollReviewRequests } = await import("../src/poller.ts");
 const { PRStateStore } = await import("../src/state/store.ts");
 const { CommitLog } = await import("../src/state/commitLog.ts");
 const { DailyBudget } = await import("../src/state/dailyBudget.ts");
+const { freshState } = await import("../src/state/transitions.ts");
 
 const REF: RepoRef = { owner: "acme", repo: "widget" };
 
@@ -73,22 +74,35 @@ function pending(count: number): PendingReview[] {
   }));
 }
 
-function makeConnector(items: PendingReview[]): SCMConnector {
+interface ConnectorOpts {
+  /** What isReviewRequested answers; an Error is thrown instead. */
+  reviewRequested?: boolean | Error;
+  commitShas?: string[];
+}
+
+function makeConnector(
+  items: PendingReview[],
+  opts: ConnectorOpts = {},
+): SCMConnector & { comments: string[] } {
+  const comments: string[] = [];
   return {
+    comments,
     name: "fake",
     async pollPendingReviews() {
       return items;
     },
     async listCommitShas() {
-      return [];
+      return opts.commitShas ?? [];
     },
-    async postComment() {
+    async postComment(_ref: RepoRef, _n: number, body: string) {
+      comments.push(body);
       return 1;
     },
     async isReviewRequested() {
-      return false;
+      if (opts.reviewRequested instanceof Error) throw opts.reviewRequested;
+      return opts.reviewRequested ?? false;
     },
-  } as unknown as SCMConnector;
+  } as unknown as SCMConnector & { comments: string[] };
 }
 
 let dir: string;
@@ -106,12 +120,17 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const run = (config: Config, items: PendingReview[]) =>
+const run = (
+  config: Config,
+  items: PendingReview[],
+  connector: SCMConnector = makeConnector(items),
+  inProgress = new Set<number>(),
+) =>
   pollReviewRequests({
     config,
     reviewerLogin: "zanuda",
-    connector: makeConnector(items),
-    inProgress: new Set<number>(),
+    connector,
+    inProgress,
     store,
     commitLog,
     budget,
@@ -162,5 +181,166 @@ describe("pollReviewRequests: daily budget", () => {
 
     assert.deepEqual(reviewed, []);
     assert.equal(budget.used, 0, "unlisted repos must not spend the budget");
+  });
+});
+
+// ─── Round-2 gate ─────────────────────────────────────────────────────────────
+//
+// Round 2 acts only on a strongly-consistent signal. The search index that
+// produced `pending` lags behind the REST mutation that cleared the request, so
+// "the PR showed up again" is not evidence the author asked for anything.
+
+describe("pollReviewRequests: round-2 gate", () => {
+  const config = makeConfig();
+  const afterRound1 = () =>
+    store.set(1000, { ...freshState(REF, 1), rounds: 1 });
+
+  it("withholds round 2 when the reviewer is not in requested_reviewers", async () => {
+    afterRound1();
+    await run(
+      config,
+      pending(1),
+      makeConnector(pending(1), {
+        reviewRequested: false,
+      }),
+    );
+    await settle();
+
+    assert.deepEqual(reviewed, [], "search-index lag is not a re-request");
+  });
+
+  it("runs round 2 when the PR really carries the request again", async () => {
+    afterRound1();
+    await run(
+      config,
+      pending(1),
+      makeConnector(pending(1), {
+        reviewRequested: true,
+      }),
+    );
+    await settle();
+
+    assert.deepEqual(reviewed, [1]);
+  });
+
+  it("runs round 2 on the mention-driven flag without an API check", async () => {
+    store.set(1000, {
+      ...freshState(REF, 1),
+      rounds: 1,
+      reReviewRequested: true,
+    });
+    const connector = makeConnector(pending(1), {
+      reviewRequested: new Error("must not be consulted"),
+    });
+
+    await run(config, pending(1), connector);
+    await settle();
+
+    assert.deepEqual(reviewed, [1]);
+  });
+
+  it("withholds round 2 when the authoritative check fails", async () => {
+    afterRound1();
+    await run(
+      config,
+      pending(1),
+      makeConnector(pending(1), {
+        reviewRequested: new Error("503"),
+      }),
+    );
+    await settle();
+
+    assert.deepEqual(reviewed, [], "never fall back to the search heuristic");
+    assert.equal(budget.used, 0, "a withheld round costs nothing");
+  });
+
+  it("stops after the last round and says so exactly once", async () => {
+    store.set(1000, { ...freshState(REF, 1), rounds: 2 });
+    const connector = makeConnector(pending(1), { reviewRequested: true });
+
+    await run(config, pending(1), connector);
+    await run(config, pending(1), connector);
+    await settle();
+
+    assert.deepEqual(reviewed, []);
+    assert.equal(connector.comments.length, 1, "notified once, not every tick");
+    assert.match(connector.comments[0]!, /review rounds/);
+  });
+
+  it("skips a PR that is waiting for a retry command", async () => {
+    store.set(1000, { ...freshState(REF, 1), failedAwaitingRetry: true });
+    await run(config, pending(1));
+    await settle();
+
+    assert.deepEqual(reviewed, []);
+  });
+});
+
+// ─── Concurrency and per-cycle caps ───────────────────────────────────────────
+
+describe("pollReviewRequests: caps", () => {
+  it("starts at most maxNewPrsPerCycle reviews in one tick", async () => {
+    const config = makeConfig({
+      limits: { ...makeConfig().limits, maxNewPrsPerCycle: 2 },
+    });
+
+    await run(config, pending(5));
+    await settle();
+
+    assert.deepEqual(reviewed, [1, 2]);
+  });
+
+  it("leaves no free slots when reviews are already in flight", async () => {
+    const config = makeConfig({
+      limits: { ...makeConfig().limits, maxConcurrentReviews: 2 },
+    });
+    const inProgress = new Set<number>([9001, 9002]);
+
+    await run(config, pending(3), makeConnector(pending(3)), inProgress);
+    await settle();
+
+    assert.deepEqual(reviewed, [], "concurrency cap reached");
+  });
+
+  it("fills only the remaining slots", async () => {
+    const config = makeConfig({
+      limits: { ...makeConfig().limits, maxConcurrentReviews: 3 },
+    });
+    const inProgress = new Set<number>([9001, 9002]);
+
+    await run(config, pending(3), makeConnector(pending(3)), inProgress);
+    await settle();
+
+    assert.deepEqual(reviewed, [1]);
+  });
+});
+
+// ─── Commit dedup ─────────────────────────────────────────────────────────────
+
+describe("pollReviewRequests: commit dedup", () => {
+  it("skips a PR whose commits were all reviewed before", async () => {
+    commitLog.addAll(REF.owner, REF.repo, ["sha1", "sha2"]);
+    const connector = makeConnector(pending(1), {
+      commitShas: ["sha1", "sha2"],
+    });
+
+    await run(makeConfig(), pending(1), connector);
+    await settle();
+
+    assert.deepEqual(reviewed, []);
+    assert.match(connector.comments[0]!, /Skipping review/);
+    assert.equal(budget.used, 0, "a skipped PR costs nothing");
+  });
+
+  it("reviews a PR that carries at least one new commit", async () => {
+    commitLog.addAll(REF.owner, REF.repo, ["sha1"]);
+    const connector = makeConnector(pending(1), {
+      commitShas: ["sha1", "sha-new"],
+    });
+
+    await run(makeConfig(), pending(1), connector);
+    await settle();
+
+    assert.deepEqual(reviewed, [1]);
   });
 });
