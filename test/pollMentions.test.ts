@@ -136,13 +136,17 @@ beforeEach(() => {
 
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-const run = (connector: SCMConnector, cfg: Config = config) =>
+const run = (
+  connector: SCMConnector,
+  cfg: Config = config,
+  prov: LLMProvider = provider,
+) =>
   pollMentions({
     config: cfg,
     reviewerLogin: "zanuda",
     connector,
     store,
-    provider,
+    provider: prov,
   });
 
 // ─── Command gating ───────────────────────────────────────────────────────────
@@ -207,6 +211,28 @@ describe("pollMentions: author-only commands", () => {
 
     assert.equal(store.get(PLATFORM_ID)!.mentionReplies, 1);
     assert.ok(connector.replies[0].body.includes("A reply long enough"));
+  });
+
+  it("consumes a mention even when the generated reply is dropped", async () => {
+    const connector = makeConnector([
+      mention({ author: "author-login", body: "@zanuda what does this do?" }),
+    ]);
+    const garbageProvider: LLMProvider = {
+      name: "fake",
+      supportsStructuredOutput: false,
+      async complete() {
+        return { text: "ok", model: "fake", provider: "fake" };
+      },
+    };
+
+    await run(connector, config, garbageProvider);
+
+    // Nothing posted, but the mention is still marked replied so a model that
+    // keeps producing sub-min-length replies cannot be retried indefinitely.
+    const state = store.get(PLATFORM_ID)!;
+    assert.equal(connector.replies.length, 0);
+    assert.equal(state.mentionReplies, 1);
+    assert.ok(state.repliedCommentIds.has(7));
   });
 });
 
