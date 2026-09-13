@@ -17,6 +17,7 @@
  *   - ROUND_FAILED sets failedAwaitingRetry; rounds is NEVER mutated by failure.
  *   - RETRY_REQUESTED clears failedAwaitingRetry and consecutiveFailures, leaves rounds.
  *   - RE_REVIEW_REQUESTED is idempotent and never touches rounds.
+ *   - ROUND_FAILED_TRANSIENT leaves the PR retryable until MAX_TRANSIENT_RETRIES.
  *   - MAX_ROUNDS_REACHED is idempotent (posting it twice does nothing the 2nd time).
  *   - progressCommentId is null after a round completes (placeholder resolved).
  */
@@ -26,6 +27,13 @@ import type { PRState } from "./store.js";
 /** The maximum number of full review rounds per PR. Single source of truth —
  * imported by the poller so the latch math and the gate can never drift. */
 export const MAX_REVIEW_ROUNDS = 2;
+
+/**
+ * How many consecutive transient failures a PR may accumulate before it stops
+ * auto-retrying and waits for an explicit `@reviewer retry`. Bounds the cost of
+ * a PR that fails the same way every tick.
+ */
+export const MAX_TRANSIENT_RETRIES = 3;
 
 // ── Events ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +51,9 @@ export type PRStateEvent =
       type: "ROUND_FAILED";
     }
   | {
+      type: "ROUND_FAILED_TRANSIENT";
+    }
+  | {
       type: "RETRY_REQUESTED";
       repliedCommentId: number;
     }
@@ -53,6 +64,10 @@ export type PRStateEvent =
   | {
       type: "MENTION_REPLIED";
       repliedCommentId: number;
+    }
+  | {
+      type: "PROGRESS_COMMENT_POSTED";
+      progressCommentId: number;
     }
   | {
       type: "MAX_ROUNDS_REACHED";
@@ -138,6 +153,21 @@ export function applyEvent(prev: PRState, event: PRStateEvent): PRState {
       };
     }
 
+    case "ROUND_FAILED_TRANSIENT": {
+      // A transport failure (GitHub 5xx, rate limit, socket error) — nothing
+      // about this PR caused it. Leave the PR retryable so the next tick picks
+      // it up again; the review request is still open on the platform. The
+      // counter bounds that: after MAX_TRANSIENT_RETRIES in a row the PR falls
+      // back to waiting for a human, so a permanently broken PR cannot spin.
+      const consecutiveFailures = prev.consecutiveFailures + 1;
+      return {
+        ...prev,
+        progressCommentId: null,
+        consecutiveFailures,
+        failedAwaitingRetry: consecutiveFailures >= MAX_TRANSIENT_RETRIES,
+      };
+    }
+
     case "RETRY_REQUESTED": {
       // Author posted "@reviewer retry". Clear the failure gate so the next
       // poll tick picks the PR up again. consecutiveFailures resets so a
@@ -179,6 +209,14 @@ export function applyEvent(prev: PRState, event: PRStateEvent): PRState {
           event.repliedCommentId,
         ),
       };
+    }
+
+    case "PROGRESS_COMMENT_POSTED": {
+      // The placeholder exists on the platform now. Persisting the id here —
+      // not after the round finishes — means a crash mid-review leaves an id
+      // the next run can edit, instead of an orphaned "_Starting review…_"
+      // plus a second placeholder.
+      return { ...prev, progressCommentId: event.progressCommentId };
     }
 
     case "MAX_ROUNDS_REACHED": {

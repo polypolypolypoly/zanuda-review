@@ -25,6 +25,8 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.65.0",
+    "@octokit/plugin-retry": "^8.1.1",
+    "@octokit/plugin-throttling": "^11.0.5",
     "@octokit/rest": "^22.0.0",
     "dotenv": "^17.0.0",
     "openai": "^6.0.0",
@@ -37,8 +39,12 @@
       "eslint --fix",
       "prettier --write"
     ],
-    "*.{yaml,yml}": ["prettier --write"],
-    "*.md": ["prettier --write"]
+    "*.{yaml,yml}": [
+      "prettier --write"
+    ],
+    "*.md": [
+      "prettier --write"
+    ]
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

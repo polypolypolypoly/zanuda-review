@@ -40,6 +40,18 @@ const RETRYABLE_ERROR_CODES = new Set([
   "ECONNREFUSED",
 ]);
 
+/**
+ * Is this error a transport-level failure worth retrying (rate limit, 5xx,
+ * socket/DNS error, timeout) rather than something about the content?
+ *
+ * Exported so the poller can tell "GitHub 502 for 30 s" from "the model
+ * returned garbage" — the first should retry on the next tick, the second
+ * should wait for a human.
+ */
+export function isTransientError(err: unknown): boolean {
+  return isRetryable(err);
+}
+
 function isRetryable(err: unknown): boolean {
   if (err && typeof err === "object") {
     // HTTP status-based retry (rate limits, server errors)
