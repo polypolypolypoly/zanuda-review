@@ -552,7 +552,7 @@ export async function pollMentions(opts: {
     try {
       const pr = await connector.fetchPR(state.ref, state.number);
       prTitle = pr.title;
-      prAuthor = pr.author || null;
+      prAuthor = pr.author;
     } catch (err) {
       logger.warn(
         { err, repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },

@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { logger } from "./logger.js";
 
 /**
  * Global configuration schema. Loaded from config/default.yaml (or the path
@@ -120,22 +121,50 @@ export type RepoConfig = z.infer<typeof RepoConfigSchema>;
  * Keys an untrusted `.zanuda/config.yml` (org or repo) may not set.
  *
  * Two reasons, both about the operator rather than the repo:
- *   - filesystem and process control — `persistence` and `memory.dir` decide
- *     where the service account creates directories and writes LLM output;
+ *   - filesystem and process control — `persistence` (the whole section:
+ *     `stateFile` and `commitLogFile` are both paths the service account
+ *     writes) and `memory.dir` decide where the service account creates
+ *     directories and writes LLM output;
  *   - operator cost — `provider` picks which API key gets burned, and
  *     `limits` / `generation.maxTokens` are the spend backstops.
  *
- * `access` and `models` are dropped for the same reason, in mergeRepoConfig.
- * Everything else (memory.enabled, context, review flags, prepromptAppend)
- * stays repo-overridable: those tune the review, not the operator's machine.
+ * `access` and `models` are dropped for the same reason. Everything else
+ * (memory.enabled, context, review flags, prepromptAppend) stays
+ * repo-overridable: those tune the review, not the operator's machine.
+ *
+ * This is the single authoritative list of operator-only keys: every key a
+ * repo/org config must not be able to set is stripped here, and every strip is
+ * logged so the operator gets an audit trail for attempted config escalation.
  */
 function stripOperatorOnly(repo: RepoConfig): RepoConfig {
   const {
     persistence: _persistence,
     limits: _limits,
     provider: _provider,
+    models: _models,
+    access: _access,
     ...rest
   } = repo;
+
+  // The repo author gets no signal that their override was ignored, so the
+  // operator's log is the only record — and the audit trail for a config
+  // attempting to steer the operator's filesystem or API spend.
+  const stripped: string[] = [];
+  if (repo.persistence !== undefined) stripped.push("persistence");
+  if (repo.limits !== undefined) stripped.push("limits");
+  if (repo.provider !== undefined) stripped.push("provider");
+  if (repo.models !== undefined) stripped.push("models");
+  if (repo.access !== undefined) stripped.push("access");
+  if (repo.memory?.dir !== undefined) stripped.push("memory.dir");
+  if (repo.generation?.maxTokens !== undefined) {
+    stripped.push("generation.maxTokens");
+  }
+  if (stripped.length > 0) {
+    logger.warn(
+      { strippedKeys: stripped },
+      "Dropped operator-only keys from org/repo .zanuda/config.yml",
+    );
+  }
 
   const memory = repo.memory ? { ...repo.memory } : undefined;
   if (memory) delete memory.dir;
@@ -210,14 +239,13 @@ function applyEnvOverrides(config: Config): Config {
  * Nested objects are merged field-by-field and undefined repo fields are
  * ignored — the base config value is preserved.
  *
- * Operator-only keys are dropped before merging: `access` and `models` here,
- * the rest in stripOperatorOnly. A repo config is written by whoever can
- * commit to the repo's base branch, which is not the operator running Zanuda.
+ * Operator-only keys are dropped by stripOperatorOnly before merging. A repo
+ * config is written by whoever can commit to the repo's base branch, which is
+ * not the operator running Zanuda.
  */
 export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {
   if (!repo) return base;
-  const safe = stripOperatorOnly(repo);
-  return mergeConfig(base, { ...safe, models: undefined, access: undefined });
+  return mergeConfig(base, stripOperatorOnly(repo));
 }
 
 /**
