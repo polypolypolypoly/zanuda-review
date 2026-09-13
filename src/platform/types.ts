@@ -54,6 +54,11 @@ export interface PullRequest {
   number: number;
   title: string;
   body: string;
+  /**
+   * Login of the account that opened the PR. Used to gate commands that spend
+   * money (re-review, retry) to the author — see pollMentions in poller.ts.
+   */
+  author: string;
   baseSha: string;
   headSha: string;
   /** Unified diff of the whole PR (raw blob from the platform). */

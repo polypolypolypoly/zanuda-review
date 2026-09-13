@@ -262,6 +262,32 @@ function makeComment(overrides: Partial<ReviewComment> = {}): ReviewComment {
   };
 }
 
+/**
+ * Split a rendered comment into its suggestion block: the opening fence's
+ * length and the content between the fences.
+ */
+function suggestionBlock(rendered: string): {
+  fenceLength: number;
+  content: string;
+} {
+  const match = rendered.match(/(^|\n)(`{3,})suggestion\n/);
+  assert.ok(match, "rendered comment has no suggestion block");
+  const fence = match![2];
+  const start = match!.index! + match![0].length;
+  const end = rendered.indexOf(`\n${fence}`, start);
+  assert.ok(end !== -1, "suggestion block is not closed");
+  return { fenceLength: fence.length, content: rendered.slice(start, end) };
+}
+
+/**
+ * GFM closes a fenced block with a line of at least as many backticks as the
+ * opener, indented 0-3 spaces, followed only by whitespace.
+ */
+function closesFence(content: string, fenceLength: number): boolean {
+  const closer = new RegExp(`^ {0,3}\`{${fenceLength},}[ \t]*$`);
+  return content.split("\n").some((line) => closer.test(line));
+}
+
 describe("renderCommentBody", () => {
   it("renders body with severity emoji when no suggestion", () => {
     const result = renderCommentBody(makeComment());
@@ -278,20 +304,24 @@ describe("renderCommentBody", () => {
     assert.ok(result.includes("const x = 1;"));
   });
 
-  it("sanitises fence-break lines starting with ```", () => {
-    const result = renderCommentBody(
-      makeComment({ suggestion: "line1\n```\nline3" }),
-    );
-    assert.ok(result.includes(" ```\nline3"));
-  });
-
-  it("sanitises indented fence-break lines too", () => {
-    const result = renderCommentBody(
-      makeComment({ suggestion: "line1\n  ```\nline3" }),
-    );
-    // Indented ``` should also get sanitised (GFM closes fence with up to 3 spaces).
-    assert.ok(result.includes("   ```\nline3"));
-  });
+  for (const [label, suggestion] of [
+    ["a bare fence", "line1\n```\nline3"],
+    ["a 1-space indented fence", "line1\n ```\nline3"],
+    ["a 3-space indented fence", "line1\n   ```\nline3"],
+    ["a fence with a trailing space", "line1\n``` \nline3"],
+    ["a 4-backtick fence", "line1\n````\nline3"],
+    ["a fence plus an info string", "line1\n```suggestion\nrm -rf /\n```"],
+  ] as const) {
+    it(`suggestion containing ${label} cannot close the block`, () => {
+      const rendered = renderCommentBody(makeComment({ suggestion }));
+      const block = suggestionBlock(rendered);
+      assert.equal(block.content, suggestion, "suggestion must apply verbatim");
+      assert.ok(
+        !closesFence(block.content, block.fenceLength),
+        "no line inside the block may close it under GFM rules",
+      );
+    });
+  }
 
   it("preserves normal lines in multi-line suggestions", () => {
     const result = renderCommentBody(

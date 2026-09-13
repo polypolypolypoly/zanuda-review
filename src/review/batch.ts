@@ -12,6 +12,8 @@ import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
 import {
   filterAnchorableComments,
+  filterFilesSummary,
+  filterResultSummaries,
   filterReviewComments,
   filterReviewVerdict,
   formatFilterSummary,
@@ -369,6 +371,11 @@ export async function reviewBatched(
     };
   }
 
+  // Cap the model-written summaries before the unreviewed-files note is
+  // appended below — that note is ours and must not be trimmed away.
+  const trimmed = filterResultSummaries(finalResult);
+  if (trimmed.length > 0) log.warn(`Hard filters: ${trimmed.join("; ")}`);
+
   // Assemble final result with all accumulated data
   const result: ReviewResult = {
     ...finalResult,
@@ -398,6 +405,14 @@ export async function reviewBatched(
     log.warn(formatFilterSummary(filtered));
   }
   result.comments = filtered.kept;
+
+  const fabricatedPaths = filterFilesSummary(result, pr.changedFiles);
+  if (fabricatedPaths.length > 0) {
+    log.warn(
+      { paths: fabricatedPaths },
+      "Batch: dropped filesSummary rows for paths not in the PR",
+    );
+  }
 
   // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
   // Mutates result.action in place — the same object reference flows to

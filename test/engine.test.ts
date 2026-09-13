@@ -537,10 +537,8 @@ describe("mergeRepoConfig", () => {
 
   it("per-section override merges shallowly", () => {
     const merged = mergeRepoConfig(baseConfig, {
-      provider: "ollama",
       review: { inlineComments: false },
     });
-    assert.equal(merged.provider, "ollama");
     assert.equal(merged.review.inlineComments, false);
     assert.equal(merged.review.event, null); // untouched
   });
@@ -548,7 +546,7 @@ describe("mergeRepoConfig", () => {
   it("does not mutate the base config", () => {
     const original = structuredClone(baseConfig);
     mergeRepoConfig(baseConfig, {
-      provider: "openai",
+      memory: { enabled: false },
       prepromptAppend: "extra",
     });
     assert.deepEqual(baseConfig, original);
@@ -561,28 +559,29 @@ describe("mergeRepoConfig", () => {
 
   it("org config overrides global, repo config overrides org", () => {
     const orgConfig = {
-      provider: "openai" as const,
+      review: { inlineComments: false },
       prepromptAppend: " Org rule.",
     };
-    const repoConfig = { provider: "ollama" as const };
+    const repoConfig = { memory: { enabled: false } };
 
     const afterOrg = mergeRepoConfig(baseConfig, orgConfig);
     const afterRepo = mergeRepoConfig(afterOrg, repoConfig);
 
-    assert.equal(afterOrg.provider, "openai");
+    assert.equal(afterOrg.review.inlineComments, false);
     assert.ok(afterOrg.preprompt.includes("Org rule."));
-    assert.equal(afterRepo.provider, "ollama");
-    assert.ok(afterRepo.preprompt.includes("Org rule.")); // survives repo merge
+    assert.equal(afterRepo.memory.enabled, false);
+    assert.equal(afterRepo.review.inlineComments, false); // survives repo merge
+    assert.ok(afterRepo.preprompt.includes("Org rule."));
   });
 
   it("null org config is a no-op, repo config still applies", () => {
     const afterOrg = mergeRepoConfig(baseConfig, null);
     const afterRepo = mergeRepoConfig(afterOrg, {
-      provider: "openrouter" as const,
+      memory: { enabled: false },
     });
 
-    assert.equal(afterOrg.provider, "anthropic");
-    assert.equal(afterRepo.provider, "openrouter");
+    assert.equal(afterOrg.memory.enabled, baseConfig.memory.enabled);
+    assert.equal(afterRepo.memory.enabled, false);
   });
 });
 

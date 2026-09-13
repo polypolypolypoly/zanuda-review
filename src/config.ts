@@ -95,15 +95,17 @@ const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>;
 
-/** A repo-supplied `.zanuda.yml` may override a subset of the config. */
+/** A repo-supplied `.zanuda/config.yml` may override a subset of the config. */
 export const RepoConfigSchema = ConfigSchema.partial().extend({
   // Convenience: a repo can append extra instructions without replacing the
   // whole preprompt.
   prepromptAppend: z.string().optional(),
   // Make nested objects partial so overlay/repo configs can specify only the
   // fields they need, without restating every field from defaults.
-  // Note: access and models are intentionally NOT overridable by repo config
-  // — access is security-sensitive, models affect operator cost.
+  // The schema stays permissive — it is shared with the operator's
+  // ZANUDA_CONFIG overlay, which may set everything. Operator-only keys are
+  // dropped from untrusted repo/org configs at merge time (see
+  // stripOperatorOnly).
   persistence: ConfigSchema.shape.persistence.partial().optional(),
   memory: ConfigSchema.shape.memory.partial().optional(),
   context: ConfigSchema.shape.context.partial().optional(),
@@ -113,6 +115,36 @@ export const RepoConfigSchema = ConfigSchema.partial().extend({
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
+
+/**
+ * Keys an untrusted `.zanuda/config.yml` (org or repo) may not set.
+ *
+ * Two reasons, both about the operator rather than the repo:
+ *   - filesystem and process control — `persistence` and `memory.dir` decide
+ *     where the service account creates directories and writes LLM output;
+ *   - operator cost — `provider` picks which API key gets burned, and
+ *     `limits` / `generation.maxTokens` are the spend backstops.
+ *
+ * `access` and `models` are dropped for the same reason, in mergeRepoConfig.
+ * Everything else (memory.enabled, context, review flags, prepromptAppend)
+ * stays repo-overridable: those tune the review, not the operator's machine.
+ */
+function stripOperatorOnly(repo: RepoConfig): RepoConfig {
+  const {
+    persistence: _persistence,
+    limits: _limits,
+    provider: _provider,
+    ...rest
+  } = repo;
+
+  const memory = repo.memory ? { ...repo.memory } : undefined;
+  if (memory) delete memory.dir;
+
+  const generation = repo.generation ? { ...repo.generation } : undefined;
+  if (generation) delete generation.maxTokens;
+
+  return { ...rest, memory, generation };
+}
 
 export function loadConfig(path?: string): Config {
   // Always load config/default.yaml (or explicit path) as the full base config.
@@ -145,7 +177,7 @@ export function loadConfig(path?: string): Config {
         `Invalid overlay config at ${overlayPath}:\n${z.prettifyError(overlayParsed.error)}`,
       );
     }
-    config = mergeRepoConfig(config, overlayParsed.data);
+    config = mergeOperatorConfig(config, overlayParsed.data);
   }
 
   return applyEnvOverrides(config);
@@ -172,14 +204,35 @@ function applyEnvOverrides(config: Config): Config {
 }
 
 /**
- * Merge a repo's `.zanuda.yml` over the global config.
+ * Merge an untrusted org or repo `.zanuda/config.yml` over the current config.
+ *
  * Shallow per-section; `prepromptAppend` is concatenated onto the preprompt.
  * Nested objects are merged field-by-field and undefined repo fields are
  * ignored — the base config value is preserved.
+ *
+ * Operator-only keys are dropped before merging: `access` and `models` here,
+ * the rest in stripOperatorOnly. A repo config is written by whoever can
+ * commit to the repo's base branch, which is not the operator running Zanuda.
  */
 export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {
   if (!repo) return base;
+  const safe = stripOperatorOnly(repo);
+  return mergeConfig(base, { ...safe, models: undefined, access: undefined });
+}
 
+/**
+ * Merge the operator's own ZANUDA_CONFIG overlay over the packaged defaults.
+ * The overlay is a local file under the operator's control, so every key
+ * applies — including `access.allowlist`, `models` and the spend limits.
+ */
+export function mergeOperatorConfig(
+  base: Config,
+  overlay: RepoConfig | null,
+): Config {
+  return overlay ? mergeConfig(base, overlay) : base;
+}
+
+function mergeConfig(base: Config, repo: RepoConfig): Config {
   const mergeSection = <T extends object>(
     baseVal: T,
     repoVal?: Partial<T>,
@@ -188,12 +241,8 @@ export function mergeRepoConfig(base: Config, repo: RepoConfig | null): Config {
   const merged: Config = {
     ...base,
     ...stripUndefined(repo),
-    // access and models are NOT merged from repo config — access is
-    // security-sensitive (a repo could widen the allowlist), and models
-    // affect operator cost. They are operator-only, set in the global
-    // config or ZANUDA_CONFIG overlay.
-    models: base.models,
-    access: base.access,
+    models: mergeSection(base.models, repo.models),
+    access: mergeSection(base.access, repo.access),
     generation: mergeSection(base.generation, repo.generation),
     persistence: mergeSection(base.persistence, repo.persistence),
     memory: mergeSection(base.memory, repo.memory),

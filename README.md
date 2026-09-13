@@ -125,7 +125,7 @@ All Zanuda files live under `.zanuda/` in the repo root (or in the org's `.githu
 
 ```
 .zanuda/
-  config.yml          # settings (provider, model, preprompt rules, etc.)
+  config.yml          # settings (preprompt rules, context files, review flags)
   instructions.md     # free-form reviewer guidelines
 ```
 
@@ -140,18 +140,29 @@ Instructions concatenate in the same order (org first, repo second).
 ### `.zanuda/config.yml`
 
 ```yaml
-provider: openrouter
-models:
-  openrouter: anthropic/claude-opus-4-8
 prepromptAppend: |
   This is a Rust project. Flag any use of unsafe.
 context:
   includeFiles: [README.md, ARCHITECTURE.md]
 memory:
   enabled: false
+review:
+  suggestions: true
 ```
 
 Full list of options: see `config/default.yaml`.
+
+**Operator-only settings.** A repo or org config tunes the review; it cannot
+steer the machine Zanuda runs on. These keys are ignored in `.zanuda/config.yml`
+and only apply in the operator's own config (`config/default.yaml` or the file
+`ZANUDA_CONFIG` points at):
+
+| Key | Why |
+| --- | --- |
+| `access` | a repo could add itself to the allowlist |
+| `provider`, `models` | picks which of the operator's API keys gets billed |
+| `limits`, `generation.maxTokens` | the spend backstops |
+| `persistence`, `memory.dir` | decide where the service account writes files |
 
 ### `.zanuda/instructions.md`
 

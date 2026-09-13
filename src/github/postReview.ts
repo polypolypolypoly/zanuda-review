@@ -5,7 +5,7 @@ import type { ReviewResult, ReviewComment } from "../review/types.js";
 
 // buildReviewCommentBody lives in review/format.ts (platform-agnostic);
 // re-exported here so existing imports from github/postReview continue to work.
-import { buildReviewCommentBody } from "../review/format.js";
+import { buildReviewCommentBody, fencedBlock } from "../review/format.js";
 export { buildReviewCommentBody };
 
 const SEVERITY_EMOJI: Record<string, string> = {
@@ -13,23 +13,18 @@ const SEVERITY_EMOJI: Record<string, string> = {
   warning: "⚠️",
 };
 
-/** Render a review comment for GitHub, appending a suggestion block if present. */
+/**
+ * Render a review comment for GitHub, appending a suggestion block if present.
+ *
+ * The suggestion goes in a fence long enough that nothing inside it can close
+ * the block (see fencedBlock) — a suggestion is attacker-reachable content and
+ * a fence break injects arbitrary markdown, including a second applyable
+ * suggestion, into Zanuda's comment.
+ */
 function renderCommentBody(c: ReviewComment): string {
   const base = `${SEVERITY_EMOJI[c.severity] ?? ""} ${c.body}`.trim();
   if (!c.suggestion) return base;
-  return `${base}\n\n\`\`\`suggestion\n${sanitizeSuggestion(c.suggestion)}\n\`\`\``;
-}
-
-/**
- * Prevent fence-break injection: if the suggestion contains a line starting
- * with \`\`\`, prepend a single space. A space-prefixed fence does not close
- * the \`\`\`suggestion block in GitHub-flavoured markdown.
- */
-function sanitizeSuggestion(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => (line.trimStart().startsWith("```") ? " " + line : line))
-    .join("\n");
+  return `${base}\n\n${fencedBlock(c.suggestion, "suggestion")}`;
 }
 
 // Exported for tests.

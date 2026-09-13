@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import * as fc from "fast-check";
 import {
+  mergeOperatorConfig,
   mergeRepoConfig,
   RepoConfigSchema,
   type Config,
@@ -127,12 +128,58 @@ describe("mergeRepoConfig: core invariants", () => {
 
   it("partial overrides preserve unset fields", () => {
     const r = mergeRepoConfig(baseConfig, {
-      provider: "openai",
+      review: { inlineComments: false },
       memory: { enabled: false },
     });
-    assert.equal(r.provider, "openai");
+    assert.equal(r.review.inlineComments, false);
     assert.equal(r.memory.enabled, false);
     assert.equal(r.memory.dir, baseConfig.memory.dir); // unset, preserved
+  });
+});
+
+// ── Operator-only keys ───────────────────────────────────────────────────────
+//
+// A repo's .zanuda/config.yml is written by whoever can commit to the base
+// branch. These keys steer the operator's filesystem and spend, so a repo
+// config must not move them.
+
+describe("mergeRepoConfig: operator-only keys", () => {
+  const hostile = {
+    provider: "openai" as const,
+    persistence: { stateFile: "/tmp/evil-state.json" },
+    memory: { dir: "/tmp/evil-memory", enabled: false },
+    limits: { maxConcurrentReviews: 99, tokenBudgetPerPR: 0, maxBatches: 0 },
+    generation: { maxTokens: 99999, temperature: 1.5 },
+    models: { anthropic: "expensive-model" },
+    access: { allowlist: ["attacker"] },
+  };
+
+  it("ignores every operator-only key from a repo config", () => {
+    const r = mergeRepoConfig(baseConfig, hostile);
+    assert.equal(r.provider, baseConfig.provider);
+    assert.deepEqual(r.persistence, baseConfig.persistence);
+    assert.equal(r.memory.dir, baseConfig.memory.dir);
+    assert.deepEqual(r.limits, baseConfig.limits);
+    assert.equal(r.generation.maxTokens, baseConfig.generation.maxTokens);
+    assert.deepEqual(r.models, baseConfig.models);
+    assert.deepEqual(r.access, baseConfig.access);
+  });
+
+  it("still applies the keys a repo may set", () => {
+    const r = mergeRepoConfig(baseConfig, hostile);
+    assert.equal(r.memory.enabled, false);
+    assert.equal(r.generation.temperature, 1.5);
+  });
+
+  it("the operator overlay may set all of them", () => {
+    const r = mergeOperatorConfig(baseConfig, hostile);
+    assert.equal(r.provider, "openai");
+    assert.equal(r.persistence.stateFile, "/tmp/evil-state.json");
+    assert.equal(r.memory.dir, "/tmp/evil-memory");
+    assert.equal(r.limits.maxConcurrentReviews, 99);
+    assert.equal(r.generation.maxTokens, 99999);
+    assert.equal(r.models.anthropic, "expensive-model");
+    assert.deepEqual(r.access.allowlist, ["attacker"]);
   });
 });
 

@@ -20,6 +20,11 @@ const DEFAULT_INTERVAL_MS = 60_000;
 /** Maximum number of @mention replies per PR before going silent. */
 const MAX_MENTION_REPLIES = 5;
 
+/** Author-only commands recognised in an @mention. */
+const RETRY_PATTERN = /\bretry\b/i;
+const RE_REVIEW_PATTERN =
+  /\b(?:re-?review|review again|round\s*2|re-?check)\b/i;
+
 export async function startPoller(opts: {
   config: Config;
   reviewerLogin: string;
@@ -426,7 +431,8 @@ async function pollReviewRequests(opts: {
  */
 const MENTION_SCAN_WINDOW_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 
-async function pollMentions(opts: {
+/** Exported for tests — the poller's only entry point is startPoller. */
+export async function pollMentions(opts: {
   config: Config;
   reviewerLogin: string;
   connector: SCMConnector;
@@ -437,6 +443,17 @@ async function pollMentions(opts: {
   const cutoff = new Date(Date.now() - MENTION_SCAN_WINDOW_MS);
 
   for (const [id, state] of store.entries()) {
+    // Re-check the allowlist on every tick. State entries outlive a repo's
+    // allowlist membership, and each reply refreshes the 7-day scan window —
+    // without this, a de-listed repo keeps its mention-reply privileges
+    // (LLM spend + bot posting) indefinitely.
+    if (!isAllowed(state.ref, config.access.allowlist)) {
+      logger.debug(
+        { repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
+        "Skipping mention scan — repo not in access.allowlist",
+      );
+      continue;
+    }
     // Scan PRs that have at least one completed round OR are waiting for a
     // retry command (failedAwaitingRetry=true, rounds may still be 0).
     if (state.rounds === 0 && !state.failedAwaitingRetry) continue;
@@ -477,11 +494,18 @@ async function pollMentions(opts: {
     );
 
     let prTitle = `PR #${state.number}`;
+    // Commands are gated on the author login, so a failed fetch is not
+    // recoverable for them — null means "unknown", and commands are withheld.
+    let prAuthor: string | null = null;
     try {
       const pr = await connector.fetchPR(state.ref, state.number);
       prTitle = pr.title;
-    } catch {
-      // Non-fatal — generic title is fine.
+      prAuthor = pr.author || null;
+    } catch (err) {
+      logger.warn(
+        { err, repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
+        "Failed to fetch PR for mention scan — commands withheld this tick",
+      );
     }
 
     const discussion = formatDiscussion(comments, 20);
@@ -492,12 +516,60 @@ async function pollMentions(opts: {
       const current = store.get(id);
       if (!current) break;
 
+      // ── Command gate ──────────────────────────────────────────────────────
+      // retry and re-review spend money: a re-review is a full review round,
+      // a retry re-opens one. On a public repo anyone can comment, so both are
+      // restricted to the PR author. Everything else stays open to any
+      // commenter (capped at MAX_MENTION_REPLIES).
+      const isRetryCommand =
+        current.failedAwaitingRetry && RETRY_PATTERN.test(mention.body);
+      const isReReviewCommand =
+        current.rounds >= 1 &&
+        current.rounds < MAX_REVIEW_ROUNDS &&
+        RE_REVIEW_PATTERN.test(mention.body);
+
+      if (isRetryCommand || isReReviewCommand) {
+        if (prAuthor === null) {
+          // Author unknown (PR fetch failed above) — leave the mention
+          // unreplied so the next tick can classify it properly.
+          continue;
+        }
+        if (mention.author.toLowerCase() !== prAuthor.toLowerCase()) {
+          logger.info(
+            {
+              repo: `${state.ref.owner}/${state.ref.repo}`,
+              pr: state.number,
+              commenter: mention.author,
+            },
+            "Ignoring command from non-author",
+          );
+          try {
+            await connector.replyToComment(
+              state.ref,
+              state.number,
+              mention,
+              `Only the PR author (@${prAuthor}) can request a re-review or a retry.`,
+            );
+          } catch (err) {
+            logger.warn({ err }, "Failed to post command-refusal reply");
+          }
+          store.set(
+            id,
+            applyEvent(current, {
+              type: "MENTION_REPLIED",
+              repliedCommentId: mention.id,
+            }),
+          );
+          continue;
+        }
+      }
+
       // ── Retry command ──────────────────────────────────────────────────────
-      // Detected when the mention body contains the word "retry" and the PR
-      // is currently in the failed-awaiting-retry state. We clear the flag and
-      // acknowledge — the next pollReviewRequests tick picks the PR up again
-      // because the review request is still open on the platform.
-      if (current.failedAwaitingRetry && /\bretry\b/i.test(mention.body)) {
+      // The PR is in the failed-awaiting-retry state and the author asked for
+      // a retry. We clear the flag and acknowledge — the next
+      // pollReviewRequests tick picks the PR up again because the review
+      // request is still open on the platform.
+      if (isRetryCommand) {
         logger.info(
           { repo: `${state.ref.owner}/${state.ref.repo}`, pr: state.number },
           "Retry command received — resetting failed state",
@@ -523,17 +595,10 @@ async function pollMentions(opts: {
       }
 
       // ── Re-review command ─────────────────────────────────────────────────
-      // Detected when the author posts @reviewer with one of the re-review
-      // trigger words. Sets the reReviewRequested flag so the next
-      // pollReviewRequests tick picks the PR up for round 2+.
-      // Only applies when the PR has completed at least one round.
-      if (
-        current.rounds >= 1 &&
-        current.rounds < MAX_REVIEW_ROUNDS &&
-        /\b(?:re-?review|review again|round\s*2|re-?check)\b/i.test(
-          mention.body,
-        )
-      ) {
+      // The author posted @reviewer with one of the re-review trigger words.
+      // Sets the reReviewRequested flag so the next pollReviewRequests tick
+      // picks the PR up for round 2+.
+      if (isReReviewCommand) {
         logger.info(
           {
             repo: `${state.ref.owner}/${state.ref.repo}`,
