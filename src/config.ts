@@ -68,8 +68,12 @@ const ConfigSchema = z.object({
     maxConcurrentReviews: z.number().int().positive(),
     /** Max new PRs picked up per poll cycle (caps burst from a flooded queue). */
     maxNewPrsPerCycle: z.number().int().positive(),
-    /** Per-PR token budget (input + output). 0 = no limit. */
-    tokenBudgetPerPR: z.number().int().nonnegative().default(0),
+    /**
+     * Per-PR token budget (input + output). 0 = no limit. Default matches
+     * config/default.yaml (a full 10-batch review with verification); keep the
+     * schema default in sync so an omitted key cannot silently lift the cap.
+     */
+    tokenBudgetPerPR: z.number().int().nonnegative().default(400_000),
     /**
      * Hard cap on review batches per PR. Prevents unbounded LLM cost on
      * pathological PRs with hundreds of changed files. Beyond this limit,
@@ -81,8 +85,9 @@ const ConfigSchema = z.object({
      * Global cap on review rounds started per UTC day, across every repo.
      * The outermost spend backstop; 0 = no limit. Deferred PRs are still
      * requested on the platform, so they are picked up the next day.
+     * Default matches config/default.yaml — keep in sync.
      */
-    maxReviewRoundsPerDay: z.number().int().nonnegative().default(0),
+    maxReviewRoundsPerDay: z.number().int().nonnegative().default(50),
   }),
   memory: z.object({
     /** Toggle the whole feature on/off. */
