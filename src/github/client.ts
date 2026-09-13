@@ -55,13 +55,31 @@ export function createOctokit(token = process.env.GITHUB_TOKEN): Octokit {
   });
 }
 
-/** fetch with a deadline, unless the caller supplied its own abort signal. */
-function timeoutFetch(
+/**
+ * Combine an optional caller-supplied abort signal with the request deadline.
+ * `AbortSignal.any` follows both: the caller's cancellation and our timeout.
+ *
+ * The retry and throttling plugins pass their own signal (to cancel an
+ * in-flight request when they reschedule), so "use the caller's signal if
+ * present" would silently drop the deadline on exactly the requests those
+ * plugins touch — the hung-connection failure this wrapper exists to fix.
+ */
+export function combineWithDeadline(
+  signal: AbortSignal | null | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const deadline = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, deadline]) : deadline;
+}
+
+/** fetch with a deadline that always applies, even when the caller supplied
+ *  its own abort signal. Exported for tests. */
+export function timeoutFetch(
   url: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> {
   return fetch(url, {
     ...init,
-    signal: init?.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    signal: combineWithDeadline(init?.signal, REQUEST_TIMEOUT_MS),
   });
 }
