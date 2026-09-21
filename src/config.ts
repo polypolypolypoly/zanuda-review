@@ -107,6 +107,12 @@ const ConfigSchema = z.object({
     /** Self-verification: after review, a second LLM call checks each finding
      * against the diff. Disable for budget-constrained self-hosters. */
     verifyFindings: z.boolean().default(true),
+    /** Hard cap on inline comments posted per review. Blockers take
+     * precedence; excess warnings are dropped first. */
+    maxCommentsPerReview: z.number().int().min(1).default(10),
+    /** When false (default), round 2+ posts only blockers — a follow-up
+     * round exists to verify round-1 fixes, not to open fresh warnings. */
+    round2Warnings: z.boolean().default(false),
   }),
 });
 

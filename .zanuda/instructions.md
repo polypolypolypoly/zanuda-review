@@ -2,6 +2,23 @@
 
 This is Zanuda's own codebase. Be strict.
 
+## Review calibration (read first)
+
+"Strict" means precise on the things that matter — not exhaustive. The bar for
+raising anything is: **does the fix improve correctness, security, or
+readability of THIS PR today?**
+
+- Only flag concrete bugs, security issues, invariant violations, or genuine
+  readability regressions that exist in the diff right now.
+- Never raise hypotheticals ("in theory", "if X were ever added", "in case the
+  schema evolves") or self-conceding notes ("not blocking", "no action needed",
+  "flagging in case"). If you cannot state how the fix improves the code today,
+  do not raise it.
+- Readability and clear intent are first-class goals. A pattern that is plain
+  and obviously correct is NOT a bug just because a more defensive version
+  exists. Do not demand defensive code against unreachable states.
+- Prefer fewer, high-confidence findings over covering every corner.
+
 ## Security — highest priority
 
 **Prompt injection is the primary threat model.** Any user-controlled content
