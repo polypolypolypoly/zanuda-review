@@ -246,6 +246,33 @@ const OUTCOME_LABEL: Record<string, string> = {
 };
 
 /**
+ * Derive a calibration directive from past outcomes: when a high fraction of
+ * warnings were dismissed or ignored, the reviewer has been over-flagging —
+ * tell it to raise warnings only when it can name a concrete defect today.
+ * Returns "" when the history is too thin or the signal is ambiguous.
+ */
+function reviewHistoryCalibration(history: ReviewHistory): string {
+  const outcomes = history.entries.flatMap((e) => e.outcomes);
+  const warnings = outcomes.filter((o) => o.severity === "warning");
+  if (warnings.length < 2) return "";
+
+  const noise = warnings.filter(
+    (o) => o.outcome === "dismissed" || o.outcome === "ignored",
+  ).length;
+  const ratio = noise / warnings.length;
+  if (ratio < 0.5) return "";
+
+  const pct = Math.round(ratio * 100);
+  return (
+    `Calibration: ${noise} of ${warnings.length} past warnings (${pct}%) were ` +
+    `dismissed or ignored rather than fixed. Warnings are low-signal in this ` +
+    `repo — raise one only when you can name a concrete defect or readability ` +
+    `regression that exists in this diff today. Silence is better than a ` +
+    `finding the author will not act on.`
+  );
+}
+
+/**
  * Render the review history as a compact markdown section for injection into
  * the review prompt. Most recent entries first so the model sees recent context
  * at the top without needing to scan down.
@@ -261,6 +288,11 @@ export function formatReviewHistory(
     `## Review history (last ${entries.length} review${entries.length === 1 ? "" : "s"})`,
     "",
   ];
+
+  const calibration = reviewHistoryCalibration(history);
+  if (calibration) {
+    lines.push(calibration, "");
+  }
 
   for (const entry of entries) {
     const icon = ACTION_ICON[entry.finalAction] ?? "💬";

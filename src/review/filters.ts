@@ -75,7 +75,10 @@ function applyDropFilters(comment: ReviewComment): string | null {
   const r = minBodyLength(comment);
   if (r !== null) return r;
 
-  return selfDebate(comment);
+  const s = selfDebate(comment);
+  if (s !== null) return s;
+
+  return nonFinding(comment);
 }
 
 // ── Phase 2: mutate filters ───────────────────────────────────────────────────
@@ -173,6 +176,46 @@ function selfDebate(comment: ReviewComment): string | null {
 
   // Self-debate markers without confirmation — the comment is awkward
   // but might still flag a real issue. Keep it.
+  return null;
+}
+
+// ── Filter: non-finding (hypothetical or self-conceding) ─────────────────────
+//
+// Catches the "why did you raise this" comment: a warning that names no
+// present-tense defect — either a hypothetical about some future change
+// ("in theory", "if X were ever added", "in case the schema evolves") or a
+// concern the model immediately walks back ("not blocking", "no action
+// needed", "flagging in case"). These cost the author a reply and a resolve
+// but change nothing, and over rounds they bury the intent of the code under
+// defensive noise.
+
+const HYPOTHETICAL_PATTERNS = [
+  /\bin theory\b/i,
+  /\bhypothetical(?:ly)?\b/i,
+  /\bif [^,.;\n]{0,60}? ever\b/i,
+  /\bin case [^,.;\n]{0,60}? (?:evolves?|changes?|grows?)\b/i,
+];
+
+const CONCEDING_PATTERNS = [
+  /\bnot blocking\b/i,
+  /\bnon-blocking\b/i,
+  /\bno action (?:needed|required)\b/i,
+  /\bno change (?:needed|required)\b/i,
+  /\bflagging in case\b/i,
+];
+
+function nonFinding(comment: ReviewComment): string | null {
+  // Only warnings are dropped here. A speculative BLOCKER is still a signal —
+  // speculativeBlocker (mutate phase) downgrades it to a warning instead, so
+  // we never regex-drop a potential security/crash finding.
+  if (comment.severity !== "warning") return null;
+
+  if (HYPOTHETICAL_PATTERNS.some((p) => p.test(comment.body))) {
+    return "hypothetical — no present-tense defect";
+  }
+  if (CONCEDING_PATTERNS.some((p) => p.test(comment.body))) {
+    return "self-conceding — net message is 'no action needed'";
+  }
   return null;
 }
 
@@ -417,6 +460,66 @@ export function filterAnchorableComments(
       });
     }
   }
+  return { kept, dropped };
+}
+
+// ── Filter: per-review comment budget and round discipline ───────────────────
+//
+// Two hard caps that keep a review actionable and keep follow-up rounds from
+// piling fresh warnings onto code that already passed:
+//   1. Round 2+ posts blockers only (configurable) — a follow-up round exists
+//      to verify round-1 fixes, not to open new warnings on reviewed code.
+//   2. A hard ceiling on inline comments per review; blockers take precedence
+//      and excess warnings are dropped first.
+//
+// Runs after anchor validation so the budget counts only what will actually
+// post, and before filterReviewVerdict so the verdict reflects the trimmed set.
+
+export function filterCommentBudget(
+  comments: ReviewComment[],
+  opts: { round: number; maxComments: number; round2Warnings: boolean },
+): { kept: ReviewComment[]; dropped: DroppedComment[] } {
+  const dropped: DroppedComment[] = [];
+  let kept = comments;
+
+  if (opts.round >= 2 && !opts.round2Warnings) {
+    const blockers = kept.filter((c) => c.severity === "blocker");
+    for (const w of kept.filter((c) => c.severity === "warning")) {
+      dropped.push({
+        path: w.path,
+        line: w.line,
+        body: w.body,
+        reason: "warning dropped in round 2 (blockers only)",
+      });
+    }
+    kept = blockers;
+  }
+
+  if (kept.length > opts.maxComments) {
+    const blockers = kept.filter((c) => c.severity === "blocker");
+    const warnings = kept.filter((c) => c.severity === "warning");
+
+    // Blockers always win; warnings fill whatever budget remains.
+    const blockerKeep = blockers.slice(0, opts.maxComments);
+    const warningKeep = warnings.slice(
+      0,
+      Math.max(0, opts.maxComments - blockerKeep.length),
+    );
+    const keepSet = new Set([...blockerKeep, ...warningKeep]);
+
+    for (const c of kept) {
+      if (!keepSet.has(c)) {
+        dropped.push({
+          path: c.path,
+          line: c.line,
+          body: c.body,
+          reason: "over per-review comment cap",
+        });
+      }
+    }
+    kept = kept.filter((c) => keepSet.has(c));
+  }
+
   return { kept, dropped };
 }
 

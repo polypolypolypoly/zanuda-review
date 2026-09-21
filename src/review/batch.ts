@@ -12,6 +12,7 @@ import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
 import {
   filterAnchorableComments,
+  filterCommentBudget,
   filterFilesSummary,
   filterResultSummaries,
   filterReviewComments,
@@ -443,7 +444,25 @@ export async function reviewBatched(
     );
   }
 
-  // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+  // Comment budget + round discipline (non-LLM).
+  const budgeted = filterCommentBudget(result.comments, {
+    round,
+    maxComments: config.review.maxCommentsPerReview,
+    round2Warnings: config.review.round2Warnings,
+  });
+  if (budgeted.dropped.length > 0) {
+    log.warn(
+      {
+        dropped: budgeted.dropped.map(
+          (d) => `${d.path}:${d.line} — ${d.reason}`,
+        ),
+      },
+      "Batch: dropped comments over budget/round discipline",
+    );
+  }
+  result.comments = budgeted.kept;
+
+  // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
   // Mutates result.action in place — the same object reference flows to
   // buildReviewCommentBody and postReview below.
   const verdictReason = filterReviewVerdict(result);

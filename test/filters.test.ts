@@ -7,6 +7,7 @@ import {
   filterReviewComments,
   filterAnchorableComments,
   filterReviewVerdict,
+  filterCommentBudget,
   formatFilterSummary,
 } from "../src/review/filters.js";
 import type { ReviewComment, ReviewResult } from "../src/review/types.js";
@@ -200,7 +201,7 @@ describe("speculativeBlocker filter", () => {
   it("does NOT touch warnings (only downgrades blockers)", () => {
     const comment = makeComment({
       severity: "warning",
-      body: "In theory this could be an issue but it's extremely rare.",
+      body: "This is extremely rare but could fail under clock skew.",
     });
     const result = filterReviewComments([comment], {
       maxCommentChars: MAX_CHARS,
@@ -614,5 +615,113 @@ describe("filterMentionReply", () => {
     const reply = filterMentionReply("word ".repeat(5000));
     assert.ok(reply !== null);
     assert.ok(reply!.length <= 1000);
+  });
+});
+
+// ── non-finding drop filter (hypothetical / self-conceding) ──────────────────
+
+describe("non-finding drop filter", () => {
+  it("drops hypothetical warnings", () => {
+    const comments = [
+      makeComment({
+        body: "If an array-valued keyword were ever added this would render as [object Object].",
+      }),
+      makeComment({
+        body: "In theory this could overflow, but no input reaches it today.",
+      }),
+      makeComment({
+        body: "Flagged in case the schema shape evolves later.",
+      }),
+    ];
+    const result = filterReviewComments(comments, {
+      maxCommentChars: MAX_CHARS,
+    });
+    assert.equal(result.kept.length, 0);
+    assert.equal(result.dropped.length, 3);
+  });
+
+  it("drops self-conceding warnings", () => {
+    const comments = [
+      makeComment({
+        body: "Minor; not blocking. No action needed if confirmed.",
+      }),
+      makeComment({
+        body: "Non-blocking given the fallback is documented.",
+      }),
+    ];
+    const result = filterReviewComments(comments, {
+      maxCommentChars: MAX_CHARS,
+    });
+    assert.equal(result.kept.length, 0);
+    assert.equal(result.dropped.length, 2);
+  });
+
+  it("keeps concrete warnings", () => {
+    const comments = [
+      makeComment({
+        body: "This will crash on null input — add a guard before dereferencing.",
+      }),
+    ];
+    const result = filterReviewComments(comments, {
+      maxCommentChars: MAX_CHARS,
+    });
+    assert.equal(result.kept.length, 1);
+    assert.equal(result.dropped.length, 0);
+  });
+});
+
+// ── per-review comment budget & round discipline ─────────────────────────────
+
+describe("filterCommentBudget", () => {
+  it("drops warnings in round 2 when round2Warnings is false", () => {
+    const comments = [
+      makeComment({ severity: "blocker", body: "Token leaks into logs." }),
+      makeComment({ severity: "warning", body: "Consider a timeout here." }),
+      makeComment({ severity: "warning", body: "Could be more DRY." }),
+    ];
+    const result = filterCommentBudget(comments, {
+      round: 2,
+      maxComments: 10,
+      round2Warnings: false,
+    });
+    assert.equal(result.kept.length, 1);
+    assert.equal(result.kept[0]!.severity, "blocker");
+    assert.equal(result.dropped.length, 2);
+  });
+
+  it("keeps warnings in round 2 when round2Warnings is true", () => {
+    const comments = [
+      makeComment({ severity: "blocker", body: "Token leaks into logs." }),
+      makeComment({ severity: "warning", body: "Consider a timeout here." }),
+    ];
+    const result = filterCommentBudget(comments, {
+      round: 2,
+      maxComments: 10,
+      round2Warnings: true,
+    });
+    assert.equal(result.kept.length, 2);
+  });
+
+  it("caps total comments, blockers first", () => {
+    const comments = [
+      makeComment({ severity: "warning", body: "w1 warning one here." }),
+      makeComment({ severity: "warning", body: "w2 warning two here." }),
+      makeComment({ severity: "warning", body: "w3 warning three here." }),
+      makeComment({ severity: "blocker", body: "b1 crashes on null." }),
+      makeComment({ severity: "blocker", body: "b2 leaks a secret." }),
+    ];
+    const result = filterCommentBudget(comments, {
+      round: 1,
+      maxComments: 3,
+      round2Warnings: false,
+    });
+    // Two blockers always kept; one warning slot left.
+    assert.equal(result.kept.length, 3);
+    assert.deepEqual(result.kept.map((c) => c.severity).sort(), [
+      "blocker",
+      "blocker",
+      "warning",
+    ]);
+    assert.equal(result.dropped.length, 2);
   });
 });

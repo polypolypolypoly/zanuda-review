@@ -27,6 +27,7 @@ import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import {
   filterAnchorableComments,
+  filterCommentBudget,
   filterFilesSummary,
   filterResultSummaries,
   filterReviewComments,
@@ -462,7 +463,27 @@ export async function reviewPullRequest(
     }
     result.comments = anchored.kept;
 
-    // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+    // Comment budget + round discipline (non-LLM). After anchor validation so
+    // the cap counts only postable comments, before filterReviewVerdict so the
+    // verdict reflects the trimmed set.
+    const budgeted = filterCommentBudget(result.comments, {
+      round,
+      maxComments: config.review.maxCommentsPerReview,
+      round2Warnings: config.review.round2Warnings,
+    });
+    if (budgeted.dropped.length > 0) {
+      log.warn(
+        {
+          dropped: budgeted.dropped.map(
+            (d) => `${d.path}:${d.line} — ${d.reason}`,
+          ),
+        },
+        "Dropped comments over budget/round discipline",
+      );
+    }
+    result.comments = budgeted.kept;
+
+    // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
     // Mutates result.action in place — the same object reference flows to
     // buildReviewCommentBody and postReview below.
     const verdictReason = filterReviewVerdict(result);
