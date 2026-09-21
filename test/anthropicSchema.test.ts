@@ -40,6 +40,10 @@ describe("serializeConstraintValue", () => {
   it("leaves strings unquoted", () => {
     assert.equal(serializeConstraintValue("max"), "max");
   });
+
+  it("falls back to String() for undefined (JSON.stringify returns undefined)", () => {
+    assert.equal(serializeConstraintValue(undefined), "undefined");
+  });
 });
 
 describe("sanitizeSchemaForAnthropic", () => {
