@@ -8,7 +8,10 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { sanitizeSchemaForAnthropic } from "../src/llm/anthropic.js";
+import {
+  sanitizeSchemaForAnthropic,
+  serializeConstraintValue,
+} from "../src/llm/anthropic.js";
 import { buildReviewResultJsonSchema } from "../src/review/types.js";
 
 /** Every key present anywhere in a schema tree. */
@@ -23,6 +26,21 @@ function allKeys(node: unknown, found = new Set<string>()): Set<string> {
   }
   return found;
 }
+
+describe("serializeConstraintValue", () => {
+  it("keeps numbers readable", () => {
+    assert.equal(serializeConstraintValue(400), "400");
+  });
+
+  it("renders arrays and objects without collapsing to [object Object]", () => {
+    assert.equal(serializeConstraintValue([1, 2, 3]), "[1,2,3]");
+    assert.equal(serializeConstraintValue({ min: 1 }), '{"min":1}');
+  });
+
+  it("leaves strings unquoted", () => {
+    assert.equal(serializeConstraintValue("max"), "max");
+  });
+});
 
 describe("sanitizeSchemaForAnthropic", () => {
   it("removes every unsupported keyword from the real review schema", () => {
