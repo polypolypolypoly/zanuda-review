@@ -22,6 +22,17 @@ const UNSUPPORTED_KEYWORDS = [
 ] as const;
 
 /**
+ * Render a dropped constraint value for the prose note. `JSON.stringify` keeps
+ * array/object values readable where `String()` would collapse them to
+ * `[object Object]`; strings stay unquoted so the note reads naturally.
+ */
+export function serializeConstraintValue(value: unknown): string {
+  return typeof value === "string"
+    ? value
+    : (JSON.stringify(value) ?? String(value));
+}
+
+/**
  * Strip the unsupported keywords, keeping the constraint visible to the model
  * as prose in `description` — the same trade the SDK's own schema helpers make.
  */
@@ -36,7 +47,7 @@ export function sanitizeSchemaForAnthropic(schema: unknown): unknown {
     schema as Record<string, unknown>,
   )) {
     if ((UNSUPPORTED_KEYWORDS as readonly string[]).includes(key)) {
-      notes.push(`${key}: ${String(value)}`);
+      notes.push(`${key}: ${serializeConstraintValue(value)}`);
       continue;
     }
     out[key] = sanitizeSchemaForAnthropic(value);
