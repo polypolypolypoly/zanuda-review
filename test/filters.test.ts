@@ -430,6 +430,41 @@ describe("filterReviewVerdict", () => {
     assert.equal(r.action, "COMMENT");
   });
 
+  it("upgrades APPROVE with a blocker to REQUEST_CHANGES", () => {
+    const r = makeResult("APPROVE", [warn("a.ts", 1), blocker("b.ts", 2)]);
+    const reason = filterReviewVerdict(r);
+    assert.ok(reason);
+    assert.match(reason!, /blocker-severity/);
+    assert.equal(r.action, "REQUEST_CHANGES");
+    assert.ok(
+      r.summary.includes("Verdict adjusted"),
+      "summary should contain adjustment note",
+    );
+  });
+
+  it("upgrades COMMENT with a blocker to REQUEST_CHANGES", () => {
+    const r = makeResult("COMMENT", [blocker("b.ts", 2)]);
+    const reason = filterReviewVerdict(r);
+    assert.ok(reason);
+    assert.match(reason!, /blocker-severity/);
+    assert.equal(r.action, "REQUEST_CHANGES");
+    assert.ok(r.summary.includes("COMMENT upgraded"));
+  });
+
+  it("keeps COMMENT when the findings are warnings only", () => {
+    const r = makeResult("COMMENT", [warn("a.ts", 1)]);
+    assert.equal(filterReviewVerdict(r), null);
+    assert.equal(r.action, "COMMENT");
+  });
+
+  it("keeps APPROVE when the findings are warnings only", () => {
+    const r = makeResult("APPROVE", [warn("a.ts", 1)]);
+    const originalSummary = r.summary;
+    assert.equal(filterReviewVerdict(r), null);
+    assert.equal(r.action, "APPROVE");
+    assert.equal(r.summary, originalSummary);
+  });
+
   it("downgrades REQUEST_CHANGES with zero inline comments to COMMENT", () => {
     const r = makeResult("REQUEST_CHANGES", []);
     const reason = filterReviewVerdict(r);

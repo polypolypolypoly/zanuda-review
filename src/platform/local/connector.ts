@@ -25,9 +25,11 @@ import type {
   SCMConnector,
 } from "../types.js";
 
-const SEVERITY_EMOJI: Record<string, string> = {
-  blocker: "🛑",
-  warning: "⚠️",
+// Backticked: a bare `[warning]` is reference-link syntax, so a model-written
+// body containing a `[warning]: url` definition would render the tag as a link.
+const SEVERITY_TAG: Record<string, string> = {
+  blocker: "`[blocker]`",
+  warning: "`[warning]`",
 };
 
 const VERDICT_DISPLAY: Record<string, { icon: string; label: string }> = {
@@ -368,8 +370,8 @@ function renderReview(result: ReviewResult): string {
   if (result.comments.length > 0) {
     lines.push("", "## Comments", "");
     for (const c of result.comments) {
-      const emoji = SEVERITY_EMOJI[c.severity] ?? "";
-      lines.push(`### ${emoji} \`${c.path}:${c.line}\``, "", c.body, "");
+      const tag = SEVERITY_TAG[c.severity] ?? "";
+      lines.push(`### ${tag} \`${c.path}:${c.line}\``, "", c.body, "");
       if (c.suggestion) {
         const ext = c.path.match(/\.(\w+)$/)?.[1] ?? "";
         lines.push(

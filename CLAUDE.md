@@ -69,10 +69,11 @@ Hard (non-LLM) filters run on the parsed review result before posting:
 - **minBodyLength** (15 chars): drops "Test", empty strings, markdown-only garbage
 - **selfDebate**: drops comments where the model argues with itself and concludes
   "it's fine" without a clear finding
-- **speculativeBlocker**: downgrades 🛑→⚠️ when the model hedges ("in theory",
-  "practically impossible")
+- **speculativeBlocker**: downgrades blocker→warning when the model hedges
+  ("in theory", "practically impossible")
 - **maxBodyLength**: belt-and-suspenders truncation
-- **filterReviewVerdict**: REQUEST_CHANGES with no blocker comments → COMMENT
+- **filterReviewVerdict**: REQUEST_CHANGES with no blocker comments → COMMENT;
+  APPROVE or COMMENT with a blocker comment → REQUEST_CHANGES
 - **filterResultSummaries**: trims runaway `summary` / `prSummary`
 - **filterFilesSummary**: drops file-table rows for paths not in the PR
 - **filterMentionReply**: same min/max length gates on @mention replies
