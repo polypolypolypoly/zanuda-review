@@ -289,9 +289,9 @@ function closesFence(content: string, fenceLength: number): boolean {
 }
 
 describe("renderCommentBody", () => {
-  it("renders body with severity emoji when no suggestion", () => {
+  it("renders body with severity tag when no suggestion", () => {
     const result = renderCommentBody(makeComment());
-    assert.ok(result.includes("⚠️"));
+    assert.ok(result.includes("`[warning]`"));
     assert.ok(result.includes("Use const here."));
     assert.ok(!result.includes("```suggestion"));
   });
@@ -339,7 +339,7 @@ describe("renderCommentBody", () => {
 describe("renderCommentSummary", () => {
   it("renders one-line summary without suggestion", () => {
     const result = renderCommentSummary(makeComment());
-    assert.ok(result.includes("⚠️"));
+    assert.ok(result.includes("`[warning]`"));
     assert.ok(result.includes("src/foo.ts:42"));
     assert.ok(result.includes("Use const here."));
     assert.ok(!result.includes("Suggestion:"));

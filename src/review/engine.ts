@@ -462,7 +462,7 @@ export async function reviewPullRequest(
     }
     result.comments = anchored.kept;
 
-    // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+    // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
     // Mutates result.action in place — the same object reference flows to
     // buildReviewCommentBody and postReview below.
     const verdictReason = filterReviewVerdict(result);

@@ -61,9 +61,10 @@ export async function startPoller(opts: {
   const budget = new DailyBudget(config.persistence.budgetFile || undefined);
 
   /**
-   * Single provider instance shared across both review rounds and mention
-   * replies. Creating it once avoids allocating a new HTTP client on every
-   * mention reply and ensures consistent provider configuration.
+   * Provider instance for @mention replies. Review rounds build their own from
+   * the merged per-repo config (see engine.ts), which may select a different
+   * provider than the poller's global one; replies use the global config.
+   * Creating it once avoids a new HTTP client per reply.
    */
   const provider = createProvider(config.provider);
 

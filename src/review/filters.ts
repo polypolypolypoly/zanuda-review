@@ -422,6 +422,8 @@ export function filterAnchorableComments(
 
 // ── Result-level filter: verdict consistency ──────────────────────────────────
 //
+// The invariant: the header verdict never contradicts the inline findings.
+//
 // REQUEST_CHANGES with zero inline comments is a broken state — the author
 // is told to fix things but given no specific things to fix. Downgrade to
 // COMMENT so the review is still visible but doesn't falsely block the PR.
@@ -429,18 +431,35 @@ export function filterAnchorableComments(
 // More subtly: REQUEST_CHANGES without any blocker-severity inline comments
 // is equally unjustified. A warning alone doesn't warrant blocking.
 //
-// When we downgrade, we also append a note to result.summary so the displayed
-// body never contradicts the header verdict. The model often writes "Verdict is
-// REQUEST_CHANGES" in the free-text summary — without this, the header shows
-// 💬 observations while the body says REQUEST_CHANGES.
+// The opposite direction matters more. APPROVE or COMMENT alongside a
+// blocker-severity finding hides the finding behind a non-blocking header,
+// which is the failure mode a reviewer exists to prevent. Upgrade it to
+// REQUEST_CHANGES.
+//
+// Every adjustment appends a note to result.summary so the displayed body
+// never contradicts the header verdict. The model often restates its verdict
+// in the free-text summary — without this, the header shows 💬 observations
+// while the body says REQUEST_CHANGES.
 //
 // Returns a reason string if the action was changed, null otherwise.
 // Mutates result.action (and result.summary when changed) in place.
 
 export function filterReviewVerdict(result: ReviewResult): string | null {
-  if (result.action !== "REQUEST_CHANGES") return null;
-
   const hasBlocker = result.comments.some((c) => c.severity === "blocker");
+
+  if (
+    (result.action === "APPROVE" || result.action === "COMMENT") &&
+    hasBlocker
+  ) {
+    const from = result.action;
+    (result as { action: ReviewResult["action"] }).action = "REQUEST_CHANGES";
+    (result as { summary: string }).summary =
+      result.summary.trim() +
+      `\n\n_(Verdict adjusted: blocker-severity findings present — ${from} upgraded to REQUEST\\_CHANGES.)_`;
+    return `${from}→REQUEST_CHANGES (blocker-severity comments present)`;
+  }
+
+  if (result.action !== "REQUEST_CHANGES") return null;
 
   if (result.comments.length === 0) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";

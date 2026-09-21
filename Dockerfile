@@ -2,7 +2,9 @@
 FROM node:22-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# --ignore-scripts: the "prepare" script runs husky, which is a dev-only tool
+# and is not installed in a production image. Same flag as the deploy workflow.
+RUN npm ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
@@ -12,7 +14,7 @@ FROM node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+RUN npm ci --omit=dev --ignore-scripts
 COPY --from=build /app/dist ./dist
 COPY config ./config
 # Run as a non-root user. The container holds a GitHub PAT and LLM API keys;

@@ -357,16 +357,9 @@ export async function reviewBatched(
     allFilesSummary.push(...parsed.filesSummary);
 
     if (isLast) {
+      // A COMMENT verdict alongside blockers from earlier batches is fixed by
+      // filterReviewVerdict below, after the comment filters have run.
       finalResult = parsed;
-
-      // If the final batch's action is COMMENT but we have blockers from
-      // earlier batches, upgrade to REQUEST_CHANGES
-      if (
-        parsed.action === "COMMENT" &&
-        allComments.some((c) => c.severity === "blocker")
-      ) {
-        finalResult = { ...parsed, action: "REQUEST_CHANGES" };
-      }
     } else if (allComments.some((c) => c.severity === "blocker")) {
       // Early stop: blocker found, skip remaining batches
       log.info(
@@ -443,7 +436,7 @@ export async function reviewBatched(
     );
   }
 
-  // Verdict consistency: REQUEST_CHANGES needs at least one blocker.
+  // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
   // Mutates result.action in place — the same object reference flows to
   // buildReviewCommentBody and postReview below.
   const verdictReason = filterReviewVerdict(result);
