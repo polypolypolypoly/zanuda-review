@@ -190,6 +190,13 @@ describe("applyEvent: ROUND_FAILED_TRANSIENT", () => {
     assert.equal(s.consecutiveFailures, 0);
     assert.equal(s.failedAwaitingRetry, false);
   });
+
+  it("a completed round clears the transient streak", () => {
+    const failed = applyEvent(state(), { type: "ROUND_FAILED_TRANSIENT" });
+    const s = applyEvent(failed, { type: "ROUND_COMPLETED", round: 1 });
+    assert.equal(s.consecutiveFailures, 0);
+    assert.equal(s.failedAwaitingRetry, false);
+  });
 });
 
 // ── PROGRESS_COMMENT_POSTED ──────────────────────────────────────────────────

@@ -60,7 +60,10 @@ async function listWithEtag<T>(
     }
     if (res.headers.etag) {
       if (listCache.size >= MAX_CACHE_ENTRIES && !listCache.has(key)) {
-        // Oldest insertion first — plain FIFO is enough for a hint cache.
+        // Evict the oldest-inserted key. Plain FIFO, not LRU: re-setting an
+        // existing key on a refresh does not move it to the back, so a hot PR
+        // inserted early can be evicted before a cold one inserted later.
+        // Fine for a hint cache — eviction just costs one full fetch.
         const oldest = listCache.keys().next().value;
         if (oldest !== undefined) listCache.delete(oldest);
       }
@@ -69,6 +72,8 @@ async function listWithEtag<T>(
     return res.data;
   } catch (err) {
     if ((err as { status?: number }).status === 304 && cached) {
+      // Safe: `items` was stored verbatim from this same endpoint's `res.data`
+      // (typed T[]) on the last 200, so the cached array is exactly a T[].
       return cached.items as T[];
     }
     throw err;

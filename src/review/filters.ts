@@ -343,6 +343,9 @@ export function filterFilesSummary(
 // comment bodies and post straight to the PR. They get the same two hard gates
 // as review comments: drop the garbage, trim the rest.
 
+// Intentionally ~2.5x the "MAX 400 CHARACTERS" instruction in the reply
+// prompt: the hard cap only catches a drifting model, so it stays generous
+// enough not to truncate a legitimate reply mid-sentence.
 const MAX_REPLY_CHARS = 1000;
 
 /**

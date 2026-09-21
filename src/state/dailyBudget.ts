@@ -59,6 +59,12 @@ export class DailyBudget {
   tryConsume(max: number): boolean {
     this.rollover();
     if (max > 0 && this.rounds >= max) return false;
+    // Increment the in-memory counter before the best-effort save: within a
+    // run the cap is enforced even if persistence fails. The trade-off is that
+    // a crash before the write lands (or a failed save) leaves the persisted
+    // count lower than reality, so a restart can undercount — the cap may then
+    // grant a few extra rounds, but never blocks a legitimate one. A soft cost
+    // backstop accepts that direction.
     this.rounds++;
     this.save();
     return true;
