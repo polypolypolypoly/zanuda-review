@@ -31,6 +31,13 @@ const BASE_DELAY_MS = 2_000;
 /** Hard ceiling on any single delay to avoid waiting forever on a 429 storm. */
 const MAX_DELAY_MS = 60_000;
 
+/**
+ * Marker name for a provider that returned an empty/blank response body.
+ * A successful HTTP call that yields no text is a provider glitch, not a
+ * content verdict — retrying with backoff is the correct response.
+ */
+const EMPTY_OUTPUT_ERROR = "EmptyModelOutput";
+
 /** Network error codes that should trigger retry. */
 const RETRYABLE_ERROR_CODES = new Set([
   "ECONNRESET",
@@ -65,6 +72,9 @@ function isRetryable(err: unknown): boolean {
     // AbortError from fetch timeouts
     const name = (err as { name?: string }).name;
     if (name === "AbortError") return true;
+
+    // Empty/blank model output — treat like a transport glitch and retry.
+    if (name === EMPTY_OUTPUT_ERROR) return true;
   }
   return false;
 }
@@ -140,7 +150,19 @@ export async function completeWithRetry(
     }
 
     try {
-      return await provider.complete(req);
+      const result = await provider.complete(req);
+      // A provider can return a 200 with an empty body (rare, but it happens
+      // and wedges the PR as a hard content failure if we let it through to
+      // the JSON parser). Treat it as retryable instead.
+      if (typeof result?.text !== "string" || result.text.trim() === "") {
+        const emptyErr = new Error(
+          `${provider.name}/${req.model} returned empty output ` +
+            `(attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+        );
+        emptyErr.name = EMPTY_OUTPUT_ERROR;
+        throw emptyErr;
+      }
+      return result;
     } catch (err) {
       lastErr = err;
       if (!isRetryable(err)) {
