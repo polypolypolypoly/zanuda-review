@@ -247,8 +247,8 @@ describe("extractJson", () => {
 // ─── adaptiveMaxTokens ───────────────────────────────────────────────────────────
 
 describe("adaptiveMaxTokens", () => {
-  it("minimum floor of 1500 for single-file PRs", () => {
-    assert.equal(adaptiveMaxTokens(1, 8192), 1500);
+  it("minimum floor of 4000 for single-file PRs", () => {
+    assert.equal(adaptiveMaxTokens(1, 8192), 4000);
   });
 
   it("scales up with file count", () => {
@@ -264,7 +264,7 @@ describe("adaptiveMaxTokens", () => {
     // 5-file PR should be well under 8192
     const tokens = adaptiveMaxTokens(5, 8192);
     assert.ok(tokens < 8192, `expected < 8192, got ${tokens}`);
-    assert.ok(tokens >= 1500, `expected >= 1500, got ${tokens}`);
+    assert.ok(tokens >= 4000, `expected >= 4000, got ${tokens}`);
   });
 });
 

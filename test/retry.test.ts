@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { completeWithRetry } from "../src/llm/retry.js";
+import { completeWithRetry, isTransientError } from "../src/llm/retry.js";
 import type { LLMProvider, CompletionRequest } from "../src/llm/types.js";
 
 /** Mock provider that fails N times then succeeds. */
@@ -23,6 +23,21 @@ function alwaysFails(error: unknown): LLMProvider {
     name: "mock",
     async complete(_req: CompletionRequest) {
       throw error;
+    },
+  };
+}
+
+/** Mock provider that returns empty text N times before succeeding. */
+function emptyThenSuccess(empties: number): LLMProvider {
+  let attempt = 0;
+  return {
+    name: "mock",
+    async complete(_req: CompletionRequest) {
+      if (attempt < empties) {
+        attempt++;
+        return { text: "", model: "test", provider: "mock" };
+      }
+      return { text: "success", model: "test", provider: "mock" };
     },
   };
 }
@@ -120,5 +135,15 @@ describe("completeWithRetry", () => {
     ]);
     const result = await completeWithRetry(provider, dummyReq);
     assert.equal(result.text, "success");
+  });
+
+  it("retries empty model output and succeeds", async () => {
+    const provider = emptyThenSuccess(2);
+    const result = await completeWithRetry(provider, dummyReq);
+    assert.equal(result.text, "success");
+  });
+
+  it("classifies empty model output as transient (retryable next tick)", () => {
+    assert.equal(isTransientError({ name: "EmptyModelOutput" }), true);
   });
 });
