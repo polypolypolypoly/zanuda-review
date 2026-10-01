@@ -133,25 +133,26 @@ export async function buildHeaderedFiles(
 }
 
 /**
- * Batch notes are the model's own batch-local summaries, written before
- * verification runs. When verification drops findings, that summary can still
- * name the dropped findings — and the synthesis call re-raises them from the
- * notes, turning "no findings" into an observations/COMMENT verdict (tg-bot#72).
+ * Batch notes are the model's own batch-local summaries, written before the
+ * findings are filtered. When verification, anchor validation, or disabled
+ * verification drops findings, that summary can still name the dropped
+ * findings — and the synthesis call re-raises them from the notes, turning
+ * "no findings" into an observations/COMMENT verdict (tg-bot#72).
  *
  * Called only when findings were actually dropped (kept < original): replace
- * the raw summary with a deterministic note so synthesis sees only what
- * survived.
+ * the raw summary with a deterministic note so synthesis sees only what was
+ * kept.
  */
 export function summarizeBatchNote(
   keptCount: number,
   originalCount: number,
 ): string {
   if (keptCount === 0) {
-    return "No findings from this batch survived verification.";
+    return "No findings from this batch were kept.";
   }
   return (
     `${keptCount} of ${originalCount} findings from this batch ` +
-    "survived verification; see the findings list for the kept issues."
+    "were kept; see the findings list for the kept issues."
   );
 }
 
@@ -379,7 +380,7 @@ export async function reviewBatched(
     // into an observations verdict (tg-bot#72). Neutralize the note so the
     // synthesis only ever sees the surviving, verified findings.
     const batchNoteSummary =
-      verificationRan && anchored.kept.length < parsed.comments.length
+      anchored.kept.length < parsed.comments.length
         ? summarizeBatchNote(anchored.kept.length, parsed.comments.length)
         : parsed.summary;
     batchNotes.push({

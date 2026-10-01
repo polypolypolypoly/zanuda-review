@@ -133,14 +133,14 @@ describe("summarizeBatchNote", () => {
   it("reports when every finding in a batch was dropped", () => {
     assert.equal(
       summarizeBatchNote(0, 3),
-      "No findings from this batch survived verification.",
+      "No findings from this batch were kept.",
     );
   });
 
   it("reports a partial retraction with counts", () => {
     assert.equal(
       summarizeBatchNote(2, 5),
-      "2 of 5 findings from this batch survived verification; see the findings list for the kept issues.",
+      "2 of 5 findings from this batch were kept; see the findings list for the kept issues.",
     );
   });
 });
@@ -183,11 +183,54 @@ describe("batch review: retracted findings don't leak into the verdict", () => {
       "raw batch summary leaked",
     );
     assert.ok(
-      user.includes("No findings from this batch survived verification."),
+      user.includes("No findings from this batch were kept."),
       "neutralized note missing",
     );
 
     assert.equal(posted.length, 1);
     assert.equal(posted[0]!.action, "APPROVE");
+  });
+
+  it("neutralizes the note when verification is disabled and findings are dropped", async () => {
+    const configNoVerify = {
+      ...config,
+      review: { ...config.review, verifyFindings: false },
+    } as unknown as Config;
+
+    calls.length = 0;
+    const posted: ReviewResult[] = [];
+    const connector = {
+      name: "fake",
+      fetchPR: async () => pr,
+      readFile: async () => null,
+      getFileTree: async () => ({ paths: [], truncated: false, total: 0 }),
+      postReview: async (_pr: unknown, result: ReviewResult) => {
+        posted.push(result);
+      },
+      postComment: async () => 1,
+      editComment: async () => {},
+      deleteComment: async () => {},
+    } as unknown as SCMConnector;
+
+    await reviewPullRequest(
+      { connector, baseConfig: configNoVerify },
+      pr.ref,
+      pr.number,
+      { round: 1, forceStrategy: "batch" },
+    );
+
+    const synth = calls.filter((c) => c.system === SYNTHESIS_SYSTEM);
+    assert.equal(synth.length, 1);
+    const user = synth[0]!.user;
+
+    assert.ok(!user.includes("possible null deref"), "finding leaked");
+    assert.ok(
+      !user.includes("Found a null deref in a.ts"),
+      "raw batch summary leaked",
+    );
+    assert.ok(
+      user.includes("No findings from this batch were kept."),
+      "neutralized note missing",
+    );
   });
 });
