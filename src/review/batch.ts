@@ -133,6 +133,29 @@ export async function buildHeaderedFiles(
 }
 
 /**
+ * Batch notes are the model's own batch-local summaries, written before
+ * verification runs. When verification drops findings, that summary can still
+ * name the dropped findings — and the synthesis call re-raises them from the
+ * notes, turning "no findings" into an observations/COMMENT verdict (tg-bot#72).
+ *
+ * Called only when findings were actually dropped (kept < original): replace
+ * the raw summary with a deterministic note so synthesis sees only what
+ * survived.
+ */
+export function summarizeBatchNote(
+  keptCount: number,
+  originalCount: number,
+): string {
+  if (keptCount === 0) {
+    return "No findings from this batch survived verification.";
+  }
+  return (
+    `${keptCount} of ${originalCount} findings from this batch ` +
+    "survived verification; see the findings list for the kept issues."
+  );
+}
+
+/**
  * Sequential multi-batch review of a large PR.
  *
  * Each batch reviews its files in isolation. All inline comments are
@@ -289,11 +312,6 @@ export async function reviewBatched(
       structured: provider.supportsStructuredOutput,
     });
     for (const f of batch.files) reviewedPaths.add(f.filename);
-    batchNotes.push({
-      batch: i + 1,
-      files: batch.files.map((f) => f.filename),
-      summary: parsed.summary,
-    });
 
     // Token budget tracking
     addTokens(
@@ -325,16 +343,17 @@ export async function reviewBatched(
     }
 
     // Accumulate comments and file summaries (after verification)
-    const batchComments =
-      parsed.comments.length > 0 && config.review.verifyFindings
-        ? await verifyFindings(
-            parsed.comments,
-            batchDiff.text,
-            config,
-            provider,
-            log,
-          )
-        : [];
+    const verificationRan =
+      parsed.comments.length > 0 && config.review.verifyFindings;
+    const batchComments = verificationRan
+      ? await verifyFindings(
+          parsed.comments,
+          batchDiff.text,
+          config,
+          provider,
+          log,
+        )
+      : [];
 
     // Anchor validation: drop comments whose (path, line) pair isn't in this
     // batch's diff. The model generates line numbers from the diff text it was
@@ -353,6 +372,21 @@ export async function reviewBatched(
         "Batch: dropped anchor-invalid inline comments (line not in diff)",
       );
     }
+
+    // Batch note: the model's batch-local summary predates verification and
+    // may name findings that verification just dropped. If it did, the
+    // synthesis call re-raises them from the notes — turning "no findings"
+    // into an observations verdict (tg-bot#72). Neutralize the note so the
+    // synthesis only ever sees the surviving, verified findings.
+    const batchNoteSummary =
+      verificationRan && anchored.kept.length < parsed.comments.length
+        ? summarizeBatchNote(anchored.kept.length, parsed.comments.length)
+        : parsed.summary;
+    batchNotes.push({
+      batch: i + 1,
+      files: batch.files.map((f) => f.filename),
+      summary: batchNoteSummary,
+    });
 
     allComments.push(...anchored.kept);
     allFilesSummary.push(...parsed.filesSummary);
