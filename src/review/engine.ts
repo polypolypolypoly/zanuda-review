@@ -26,6 +26,7 @@ import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import {
+  completeFilesSummary,
   filterAnchorableComments,
   filterCommentBudget,
   filterFilesSummary,
@@ -438,6 +439,17 @@ export async function reviewPullRequest(
       log.warn(
         { paths: fabricatedPaths },
         "Dropped filesSummary rows for paths not in the PR",
+      );
+    }
+    const undescribed = completeFilesSummary(
+      result,
+      pr.files,
+      includedPaths(promptDiff),
+    );
+    if (undescribed.length > 0) {
+      log.info(
+        { paths: undescribed },
+        "filesSummary missing rows for reviewed files - filled from diff stats",
       );
     }
 

@@ -11,6 +11,7 @@ import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
 import {
+  completeFilesSummary,
   filterAnchorableComments,
   filterCommentBudget,
   filterFilesSummary,
@@ -20,11 +21,7 @@ import {
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
-import {
-  assembleBatchDiff,
-  batchFilePaths,
-  buildValidLineMap,
-} from "./diff.js";
+import { assembleBatchDiff, buildValidLineMap } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 import { headeredFile, type HeaderedFile } from "./header.js";
@@ -170,6 +167,9 @@ export async function reviewBatched(
 
   const allComments: ReviewResult["comments"] = [];
   const allFilesSummary: ReviewResult["filesSummary"] = [];
+  // Files whose diff the model actually reviewed. Batches skipped by the
+  // maxBatches cap, the token budget, or the blocker early-stop never get here.
+  const reviewedPaths = new Set<string>();
   let finalResult: ReviewResult | null = null;
 
   // ── Token budget ─────────────────────────────────────────────────
@@ -294,6 +294,7 @@ export async function reviewBatched(
     const parsed = parseReviewResult(completion.text, {
       structured: provider.supportsStructuredOutput,
     });
+    for (const f of batch.files) reviewedPaths.add(f.filename);
 
     // Token budget tracking
     addTokens(
@@ -443,6 +444,13 @@ export async function reviewBatched(
       "Batch: dropped filesSummary rows for paths not in the PR",
     );
   }
+  const undescribed = completeFilesSummary(result, pr.files, reviewedPaths);
+  if (undescribed.length > 0) {
+    log.info(
+      { paths: undescribed },
+      "Batch: filesSummary missing rows for reviewed files - filled from diff stats",
+    );
+  }
 
   // Comment budget + round discipline (non-LLM).
   const budgeted = filterCommentBudget(result.comments, {
@@ -504,21 +512,12 @@ export async function reviewBatched(
   }
 
   if (!dryRun) {
-    // Collect all visible file paths across all batches
-    const allVisiblePaths = new Set<string>();
-    for (const batch of batches) {
-      const batchDiff = assembleBatchDiff(batch.files);
-      for (const p of batchFilePaths(batchDiff)) {
-        allVisiblePaths.add(p);
-      }
-    }
-
     // Post the review event FIRST (summary lives in its body), then delete the
     // transient placeholder. Same ordering as the single-batch engine path:
     // if postReview fails the placeholder survives for the failSafe to edit
     // into an error; on success there is one canonical summary, no duplicate.
     await deps.connector.postReview(pr, result, config, {
-      visibleFilePaths: allVisiblePaths,
+      visibleFilePaths: reviewedPaths,
     });
     if (startingCommentId !== null) {
       try {

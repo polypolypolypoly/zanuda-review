@@ -1,6 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  completeFilesSummary,
   filterFilesSummary,
   filterMentionReply,
   filterResultSummaries,
@@ -437,11 +438,8 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /zero inline/);
     assert.equal(r.action, "COMMENT");
-    // Summary must be amended so the body doesn't contradict the header verdict.
-    assert.ok(
-      r.summary.includes("Verdict adjusted"),
-      "summary should contain adjustment note",
-    );
+    // The downgrade is silent on the PR — no internal note in the summary.
+    assert.ok(!r.summary.includes("Verdict adjusted"));
   });
 
   it("downgrades REQUEST_CHANGES with only warnings to COMMENT", () => {
@@ -450,10 +448,7 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /no blocker/);
     assert.equal(r.action, "COMMENT");
-    assert.ok(
-      r.summary.includes("Verdict adjusted"),
-      "summary should contain adjustment note",
-    );
+    assert.ok(!r.summary.includes("Verdict adjusted"));
   });
 
   it("does not amend summary when no downgrade occurs", () => {
@@ -597,6 +592,57 @@ describe("filterFilesSummary", () => {
       result.filesSummary.map((f) => f.path),
       ["src/a.ts"],
     );
+  });
+});
+
+describe("completeFilesSummary", () => {
+  const files = [
+    { filename: "a.ts", additions: 3, deletions: 1 },
+    { filename: "b.ts", additions: 0, deletions: 40 },
+    { filename: "c.ts", additions: 5, deletions: 0 },
+  ];
+
+  it("fills a row for every reviewed file the model skipped, in PR order", () => {
+    const result = makeResult({
+      filesSummary: [{ path: "c.ts", description: "adds c" }],
+    });
+    const filled = completeFilesSummary(
+      result,
+      files,
+      new Set(["a.ts", "b.ts", "c.ts"]),
+    );
+    assert.deepEqual(filled, ["a.ts", "b.ts"]);
+    assert.deepEqual(result.filesSummary, [
+      { path: "a.ts", description: "+3 −1 lines" },
+      { path: "b.ts", description: "+0 −40 lines" },
+      { path: "c.ts", description: "adds c" },
+    ]);
+  });
+
+  it("drops rows for files the model was never shown", () => {
+    const result = makeResult({
+      filesSummary: [
+        { path: "a.ts", description: "adds a" },
+        { path: "b.ts", description: "guessed from the file list" },
+      ],
+    });
+    completeFilesSummary(result, files, new Set(["a.ts"]));
+    assert.deepEqual(result.filesSummary, [
+      { path: "a.ts", description: "adds a" },
+    ]);
+  });
+
+  it("keeps the first description when the model repeats a path", () => {
+    const result = makeResult({
+      filesSummary: [
+        { path: "a.ts", description: "first" },
+        { path: "a.ts", description: "second" },
+      ],
+    });
+    completeFilesSummary(result, files, new Set(["a.ts"]));
+    assert.deepEqual(result.filesSummary, [
+      { path: "a.ts", description: "first" },
+    ]);
   });
 });
 
