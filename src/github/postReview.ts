@@ -8,9 +8,11 @@ import type { ReviewResult, ReviewComment } from "../review/types.js";
 import { buildReviewCommentBody, fencedBlock } from "../review/format.js";
 export { buildReviewCommentBody };
 
-const SEVERITY_EMOJI: Record<string, string> = {
-  blocker: "🛑",
-  warning: "⚠️",
+// Backticked: a bare `[warning]` is reference-link syntax, so a model-written
+// body containing a `[warning]: url` definition would render the tag as a link.
+const SEVERITY_TAG: Record<string, string> = {
+  blocker: "`[blocker]`",
+  warning: "`[warning]`",
 };
 
 /**
@@ -22,7 +24,7 @@ const SEVERITY_EMOJI: Record<string, string> = {
  * suggestion, into Zanuda's comment.
  */
 function renderCommentBody(c: ReviewComment): string {
-  const base = `${SEVERITY_EMOJI[c.severity] ?? ""} ${c.body}`.trim();
+  const base = `${SEVERITY_TAG[c.severity] ?? ""} ${c.body}`.trim();
   if (!c.suggestion) return base;
   return `${base}\n\n${fencedBlock(c.suggestion, "suggestion")}`;
 }
@@ -32,7 +34,7 @@ export { renderCommentBody, renderCommentSummary };
 
 /** Render a one-line summary of a comment for fallback body dumps. */
 function renderCommentSummary(c: ReviewComment): string {
-  const base = `${SEVERITY_EMOJI[c.severity] ?? ""} \`${c.path}:${c.line}\` — ${c.body}`;
+  const base = `${SEVERITY_TAG[c.severity] ?? ""} \`${c.path}:${c.line}\` — ${c.body}`;
   if (!c.suggestion) return base;
   // Suggestion shown inline but collapsed for the fallback dump.
   const preview =

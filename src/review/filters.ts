@@ -630,6 +630,8 @@ export function filterCommentBudget(
 
 // ── Result-level filter: verdict consistency ──────────────────────────────────
 //
+// The invariant: the header verdict never contradicts the inline findings.
+//
 // REQUEST_CHANGES with zero inline comments is a broken state — the author
 // is told to fix things but given no specific things to fix. Downgrade to
 // COMMENT so the review is still visible but doesn't falsely block the PR.
@@ -637,17 +639,31 @@ export function filterCommentBudget(
 // More subtly: REQUEST_CHANGES without any blocker-severity inline comments
 // is equally unjustified. A warning alone doesn't warrant blocking.
 //
-// The downgrade is silent on the PR: the header shows the effective verdict and
-// the reason goes to the operator log. An "(adjusted…)" note in the body is
-// pipeline internals the PR author cannot act on.
+// Two directions, both silent on the PR — the header verdict is the single
+// source of truth and the adjustment reasons go to the operator log:
+//   - REQUEST_CHANGES with zero comments, or only warnings, downgrades to
+//     COMMENT — the author is never told to fix things without being given
+//     specific things to fix.
+//   - APPROVE or COMMENT alongside a blocker-severity finding upgrades to
+//     REQUEST_CHANGES — a blocker must never hide behind a non-blocking
+//     header.
 //
 // Returns a reason string if the action was changed, null otherwise.
 // Mutates result.action in place.
 
 export function filterReviewVerdict(result: ReviewResult): string | null {
-  if (result.action !== "REQUEST_CHANGES") return null;
-
   const hasBlocker = result.comments.some((c) => c.severity === "blocker");
+
+  if (
+    (result.action === "APPROVE" || result.action === "COMMENT") &&
+    hasBlocker
+  ) {
+    const from = result.action;
+    (result as { action: ReviewResult["action"] }).action = "REQUEST_CHANGES";
+    return `${from}→REQUEST_CHANGES (blocker-severity comments present)`;
+  }
+
+  if (result.action !== "REQUEST_CHANGES") return null;
 
   if (result.comments.length === 0) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";

@@ -1,10 +1,12 @@
 # ─────────────────────────────────────────────────────────────────────
 # Zanuda the Reviewer — default configuration.
 #
-# This is the GLOBAL config. Any repository can override most of these
-# values by committing a `.zanuda.yml` file to its default branch
-# (see `repoConfig` in src/context/repoConfig.ts). Per-repo values are
-# shallow-merged over these defaults.
+# This is the GLOBAL config. A repository can override the review-tuning
+# values by committing `.zanuda/config.yml` to its default branch (see
+# `repoConfig` in src/context/repoConfig.ts). Per-repo values are
+# shallow-merged over these defaults; operator-only keys (access, models,
+# provider, limits, generation.maxTokens, persistence, memory.dir) are
+# stripped from repo configs — see stripOperatorOnly in src/config.ts.
 # ─────────────────────────────────────────────────────────────────────
 
 # Which model-agnostic provider to use. Overridable via LLM_PROVIDER env.
@@ -14,9 +16,9 @@ provider: anthropic
 # Per-provider model id. The active provider's entry is used unless the
 # LLM_MODEL env var is set.
 models:
-  anthropic: claude-opus-4-8
+  anthropic: claude-opus-5
   openai: gpt-4o
-  openrouter: anthropic/claude-opus-4-8
+  openrouter: anthropic/claude-opus-5
   ollama: qwen2.5:3b
   deepseek: deepseek-chat
   gemini: gemini-2.5-flash

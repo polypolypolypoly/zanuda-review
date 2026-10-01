@@ -469,6 +469,7 @@ export async function reviewBatched(
   }
 
   // Verdict consistency — synthesis already clamps, this is the shared gate.
+
   const verdictReason = filterReviewVerdict(result);
   if (verdictReason) {
     log.warn(`Verdict adjusted: ${verdictReason}`);
