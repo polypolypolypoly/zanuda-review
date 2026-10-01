@@ -1,12 +1,17 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
+  completeFilesSummary,
+  fallbackSummary,
+  filterSummarySelfCorrection,
+  isSelfCorrecting,
   filterFilesSummary,
   filterMentionReply,
   filterResultSummaries,
   filterReviewComments,
   filterAnchorableComments,
   filterReviewVerdict,
+  filterCommentBudget,
   formatFilterSummary,
 } from "../src/review/filters.js";
 import type { ReviewComment, ReviewResult } from "../src/review/types.js";
@@ -200,7 +205,7 @@ describe("speculativeBlocker filter", () => {
   it("does NOT touch warnings (only downgrades blockers)", () => {
     const comment = makeComment({
       severity: "warning",
-      body: "In theory this could be an issue but it's extremely rare.",
+      body: "This is extremely rare but could fail under clock skew.",
     });
     const result = filterReviewComments([comment], {
       maxCommentChars: MAX_CHARS,
@@ -436,10 +441,8 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /blocker-severity/);
     assert.equal(r.action, "REQUEST_CHANGES");
-    assert.ok(
-      r.summary.includes("Verdict adjusted"),
-      "summary should contain adjustment note",
-    );
+    // The upgrade is silent on the PR, like the downgrade — no internal note.
+    assert.ok(!r.summary.includes("Verdict adjusted"));
   });
 
   it("upgrades COMMENT with a blocker to REQUEST_CHANGES", () => {
@@ -448,7 +451,8 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /blocker-severity/);
     assert.equal(r.action, "REQUEST_CHANGES");
-    assert.ok(r.summary.includes("COMMENT upgraded"));
+    assert.ok(!r.summary.includes("Verdict adjusted"));
+    assert.ok(!r.summary.includes("COMMENT upgraded"));
   });
 
   it("keeps COMMENT when the findings are warnings only", () => {
@@ -471,11 +475,8 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /zero inline/);
     assert.equal(r.action, "COMMENT");
-    // Summary must be amended so the body doesn't contradict the header verdict.
-    assert.ok(
-      r.summary.includes("Verdict adjusted"),
-      "summary should contain adjustment note",
-    );
+    // The downgrade is silent on the PR — no internal note in the summary.
+    assert.ok(!r.summary.includes("Verdict adjusted"));
   });
 
   it("downgrades REQUEST_CHANGES with only warnings to COMMENT", () => {
@@ -484,10 +485,7 @@ describe("filterReviewVerdict", () => {
     assert.ok(reason);
     assert.match(reason!, /no blocker/);
     assert.equal(r.action, "COMMENT");
-    assert.ok(
-      r.summary.includes("Verdict adjusted"),
-      "summary should contain adjustment note",
-    );
+    assert.ok(!r.summary.includes("Verdict adjusted"));
   });
 
   it("does not amend summary when no downgrade occurs", () => {
@@ -634,6 +632,124 @@ describe("filterFilesSummary", () => {
   });
 });
 
+describe("completeFilesSummary", () => {
+  const files = [
+    { filename: "a.ts", additions: 3, deletions: 1 },
+    { filename: "b.ts", additions: 0, deletions: 40 },
+    { filename: "c.ts", additions: 5, deletions: 0 },
+  ];
+
+  it("fills a row for every reviewed file the model skipped, in PR order", () => {
+    const result = makeResult({
+      filesSummary: [{ path: "c.ts", description: "adds c" }],
+    });
+    const filled = completeFilesSummary(
+      result,
+      files,
+      new Set(["a.ts", "b.ts", "c.ts"]),
+    );
+    assert.deepEqual(filled, ["a.ts", "b.ts"]);
+    assert.deepEqual(result.filesSummary, [
+      { path: "a.ts", description: "+3 −1 lines" },
+      { path: "b.ts", description: "+0 −40 lines" },
+      { path: "c.ts", description: "adds c" },
+    ]);
+  });
+
+  it("drops rows for files the model was never shown", () => {
+    const result = makeResult({
+      filesSummary: [
+        { path: "a.ts", description: "adds a" },
+        { path: "b.ts", description: "guessed from the file list" },
+      ],
+    });
+    completeFilesSummary(result, files, new Set(["a.ts"]));
+    assert.deepEqual(result.filesSummary, [
+      { path: "a.ts", description: "adds a" },
+    ]);
+  });
+
+  it("keeps the first description when the model repeats a path", () => {
+    const result = makeResult({
+      filesSummary: [
+        { path: "a.ts", description: "first" },
+        { path: "a.ts", description: "second" },
+      ],
+    });
+    completeFilesSummary(result, files, new Set(["a.ts"]));
+    assert.deepEqual(result.filesSummary, [
+      { path: "a.ts", description: "first" },
+    ]);
+  });
+});
+
+describe("isSelfCorrecting", () => {
+  it("flags the tg-bot#70 summary", () => {
+    const text =
+      "Mostly a clean deletion/docs PR, but `bot_commands.py` still... actually " +
+      "those menu entries ARE removed. The real problems: (1) `start.py` still " +
+      "references `/claude_stats` wait—removed.";
+    assert.equal(isSelfCorrecting(text), true);
+  });
+
+  for (const text of [
+    "Hmm… actually the guard is there.",
+    "The cache is stale. Wait, no — it is rebuilt on every call.",
+    "On second thought the retry is bounded.",
+    "Scratch that, the lock is held.",
+  ]) {
+    it(`flags: ${text}`, () => assert.equal(isSelfCorrecting(text), true));
+  }
+
+  for (const text of [
+    "Clean removal of the home_status and plug features; no issues found.",
+    "The poller does not wait for the lock before writing state.json.",
+    "Actually removes the dead setup_routers helper and its tests.",
+    "Callers wait, then retry with backoff — this is correct.",
+    "Two warnings on error handling in the audit service.",
+  ]) {
+    it(`keeps: ${text}`, () => assert.equal(isSelfCorrecting(text), false));
+  }
+});
+
+describe("fallbackSummary", () => {
+  it("summarises the final comment set", () => {
+    assert.equal(fallbackSummary([]), "No issues found in the reviewed files.");
+    assert.equal(
+      fallbackSummary([makeComment({ severity: "warning" })]),
+      "1 warning — see the inline comments.",
+    );
+    assert.equal(
+      fallbackSummary([
+        makeComment({ severity: "blocker" }),
+        makeComment({ severity: "blocker" }),
+        makeComment({ severity: "warning" }),
+      ]),
+      "2 blockers and 1 warning — see the inline comments.",
+    );
+  });
+});
+
+describe("filterSummarySelfCorrection", () => {
+  it("replaces a self-correcting summary and drops a self-correcting prSummary", () => {
+    const result = makeResult({
+      summary: "Looks broken... actually it is fine.",
+      prSummary: "Adds X — wait—removes X.",
+    });
+    const reasons = filterSummarySelfCorrection(result);
+    assert.equal(reasons.length, 2);
+    assert.equal(result.summary, "No issues found in the reviewed files.");
+    assert.equal(result.prSummary, "");
+  });
+
+  it("leaves a clean summary alone", () => {
+    const result = makeResult({ summary: "Clean.", prSummary: "Adds X." });
+    assert.deepEqual(filterSummarySelfCorrection(result), []);
+    assert.equal(result.summary, "Clean.");
+    assert.equal(result.prSummary, "Adds X.");
+  });
+});
+
 describe("filterMentionReply", () => {
   it("returns a normal reply unchanged", () => {
     const text = "  The retry loop has no backoff — add one.  ";
@@ -649,5 +765,113 @@ describe("filterMentionReply", () => {
     const reply = filterMentionReply("word ".repeat(5000));
     assert.ok(reply !== null);
     assert.ok(reply!.length <= 1000);
+  });
+});
+
+// ── non-finding drop filter (hypothetical / self-conceding) ──────────────────
+
+describe("non-finding drop filter", () => {
+  it("drops hypothetical warnings", () => {
+    const comments = [
+      makeComment({
+        body: "If an array-valued keyword were ever added this would render as [object Object].",
+      }),
+      makeComment({
+        body: "In theory this could overflow, but no input reaches it today.",
+      }),
+      makeComment({
+        body: "Flagged in case the schema shape evolves later.",
+      }),
+    ];
+    const result = filterReviewComments(comments, {
+      maxCommentChars: MAX_CHARS,
+    });
+    assert.equal(result.kept.length, 0);
+    assert.equal(result.dropped.length, 3);
+  });
+
+  it("drops self-conceding warnings", () => {
+    const comments = [
+      makeComment({
+        body: "Minor; not blocking. No action needed if confirmed.",
+      }),
+      makeComment({
+        body: "Non-blocking given the fallback is documented.",
+      }),
+    ];
+    const result = filterReviewComments(comments, {
+      maxCommentChars: MAX_CHARS,
+    });
+    assert.equal(result.kept.length, 0);
+    assert.equal(result.dropped.length, 2);
+  });
+
+  it("keeps concrete warnings", () => {
+    const comments = [
+      makeComment({
+        body: "This will crash on null input — add a guard before dereferencing.",
+      }),
+    ];
+    const result = filterReviewComments(comments, {
+      maxCommentChars: MAX_CHARS,
+    });
+    assert.equal(result.kept.length, 1);
+    assert.equal(result.dropped.length, 0);
+  });
+});
+
+// ── per-review comment budget & round discipline ─────────────────────────────
+
+describe("filterCommentBudget", () => {
+  it("drops warnings in round 2 when round2Warnings is false", () => {
+    const comments = [
+      makeComment({ severity: "blocker", body: "Token leaks into logs." }),
+      makeComment({ severity: "warning", body: "Consider a timeout here." }),
+      makeComment({ severity: "warning", body: "Could be more DRY." }),
+    ];
+    const result = filterCommentBudget(comments, {
+      round: 2,
+      maxComments: 10,
+      round2Warnings: false,
+    });
+    assert.equal(result.kept.length, 1);
+    assert.equal(result.kept[0]!.severity, "blocker");
+    assert.equal(result.dropped.length, 2);
+  });
+
+  it("keeps warnings in round 2 when round2Warnings is true", () => {
+    const comments = [
+      makeComment({ severity: "blocker", body: "Token leaks into logs." }),
+      makeComment({ severity: "warning", body: "Consider a timeout here." }),
+    ];
+    const result = filterCommentBudget(comments, {
+      round: 2,
+      maxComments: 10,
+      round2Warnings: true,
+    });
+    assert.equal(result.kept.length, 2);
+  });
+
+  it("caps total comments, blockers first", () => {
+    const comments = [
+      makeComment({ severity: "warning", body: "w1 warning one here." }),
+      makeComment({ severity: "warning", body: "w2 warning two here." }),
+      makeComment({ severity: "warning", body: "w3 warning three here." }),
+      makeComment({ severity: "blocker", body: "b1 crashes on null." }),
+      makeComment({ severity: "blocker", body: "b2 leaks a secret." }),
+    ];
+    const result = filterCommentBudget(comments, {
+      round: 1,
+      maxComments: 3,
+      round2Warnings: false,
+    });
+    // Two blockers always kept; one warning slot left.
+    assert.equal(result.kept.length, 3);
+    assert.deepEqual(result.kept.map((c) => c.severity).sort(), [
+      "blocker",
+      "blocker",
+      "warning",
+    ]);
+    assert.equal(result.dropped.length, 2);
   });
 });

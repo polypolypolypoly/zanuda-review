@@ -108,6 +108,63 @@ describe("formatReviewHistory", () => {
   it("returns empty string for empty history", () => {
     assert.equal(formatReviewHistory({ entries: [] }), "");
   });
+
+  it("emits a calibration directive when warnings were mostly noise", () => {
+    const warningOutcomes = [
+      {
+        path: "src/a.ts",
+        severity: "warning" as const,
+        summary: "hypothetical edge case",
+        outcome: "dismissed" as const,
+        dismissalReason: "intentional",
+      },
+      {
+        path: "src/b.ts",
+        severity: "warning" as const,
+        summary: "style nitpick",
+        outcome: "ignored" as const,
+      },
+      {
+        path: "src/c.ts",
+        severity: "warning" as const,
+        summary: "real bug",
+        outcome: "addressed" as const,
+      },
+    ];
+    const history: ReviewHistory = {
+      entries: [makeEntry(1, { outcomes: warningOutcomes })],
+    };
+
+    const text = formatReviewHistory(history);
+    assert.ok(text.includes("Calibration:"));
+    assert.ok(text.includes("2 of 3 past warnings"));
+  });
+
+  it("stays silent when warnings were mostly addressed", () => {
+    const history: ReviewHistory = {
+      entries: [
+        makeEntry(1, {
+          outcomes: [
+            {
+              path: "src/a.ts",
+              severity: "warning" as const,
+              summary: "real bug",
+              outcome: "addressed" as const,
+            },
+            {
+              path: "src/b.ts",
+              severity: "warning" as const,
+              summary: "real bug two",
+              outcome: "addressed" as const,
+            },
+          ],
+        }),
+      ],
+    };
+
+    const text = formatReviewHistory(history);
+    assert.ok(!text.includes("Calibration:"));
+  });
 });
 
 // ─── Untrusted content ────────────────────────────────────────────────────────

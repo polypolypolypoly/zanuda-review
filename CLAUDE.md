@@ -13,6 +13,8 @@ AI code reviewer with a dedicated GitHub account (`ZlayaZanuda`). When requested
   → build prompt (preprompt + memory + context + diff)
   → LLM provider (Anthropic | OpenAI | OpenRouter | Ollama | DeepSeek | Gemini)
   → parse structured JSON result
+  → (large PRs) per-batch review, then one synthesis call over the verified
+    findings writes the PR-wide summary + verdict (no batch judges the whole PR)
   → apply hard output filters (non-LLM: drop garbage, downgrade speculative blockers,
     enforce verdict consistency)
   → post review via SCMConnector (inline comments + COMMENT event carrying the
@@ -75,6 +77,10 @@ Hard (non-LLM) filters run on the parsed review result before posting:
 - **filterReviewVerdict**: REQUEST_CHANGES with no blocker comments → COMMENT;
   APPROVE or COMMENT with a blocker comment → REQUEST_CHANGES
 - **filterResultSummaries**: trims runaway `summary` / `prSummary`
+- **filterSummarySelfCorrection**: replaces a summary where the model corrects
+  itself mid-thought ("… actually", "wait—") with a code-built one
+- **completeFilesSummary**: rebuilds the file table from the files actually
+  reviewed — the model's skipped rows get a `+a −d lines` fallback
 - **filterFilesSummary**: drops file-table rows for paths not in the PR
 - **filterMentionReply**: same min/max length gates on @mention replies
 - **commit dedup**: skips PRs whose commits were all already reviewed
@@ -138,6 +144,7 @@ review/
   diff.ts             diff assembly and budget management
   chunk.ts            dependency-aware file clustering for large PRs
   batch.ts            multi-batch sequential review for large PRs
+  synthesize.ts       PR-wide summary + verdict for multi-batch reviews
   parse.ts            parse LLM text output into ReviewResult
   verify.ts           self-verification pass (LLM checks own findings)
   budget.ts           token budget management

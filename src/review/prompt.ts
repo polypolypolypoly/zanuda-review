@@ -393,12 +393,11 @@ export interface BatchPromptOpts {
  *
  * Each batch prompt:
  *   - Includes the shared context (repo memory, review history, instructions)
- *   - Includes the running summary from previous batches (except batch 1)
  *   - Includes the batch diff with file headers
  *   - Gives batch-specific task instructions: review only these files,
- *     produce comments + a findings summary for the next batch
+ *     produce comments + a batch-local summary
  *
- * The final batch also gets the overall verdict task.
+ * No batch writes the PR-wide verdict — see synthesize.ts.
  */
 export function buildBatchUserPrompt(
   pr: PullRequestData,
@@ -478,22 +477,14 @@ export function buildBatchUserPrompt(
 }
 
 function batchTaskInstructions(opts: BatchPromptOpts): string {
-  const { batchIndex, totalBatches, isLastBatch, structuredOutput } = opts;
+  const { batchIndex, totalBatches, structuredOutput } = opts;
+  const isRound2 = (opts.round ?? 1) >= 2;
 
-  if (isLastBatch) {
-    return (
-      `## Your task (batch ${batchIndex} of ${totalBatches} — FINAL)\n` +
-      `Review the files above. This is the last batch in a multi-batch review.\n\n` +
-      `Produce the FINAL review output:\n` +
-      `- Inline comments for issues in this batch's files\n` +
-      `- A final \`action\` verdict that considers whether ANY batch above\n` +
-      `  found blockers (check the progress status in the system prompt)\n` +
-      `- A \`summary\` that covers the full PR, not just this batch\n` +
-      `- \`prSummary\` describing what the whole PR does\n` +
-      (structuredOutput ? "" : outputInstructions(true, false, 400)) // structured output handled at API level
-    );
-  }
-
+  // Every batch — the last one included — reviews only its own files. The
+  // PR-wide summary and verdict are written afterwards by a separate synthesis
+  // call that sees every batch's notes and the verified findings (see
+  // synthesize.ts). Asking the last batch to judge the whole PR from a view of
+  // its own files produced hallucinated cross-batch claims (tg-bot#70).
   return (
     `## Your task (batch ${batchIndex} of ${totalBatches})\n` +
     `Review ONLY the files in this batch. You are reviewing in isolation.\n` +
@@ -502,7 +493,12 @@ function batchTaskInstructions(opts: BatchPromptOpts): string {
     `Produce:\n` +
     `- Inline comments for issues you can verify in these files\n` +
     `- Set \`filesSummary\` for the files in this batch only\n` +
-    `- Set \`action\` to COMMENT (the final batch produces the verdict)\n\n` +
+    `- Set \`summary\` to 1–3 sentences on these files only` +
+    (isRound2
+      ? `, including which round-1 issues on these files were addressed\n`
+      : `\n`) +
+    `- Set \`prSummary\` to an empty string and \`action\` to COMMENT — the\n` +
+    `  PR-wide summary and verdict are written after all batches\n\n` +
     (structuredOutput ? "" : batchOutputInstructions())
   );
 }
@@ -511,8 +507,8 @@ function batchOutputInstructions(): string {
   return `
 Respond with a single JSON object and nothing else (no markdown fences). Shape:
 {
-  "prSummary": "string — empty for intermediate batches",
-  "summary": "string — overall assessment for this batch",
+  "prSummary": "",
+  "summary": "string — 1-3 sentences on this batch's files only",
   "action": "COMMENT",
   "filesSummary": [
     {

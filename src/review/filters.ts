@@ -75,7 +75,10 @@ function applyDropFilters(comment: ReviewComment): string | null {
   const r = minBodyLength(comment);
   if (r !== null) return r;
 
-  return selfDebate(comment);
+  const s = selfDebate(comment);
+  if (s !== null) return s;
+
+  return nonFinding(comment);
 }
 
 // ── Phase 2: mutate filters ───────────────────────────────────────────────────
@@ -173,6 +176,46 @@ function selfDebate(comment: ReviewComment): string | null {
 
   // Self-debate markers without confirmation — the comment is awkward
   // but might still flag a real issue. Keep it.
+  return null;
+}
+
+// ── Filter: non-finding (hypothetical or self-conceding) ─────────────────────
+//
+// Catches the "why did you raise this" comment: a warning that names no
+// present-tense defect — either a hypothetical about some future change
+// ("in theory", "if X were ever added", "in case the schema evolves") or a
+// concern the model immediately walks back ("not blocking", "no action
+// needed", "flagging in case"). These cost the author a reply and a resolve
+// but change nothing, and over rounds they bury the intent of the code under
+// defensive noise.
+
+const HYPOTHETICAL_PATTERNS = [
+  /\bin theory\b/i,
+  /\bhypothetical(?:ly)?\b/i,
+  /\bif [^,.;\n]{0,60}? ever\b/i,
+  /\bin case [^,.;\n]{0,60}? (?:evolves?|changes?|grows?)\b/i,
+];
+
+const CONCEDING_PATTERNS = [
+  /\bnot blocking\b/i,
+  /\bnon-blocking\b/i,
+  /\bno action (?:needed|required)\b/i,
+  /\bno change (?:needed|required)\b/i,
+  /\bflagging in case\b/i,
+];
+
+function nonFinding(comment: ReviewComment): string | null {
+  // Only warnings are dropped here. A speculative BLOCKER is still a signal —
+  // speculativeBlocker (mutate phase) downgrades it to a warning instead, so
+  // we never regex-drop a potential security/crash finding.
+  if (comment.severity !== "warning") return null;
+
+  if (HYPOTHETICAL_PATTERNS.some((p) => p.test(comment.body))) {
+    return "hypothetical — no present-tense defect";
+  }
+  if (CONCEDING_PATTERNS.some((p) => p.test(comment.body))) {
+    return "self-conceding — net message is 'no action needed'";
+  }
   return null;
 }
 
@@ -312,6 +355,68 @@ export function filterResultSummaries(result: ReviewResult): string[] {
   return reasons;
 }
 
+// ── Result-level filter: thinking aloud in the summary ───────────────────────
+//
+// The summary is the first thing the author reads. tg-bot#70 shipped one where
+// the model argued with itself: "…still... actually those menu entries ARE
+// removed… (1) start.py still references /claude_stats wait—removed." A
+// summary that corrects itself mid-sentence cannot be trusted on any claim, so
+// it is replaced wholesale with a code-built one rather than patched.
+//
+// Patterns are deliberately narrow: each one is a self-correction marker that
+// does not occur in a stated conclusion.
+
+const SELF_CORRECTION_PATTERNS: RegExp[] = [
+  /(?:\.{3}|…)\s*(?:actually|wait|no|hmm|oh)\b/i, // "still... actually"
+  /\bwait\s*[—–]/i, // "wait—removed"
+  /\bwait[,.!]\s*(?:no|actually|that|those|it|this|they)\b/i,
+  /\b(?:scratch that|never ?mind|on second thought|let me re-?check)\b/i,
+  /\bactually,?\s+(?:no|never ?mind)\b/i,
+];
+
+/** True when `text` reads like the model correcting itself mid-thought. */
+export function isSelfCorrecting(text: string): boolean {
+  return SELF_CORRECTION_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * A summary written by code from the posted findings. Used when the model's
+ * summary is unusable (self-correcting) or missing (synthesis call failed).
+ */
+export function fallbackSummary(comments: ReviewComment[]): string {
+  const blockers = comments.filter((c) => c.severity === "blocker").length;
+  const warnings = comments.length - blockers;
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (blockers > 0 && warnings > 0) {
+    return `${plural(blockers, "blocker")} and ${plural(warnings, "warning")} — see the inline comments.`;
+  }
+  if (blockers > 0)
+    return `${plural(blockers, "blocker")} — see the inline comments.`;
+  if (warnings > 0)
+    return `${plural(warnings, "warning")} — see the inline comments.`;
+  return "No issues found in the reviewed files.";
+}
+
+/**
+ * Replace a self-correcting summary with fallbackSummary, and drop a
+ * self-correcting prSummary (the context toggle omits an empty one). Mutates
+ * in place; call once the final comment set is known. Returns a reason per
+ * replaced field.
+ */
+export function filterSummarySelfCorrection(result: ReviewResult): string[] {
+  const reasons: string[] = [];
+  if (isSelfCorrecting(result.summary)) {
+    (result as { summary: string }).summary = fallbackSummary(result.comments);
+    reasons.push("summary replaced (model corrected itself mid-thought)");
+  }
+  if (result.prSummary && isSelfCorrecting(result.prSummary)) {
+    (result as { prSummary: string }).prSummary = "";
+    reasons.push("prSummary dropped (model corrected itself mid-thought)");
+  }
+  return reasons;
+}
+
 // ── Result-level filter: filesSummary paths ───────────────────────────────────
 //
 // filesSummary rows render straight into the markdown file table. Inline
@@ -335,6 +440,49 @@ export function filterFilesSummary(
       kept;
   }
   return droppedPaths;
+}
+
+// ── Result-level fixer: complete the file table ───────────────────────────────
+//
+// The model routinely skips rows in filesSummary — deleted files, lockfiles,
+// docs — even when told to list every file. The header then read "Checked 20
+// of 29 files" on a PR whose 29 files were all sent to the model (tg-bot#70).
+// Which files were reviewed is something the code knows exactly, so the table
+// is rebuilt from that set: model descriptions where present, a code-derived
+// line count otherwise. Rows for files the model never saw are dropped — it
+// cannot describe a diff it was not shown. Order follows the PR's file list.
+
+/**
+ * Rebuild filesSummary so it has exactly one row per reviewed file, in PR
+ * order. Mutates in place. Returns the paths that got a fallback description.
+ */
+export function completeFilesSummary(
+  result: ReviewResult,
+  files: ReadonlyArray<{
+    filename: string;
+    additions: number;
+    deletions: number;
+  }>,
+  reviewedPaths: ReadonlySet<string>,
+): string[] {
+  const described = new Map<string, string>();
+  for (const f of result.filesSummary) {
+    if (!described.has(f.path)) described.set(f.path, f.description);
+  }
+  const filled: string[] = [];
+  const rows: ReviewResult["filesSummary"] = [];
+  for (const f of files) {
+    if (!reviewedPaths.has(f.filename)) continue;
+    let description = described.get(f.filename);
+    if (!description?.trim()) {
+      description = `+${f.additions} −${f.deletions} lines`;
+      filled.push(f.filename);
+    }
+    rows.push({ path: f.filename, description });
+  }
+  (result as { filesSummary: ReviewResult["filesSummary"] }).filesSummary =
+    rows;
+  return filled;
 }
 
 // ── Mention replies ───────────────────────────────────────────────────────────
@@ -420,6 +568,66 @@ export function filterAnchorableComments(
   return { kept, dropped };
 }
 
+// ── Filter: per-review comment budget and round discipline ───────────────────
+//
+// Two hard caps that keep a review actionable and keep follow-up rounds from
+// piling fresh warnings onto code that already passed:
+//   1. Round 2+ posts blockers only (configurable) — a follow-up round exists
+//      to verify round-1 fixes, not to open new warnings on reviewed code.
+//   2. A hard ceiling on inline comments per review; blockers take precedence
+//      and excess warnings are dropped first.
+//
+// Runs after anchor validation so the budget counts only what will actually
+// post, and before filterReviewVerdict so the verdict reflects the trimmed set.
+
+export function filterCommentBudget(
+  comments: ReviewComment[],
+  opts: { round: number; maxComments: number; round2Warnings: boolean },
+): { kept: ReviewComment[]; dropped: DroppedComment[] } {
+  const dropped: DroppedComment[] = [];
+  let kept = comments;
+
+  if (opts.round >= 2 && !opts.round2Warnings) {
+    const blockers = kept.filter((c) => c.severity === "blocker");
+    for (const w of kept.filter((c) => c.severity === "warning")) {
+      dropped.push({
+        path: w.path,
+        line: w.line,
+        body: w.body,
+        reason: "warning dropped in round 2 (blockers only)",
+      });
+    }
+    kept = blockers;
+  }
+
+  if (kept.length > opts.maxComments) {
+    const blockers = kept.filter((c) => c.severity === "blocker");
+    const warnings = kept.filter((c) => c.severity === "warning");
+
+    // Blockers always win; warnings fill whatever budget remains.
+    const blockerKeep = blockers.slice(0, opts.maxComments);
+    const warningKeep = warnings.slice(
+      0,
+      Math.max(0, opts.maxComments - blockerKeep.length),
+    );
+    const keepSet = new Set([...blockerKeep, ...warningKeep]);
+
+    for (const c of kept) {
+      if (!keepSet.has(c)) {
+        dropped.push({
+          path: c.path,
+          line: c.line,
+          body: c.body,
+          reason: "over per-review comment cap",
+        });
+      }
+    }
+    kept = kept.filter((c) => keepSet.has(c));
+  }
+
+  return { kept, dropped };
+}
+
 // ── Result-level filter: verdict consistency ──────────────────────────────────
 //
 // The invariant: the header verdict never contradicts the inline findings.
@@ -431,18 +639,17 @@ export function filterAnchorableComments(
 // More subtly: REQUEST_CHANGES without any blocker-severity inline comments
 // is equally unjustified. A warning alone doesn't warrant blocking.
 //
-// The opposite direction matters more. APPROVE or COMMENT alongside a
-// blocker-severity finding hides the finding behind a non-blocking header,
-// which is the failure mode a reviewer exists to prevent. Upgrade it to
-// REQUEST_CHANGES.
-//
-// Every adjustment appends a note to result.summary so the displayed body
-// never contradicts the header verdict. The model often restates its verdict
-// in the free-text summary — without this, the header shows 💬 observations
-// while the body says REQUEST_CHANGES.
+// Two directions, both silent on the PR — the header verdict is the single
+// source of truth and the adjustment reasons go to the operator log:
+//   - REQUEST_CHANGES with zero comments, or only warnings, downgrades to
+//     COMMENT — the author is never told to fix things without being given
+//     specific things to fix.
+//   - APPROVE or COMMENT alongside a blocker-severity finding upgrades to
+//     REQUEST_CHANGES — a blocker must never hide behind a non-blocking
+//     header.
 //
 // Returns a reason string if the action was changed, null otherwise.
-// Mutates result.action (and result.summary when changed) in place.
+// Mutates result.action in place.
 
 export function filterReviewVerdict(result: ReviewResult): string | null {
   const hasBlocker = result.comments.some((c) => c.severity === "blocker");
@@ -453,9 +660,6 @@ export function filterReviewVerdict(result: ReviewResult): string | null {
   ) {
     const from = result.action;
     (result as { action: ReviewResult["action"] }).action = "REQUEST_CHANGES";
-    (result as { summary: string }).summary =
-      result.summary.trim() +
-      `\n\n_(Verdict adjusted: blocker-severity findings present — ${from} upgraded to REQUEST\\_CHANGES.)_`;
     return `${from}→REQUEST_CHANGES (blocker-severity comments present)`;
   }
 
@@ -463,17 +667,11 @@ export function filterReviewVerdict(result: ReviewResult): string | null {
 
   if (result.comments.length === 0) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";
-    (result as { summary: string }).summary =
-      result.summary.trim() +
-      "\n\n_(Verdict adjusted: no inline findings — REQUEST\\_CHANGES downgraded to COMMENT.)_";
     return "REQUEST_CHANGES→COMMENT (zero inline comments — no specific issues to address)";
   }
 
   if (!hasBlocker) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";
-    (result as { summary: string }).summary =
-      result.summary.trim() +
-      "\n\n_(Verdict adjusted: all findings are warnings, none blockers — REQUEST\\_CHANGES downgraded to COMMENT.)_";
     return "REQUEST_CHANGES→COMMENT (no blocker-severity comments — warnings alone don't justify blocking)";
   }
 
