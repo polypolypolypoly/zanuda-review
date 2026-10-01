@@ -355,6 +355,68 @@ export function filterResultSummaries(result: ReviewResult): string[] {
   return reasons;
 }
 
+// ── Result-level filter: thinking aloud in the summary ───────────────────────
+//
+// The summary is the first thing the author reads. tg-bot#70 shipped one where
+// the model argued with itself: "…still... actually those menu entries ARE
+// removed… (1) start.py still references /claude_stats wait—removed." A
+// summary that corrects itself mid-sentence cannot be trusted on any claim, so
+// it is replaced wholesale with a code-built one rather than patched.
+//
+// Patterns are deliberately narrow: each one is a self-correction marker that
+// does not occur in a stated conclusion.
+
+const SELF_CORRECTION_PATTERNS: RegExp[] = [
+  /(?:\.{3}|…)\s*(?:actually|wait|no|hmm|oh)\b/i, // "still... actually"
+  /\bwait\s*[—–]/i, // "wait—removed"
+  /\bwait[,.!]\s*(?:no|actually|that|those|it|this|they)\b/i,
+  /\b(?:scratch that|never ?mind|on second thought|let me re-?check)\b/i,
+  /\bactually,?\s+(?:no|never ?mind)\b/i,
+];
+
+/** True when `text` reads like the model correcting itself mid-thought. */
+export function isSelfCorrecting(text: string): boolean {
+  return SELF_CORRECTION_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * A summary written by code from the posted findings. Used when the model's
+ * summary is unusable (self-correcting) or missing (synthesis call failed).
+ */
+export function fallbackSummary(comments: ReviewComment[]): string {
+  const blockers = comments.filter((c) => c.severity === "blocker").length;
+  const warnings = comments.length - blockers;
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (blockers > 0 && warnings > 0) {
+    return `${plural(blockers, "blocker")} and ${plural(warnings, "warning")} — see the inline comments.`;
+  }
+  if (blockers > 0)
+    return `${plural(blockers, "blocker")} — see the inline comments.`;
+  if (warnings > 0)
+    return `${plural(warnings, "warning")} — see the inline comments.`;
+  return "No issues found in the reviewed files.";
+}
+
+/**
+ * Replace a self-correcting summary with fallbackSummary, and drop a
+ * self-correcting prSummary (the context toggle omits an empty one). Mutates
+ * in place; call once the final comment set is known. Returns a reason per
+ * replaced field.
+ */
+export function filterSummarySelfCorrection(result: ReviewResult): string[] {
+  const reasons: string[] = [];
+  if (isSelfCorrecting(result.summary)) {
+    (result as { summary: string }).summary = fallbackSummary(result.comments);
+    reasons.push("summary replaced (model corrected itself mid-thought)");
+  }
+  if (result.prSummary && isSelfCorrecting(result.prSummary)) {
+    (result as { prSummary: string }).prSummary = "";
+    reasons.push("prSummary dropped (model corrected itself mid-thought)");
+  }
+  return reasons;
+}
+
 // ── Result-level filter: filesSummary paths ───────────────────────────────────
 //
 // filesSummary rows render straight into the markdown file table. Inline

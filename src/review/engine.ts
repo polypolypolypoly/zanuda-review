@@ -33,6 +33,7 @@ import {
   filterResultSummaries,
   filterReviewComments,
   filterReviewVerdict,
+  filterSummarySelfCorrection,
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
@@ -494,6 +495,11 @@ export async function reviewPullRequest(
       );
     }
     result.comments = budgeted.kept;
+
+    // A summary that argues with itself is replaced by a code-built one
+    // from the final comment set (hence after every comment filter).
+    const replaced = filterSummarySelfCorrection(result);
+    if (replaced.length > 0) log.warn(`Hard filters: ${replaced.join("; ")}`);
 
     // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
     // Mutates result.action in place — the same object reference flows to

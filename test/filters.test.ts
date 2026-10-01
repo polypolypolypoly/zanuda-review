@@ -2,6 +2,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   completeFilesSummary,
+  fallbackSummary,
+  filterSummarySelfCorrection,
+  isSelfCorrecting,
   filterFilesSummary,
   filterMentionReply,
   filterResultSummaries,
@@ -643,6 +646,73 @@ describe("completeFilesSummary", () => {
     assert.deepEqual(result.filesSummary, [
       { path: "a.ts", description: "first" },
     ]);
+  });
+});
+
+describe("isSelfCorrecting", () => {
+  it("flags the tg-bot#70 summary", () => {
+    const text =
+      "Mostly a clean deletion/docs PR, but `bot_commands.py` still... actually " +
+      "those menu entries ARE removed. The real problems: (1) `start.py` still " +
+      "references `/claude_stats` wait—removed.";
+    assert.equal(isSelfCorrecting(text), true);
+  });
+
+  for (const text of [
+    "Hmm… actually the guard is there.",
+    "The cache is stale. Wait, no — it is rebuilt on every call.",
+    "On second thought the retry is bounded.",
+    "Scratch that, the lock is held.",
+  ]) {
+    it(`flags: ${text}`, () => assert.equal(isSelfCorrecting(text), true));
+  }
+
+  for (const text of [
+    "Clean removal of the home_status and plug features; no issues found.",
+    "The poller does not wait for the lock before writing state.json.",
+    "Actually removes the dead setup_routers helper and its tests.",
+    "Callers wait, then retry with backoff — this is correct.",
+    "Two warnings on error handling in the audit service.",
+  ]) {
+    it(`keeps: ${text}`, () => assert.equal(isSelfCorrecting(text), false));
+  }
+});
+
+describe("fallbackSummary", () => {
+  it("summarises the final comment set", () => {
+    assert.equal(fallbackSummary([]), "No issues found in the reviewed files.");
+    assert.equal(
+      fallbackSummary([makeComment({ severity: "warning" })]),
+      "1 warning — see the inline comments.",
+    );
+    assert.equal(
+      fallbackSummary([
+        makeComment({ severity: "blocker" }),
+        makeComment({ severity: "blocker" }),
+        makeComment({ severity: "warning" }),
+      ]),
+      "2 blockers and 1 warning — see the inline comments.",
+    );
+  });
+});
+
+describe("filterSummarySelfCorrection", () => {
+  it("replaces a self-correcting summary and drops a self-correcting prSummary", () => {
+    const result = makeResult({
+      summary: "Looks broken... actually it is fine.",
+      prSummary: "Adds X — wait—removes X.",
+    });
+    const reasons = filterSummarySelfCorrection(result);
+    assert.equal(reasons.length, 2);
+    assert.equal(result.summary, "No issues found in the reviewed files.");
+    assert.equal(result.prSummary, "");
+  });
+
+  it("leaves a clean summary alone", () => {
+    const result = makeResult({ summary: "Clean.", prSummary: "Adds X." });
+    assert.deepEqual(filterSummarySelfCorrection(result), []);
+    assert.equal(result.summary, "Clean.");
+    assert.equal(result.prSummary, "Adds X.");
   });
 });
 
