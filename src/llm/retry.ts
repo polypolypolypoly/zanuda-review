@@ -38,6 +38,14 @@ const MAX_DELAY_MS = 60_000;
  */
 const EMPTY_OUTPUT_ERROR = "EmptyModelOutput";
 
+/**
+ * Marker name for structured output that is not parseable JSON (typically
+ * truncated because the model hit max_tokens mid-generation). Retryable — a
+ * fresh attempt with the same budget often completes, and if it never does the
+ * poller treats it as transient rather than wedging the PR.
+ */
+const INVALID_JSON_OUTPUT_ERROR = "InvalidJsonOutput";
+
 /** Network error codes that should trigger retry. */
 const RETRYABLE_ERROR_CODES = new Set([
   "ECONNRESET",
@@ -75,6 +83,9 @@ function isRetryable(err: unknown): boolean {
 
     // Empty/blank model output — treat like a transport glitch and retry.
     if (name === EMPTY_OUTPUT_ERROR) return true;
+
+    // Structured output came back as non-JSON (truncated mid-generation).
+    if (name === INVALID_JSON_OUTPUT_ERROR) return true;
   }
   return false;
 }
@@ -161,6 +172,21 @@ export async function completeWithRetry(
         );
         emptyErr.name = EMPTY_OUTPUT_ERROR;
         throw emptyErr;
+      }
+      // Structured-output providers promise clean JSON. If the body is
+      // truncated (model hit max_tokens mid-JSON) it won't parse — retry it
+      // rather than letting it fail as a permanent content error.
+      if (provider.supportsStructuredOutput && req.jsonSchema) {
+        try {
+          JSON.parse(result.text);
+        } catch {
+          const invalidErr = new Error(
+            `${provider.name}/${req.model} returned unparseable JSON ` +
+              `(attempt ${attempt + 1}/${MAX_ATTEMPTS})`,
+          );
+          invalidErr.name = INVALID_JSON_OUTPUT_ERROR;
+          throw invalidErr;
+        }
       }
       return result;
     } catch (err) {

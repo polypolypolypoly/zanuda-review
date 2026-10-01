@@ -42,6 +42,22 @@ function emptyThenSuccess(empties: number): LLMProvider {
   };
 }
 
+/** Mock structured-output provider that returns truncated JSON N times. */
+function invalidJsonThenValid(invalids: number): LLMProvider {
+  let attempt = 0;
+  return {
+    name: "mock",
+    supportsStructuredOutput: true,
+    async complete(_req: CompletionRequest) {
+      if (attempt < invalids) {
+        attempt++;
+        return { text: '{"summary": "trunc', model: "test", provider: "mock" };
+      }
+      return { text: '{"ok": true}', model: "test", provider: "mock" };
+    },
+  };
+}
+
 const dummyReq: CompletionRequest = {
   system: "test",
   user: "test",
@@ -145,5 +161,18 @@ describe("completeWithRetry", () => {
 
   it("classifies empty model output as transient (retryable next tick)", () => {
     assert.equal(isTransientError({ name: "EmptyModelOutput" }), true);
+  });
+
+  it("retries truncated structured JSON and succeeds", async () => {
+    const provider = invalidJsonThenValid(2);
+    const result = await completeWithRetry(provider, {
+      ...dummyReq,
+      jsonSchema: { type: "object" },
+    });
+    assert.equal(result.text, '{"ok": true}');
+  });
+
+  it("classifies invalid structured JSON as transient", () => {
+    assert.equal(isTransientError({ name: "InvalidJsonOutput" }), true);
   });
 });

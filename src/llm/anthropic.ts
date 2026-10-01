@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { logger } from "../logger.js";
 import type {
   CompletionRequest,
   CompletionResult,
@@ -84,9 +85,17 @@ export class AnthropicProvider implements LLMProvider {
       max_tokens: req.maxTokens,
       system: req.system,
       messages: [{ role: "user", content: req.user }],
+      // claude-opus-5-5 is an adaptive-thinking model whose hidden reasoning
+      // tokens count against max_tokens; a multi-file batch can burn the whole
+      // budget thinking and return an empty/truncated body. The model rejects
+      // `thinking.type.disabled`, so pin adaptive thinking to LOW effort — the
+      // preprompt + verifyFindings pass already enforce review discipline, and
+      // this leaves max_tokens for the visible structured output.
+      thinking: { type: "adaptive", display: "omitted" },
       ...(req.jsonSchema
         ? {
             output_config: {
+              effort: "low",
               format: {
                 type: "json_schema" as const,
                 schema: sanitizeSchemaForAnthropic(req.jsonSchema) as Record<
@@ -103,6 +112,27 @@ export class AnthropicProvider implements LLMProvider {
       .filter((b): b is Anthropic.TextBlock => b.type === "text")
       .map((b) => b.text)
       .join("");
+
+    // Diagnostic: reasoning models spend output tokens on hidden thinking.
+    // When generation stops short (stop_reason !== "end_turn") the visible
+    // text is truncated, which surfaces downstream as a JSON parse failure.
+    if (res.stop_reason !== "end_turn") {
+      logger.warn(
+        {
+          model: req.model,
+          stopReason: res.stop_reason,
+          outputTokens: res.usage?.output_tokens,
+          inputTokens: res.usage?.input_tokens,
+          maxTokens: req.maxTokens,
+          textChars: text.length,
+          thinkingBlocks: res.content.filter(
+            (b) => b.type === "thinking" || b.type === "redacted_thinking",
+          ).length,
+        },
+        "Anthropic generation stopped before end_turn",
+      );
+    }
+
     return { text, model: req.model, provider: this.name };
   }
 }
