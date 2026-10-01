@@ -75,17 +75,22 @@ export function formatDiscussion(
 // Verdicts are recommendations to humans — not GitHub review actions.
 // Language reflects that Zanuda is advising, not deciding.
 const VERDICT_DISPLAY: Record<string, { icon: string; label: string }> = {
-  APPROVE: { icon: "✅", label: "recommend merging" },
-  REQUEST_CHANGES: { icon: "🛑", label: "address issues" },
-  COMMENT: { icon: "💬", label: "observations" },
+  APPROVE: { icon: "✅", label: "Recommend merging" },
+  REQUEST_CHANGES: { icon: "🛑", label: "Address issues" },
+  COMMENT: { icon: "💬", label: "Observations" },
 };
 
 // ── Review comment body builder ───────────────────────────────────────────────
 
 /**
- * Build the full review content for the progress comment.
- * This replaces "Starting review…" with the complete verdict, summary,
- * and file overview — everything the author needs in one place.
+ * Build the review body. Layout, top to bottom:
+ *
+ *   1. Status  — one small line: review complete, scope, inline count.
+ *   2. Verdict — icon + recommendation, then the model's assessment.
+ *   3. Context — collapsed: what this PR does + the changed-files table.
+ *
+ * The verdict is what the author needs; the context is reference material,
+ * so it stays folded.
  */
 export function buildReviewCommentBody(
   result: ReviewResult,
@@ -102,73 +107,76 @@ export function buildReviewCommentBody(
     round?: number;
   } = {},
 ): string {
-  // Use the engine-provided count when available — it's always accurate.
-  // Fall back to filesSummary.length for backward compatibility (CLI dry-run).
   const reviewed = opts.reviewedFiles ?? result.filesSummary.length;
   const inlineCount = result.comments.length;
+  const round = opts.round ?? 1;
 
-  // Scope line: shows how many files were described. When filesSummary is
-  // empty but the model posted inline comments we avoid "Checked 0 of N" —
-  // the model clearly examined specific files even if it skipped per-file
-  // descriptions (common in round 2, where the model focuses on re-assessing
-  // round-1 issues rather than mechanically listing every changed file).
-  let scopeLine = "";
+  // ── 1. Status ──────────────────────────────────────────────────────────────
+  const status: string[] = [
+    round >= 2 ? `Review complete (round ${round} of 2)` : "Review complete",
+  ];
+  // No scope when nothing is known — "Checked 0 of N" reads as a failure.
   if (reviewed > 0) {
-    scopeLine =
-      reviewed === totalFiles
-        ? `Checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
-        : `Checked ${reviewed} of ${totalFiles} files`;
+    status.push(
+      reviewed >= totalFiles
+        ? `checked ${totalFiles} file${totalFiles === 1 ? "" : "s"}`
+        : `checked ${reviewed} of ${totalFiles} files`,
+    );
   }
+  status.push(
+    inlineCount > 0
+      ? `${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}`
+      : "no inline comments",
+  );
+  if (opts.diffTruncated) {
+    status.push("⚠️ diff truncated (PR too large — review may be incomplete)");
+  }
+
+  // ── 2. Verdict ─────────────────────────────────────────────────────────────
   const { icon, label } = VERDICT_DISPLAY[result.action] ?? {
     icon: "💬",
-    label: "observations",
+    label: "Observations",
   };
+  const parts: string[] = [
+    `<sub>${status.join(" · ")}</sub>`,
+    "",
+    `${icon} **${label}**`,
+  ];
+  if (result.summary.trim()) parts.push("", result.summary.trim());
 
-  const truncationNote = opts.diffTruncated
-    ? " · ⚠️ diff truncated (PR too large — review may be incomplete)"
-    : "";
-
-  const parts: string[] = [];
-
-  // Scope + inline count sub-line
-  const subParts: string[] = [];
-  if (scopeLine) subParts.push(scopeLine);
-  if (inlineCount > 0)
-    subParts.push(
-      `${inlineCount} inline comment${inlineCount === 1 ? "" : "s"}`,
-    );
-  if (truncationNote) subParts.push(truncationNote);
-  if (subParts.length > 0) parts.push(`<sub>${subParts.join(" · ")}</sub>`, "");
-
-  const round = opts.round ?? 1;
-  parts.push(
-    `${icon} **Review complete**${round >= 2 ? ` (round ${round} of 2)` : ""} · ${label}`,
-  );
-
-  if (round < 2 && result.prSummary) {
-    parts.push("", `**What this PR does**`, "", result.prSummary);
+  // ── 3. Context (collapsed) ─────────────────────────────────────────────────
+  const context: string[] = [];
+  if (round < 2 && result.prSummary?.trim()) {
+    context.push("**What this PR does**", "", result.prSummary.trim());
   }
-
-  // Skip the Observations heading entirely when the model returned no summary
-  // (common in round 2 when prior issues were resolved) — an empty
-  // "**Observations**" section with no text below it looks broken.
-  if (result.summary.trim()) {
-    parts.push("", `**Observations**`, "", result.summary);
-  }
-
   if (result.filesSummary.length > 0) {
+    if (context.length > 0) context.push("");
+    context.push(
+      `**Changed files (${result.filesSummary.length})**`,
+      "",
+      "| File | Description |",
+      "| --- | --- |",
+      ...result.filesSummary.map(
+        (f) => `| ${tableCell(f.path)} | ${tableCell(f.description)} |`,
+      ),
+    );
+  }
+  if (context.length > 0) {
     parts.push(
-      ``,
-      `<details>`,
-      `<summary>Changed files (${reviewed})</summary>`,
-      ``,
-      `| File | Description |`,
-      `| --- | --- |`,
-      ...result.filesSummary.map((f) => `| ${f.path} | ${f.description} |`),
-      ``,
-      `</details>`,
+      "",
+      "<details>",
+      "<summary>Context</summary>",
+      "",
+      ...context,
+      "",
+      "</details>",
     );
   }
 
   return parts.join("\n");
+}
+
+/** Keep a model-written string inside its table cell: no pipes, no newlines. */
+function tableCell(text: string): string {
+  return text.replace(/\r?\n/g, " ").replace(/\|/g, "\\|");
 }

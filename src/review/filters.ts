@@ -355,6 +355,68 @@ export function filterResultSummaries(result: ReviewResult): string[] {
   return reasons;
 }
 
+// ── Result-level filter: thinking aloud in the summary ───────────────────────
+//
+// The summary is the first thing the author reads. tg-bot#70 shipped one where
+// the model argued with itself: "…still... actually those menu entries ARE
+// removed… (1) start.py still references /claude_stats wait—removed." A
+// summary that corrects itself mid-sentence cannot be trusted on any claim, so
+// it is replaced wholesale with a code-built one rather than patched.
+//
+// Patterns are deliberately narrow: each one is a self-correction marker that
+// does not occur in a stated conclusion.
+
+const SELF_CORRECTION_PATTERNS: RegExp[] = [
+  /(?:\.{3}|…)\s*(?:actually|wait|no|hmm|oh)\b/i, // "still... actually"
+  /\bwait\s*[—–]/i, // "wait—removed"
+  /\bwait[,.!]\s*(?:no|actually|that|those|it|this|they)\b/i,
+  /\b(?:scratch that|never ?mind|on second thought|let me re-?check)\b/i,
+  /\bactually,?\s+(?:no|never ?mind)\b/i,
+];
+
+/** True when `text` reads like the model correcting itself mid-thought. */
+export function isSelfCorrecting(text: string): boolean {
+  return SELF_CORRECTION_PATTERNS.some((p) => p.test(text));
+}
+
+/**
+ * A summary written by code from the posted findings. Used when the model's
+ * summary is unusable (self-correcting) or missing (synthesis call failed).
+ */
+export function fallbackSummary(comments: ReviewComment[]): string {
+  const blockers = comments.filter((c) => c.severity === "blocker").length;
+  const warnings = comments.length - blockers;
+  const plural = (n: number, word: string) =>
+    `${n} ${word}${n === 1 ? "" : "s"}`;
+  if (blockers > 0 && warnings > 0) {
+    return `${plural(blockers, "blocker")} and ${plural(warnings, "warning")} — see the inline comments.`;
+  }
+  if (blockers > 0)
+    return `${plural(blockers, "blocker")} — see the inline comments.`;
+  if (warnings > 0)
+    return `${plural(warnings, "warning")} — see the inline comments.`;
+  return "No issues found in the reviewed files.";
+}
+
+/**
+ * Replace a self-correcting summary with fallbackSummary, and drop a
+ * self-correcting prSummary (the context toggle omits an empty one). Mutates
+ * in place; call once the final comment set is known. Returns a reason per
+ * replaced field.
+ */
+export function filterSummarySelfCorrection(result: ReviewResult): string[] {
+  const reasons: string[] = [];
+  if (isSelfCorrecting(result.summary)) {
+    (result as { summary: string }).summary = fallbackSummary(result.comments);
+    reasons.push("summary replaced (model corrected itself mid-thought)");
+  }
+  if (result.prSummary && isSelfCorrecting(result.prSummary)) {
+    (result as { prSummary: string }).prSummary = "";
+    reasons.push("prSummary dropped (model corrected itself mid-thought)");
+  }
+  return reasons;
+}
+
 // ── Result-level filter: filesSummary paths ───────────────────────────────────
 //
 // filesSummary rows render straight into the markdown file table. Inline
@@ -378,6 +440,49 @@ export function filterFilesSummary(
       kept;
   }
   return droppedPaths;
+}
+
+// ── Result-level fixer: complete the file table ───────────────────────────────
+//
+// The model routinely skips rows in filesSummary — deleted files, lockfiles,
+// docs — even when told to list every file. The header then read "Checked 20
+// of 29 files" on a PR whose 29 files were all sent to the model (tg-bot#70).
+// Which files were reviewed is something the code knows exactly, so the table
+// is rebuilt from that set: model descriptions where present, a code-derived
+// line count otherwise. Rows for files the model never saw are dropped — it
+// cannot describe a diff it was not shown. Order follows the PR's file list.
+
+/**
+ * Rebuild filesSummary so it has exactly one row per reviewed file, in PR
+ * order. Mutates in place. Returns the paths that got a fallback description.
+ */
+export function completeFilesSummary(
+  result: ReviewResult,
+  files: ReadonlyArray<{
+    filename: string;
+    additions: number;
+    deletions: number;
+  }>,
+  reviewedPaths: ReadonlySet<string>,
+): string[] {
+  const described = new Map<string, string>();
+  for (const f of result.filesSummary) {
+    if (!described.has(f.path)) described.set(f.path, f.description);
+  }
+  const filled: string[] = [];
+  const rows: ReviewResult["filesSummary"] = [];
+  for (const f of files) {
+    if (!reviewedPaths.has(f.filename)) continue;
+    let description = described.get(f.filename);
+    if (!description?.trim()) {
+      description = `+${f.additions} −${f.deletions} lines`;
+      filled.push(f.filename);
+    }
+    rows.push({ path: f.filename, description });
+  }
+  (result as { filesSummary: ReviewResult["filesSummary"] }).filesSummary =
+    rows;
+  return filled;
 }
 
 // ── Mention replies ───────────────────────────────────────────────────────────
@@ -532,13 +637,12 @@ export function filterCommentBudget(
 // More subtly: REQUEST_CHANGES without any blocker-severity inline comments
 // is equally unjustified. A warning alone doesn't warrant blocking.
 //
-// When we downgrade, we also append a note to result.summary so the displayed
-// body never contradicts the header verdict. The model often writes "Verdict is
-// REQUEST_CHANGES" in the free-text summary — without this, the header shows
-// 💬 observations while the body says REQUEST_CHANGES.
+// The downgrade is silent on the PR: the header shows the effective verdict and
+// the reason goes to the operator log. An "(adjusted…)" note in the body is
+// pipeline internals the PR author cannot act on.
 //
 // Returns a reason string if the action was changed, null otherwise.
-// Mutates result.action (and result.summary when changed) in place.
+// Mutates result.action in place.
 
 export function filterReviewVerdict(result: ReviewResult): string | null {
   if (result.action !== "REQUEST_CHANGES") return null;
@@ -547,17 +651,11 @@ export function filterReviewVerdict(result: ReviewResult): string | null {
 
   if (result.comments.length === 0) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";
-    (result as { summary: string }).summary =
-      result.summary.trim() +
-      "\n\n_(Verdict adjusted: no inline findings — REQUEST\\_CHANGES downgraded to COMMENT.)_";
     return "REQUEST_CHANGES→COMMENT (zero inline comments — no specific issues to address)";
   }
 
   if (!hasBlocker) {
     (result as { action: ReviewResult["action"] }).action = "COMMENT";
-    (result as { summary: string }).summary =
-      result.summary.trim() +
-      "\n\n_(Verdict adjusted: all findings are warnings, none blockers — REQUEST\\_CHANGES downgraded to COMMENT.)_";
     return "REQUEST_CHANGES→COMMENT (no blocker-severity comments — warnings alone don't justify blocking)";
   }
 

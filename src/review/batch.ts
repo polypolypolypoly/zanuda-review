@@ -11,20 +11,19 @@ import type { SCMConnector, RepoRef, PullRequest } from "../platform/types.js";
 import type { LLMProvider } from "../llm/index.js";
 import type { logger } from "../logger.js";
 import {
+  completeFilesSummary,
   filterAnchorableComments,
   filterCommentBudget,
   filterFilesSummary,
   filterResultSummaries,
   filterReviewComments,
   filterReviewVerdict,
+  filterSummarySelfCorrection,
   formatFilterSummary,
 } from "./filters.js";
+import { synthesizeBatchVerdict, type BatchNote } from "./synthesize.js";
 import { buildSystemPrompt, buildBatchUserPrompt } from "./prompt.js";
-import {
-  assembleBatchDiff,
-  batchFilePaths,
-  buildValidLineMap,
-} from "./diff.js";
+import { assembleBatchDiff, buildValidLineMap } from "./diff.js";
 import { type ReviewResult, buildReviewResultJsonSchema } from "./types.js";
 import { completeWithRetry } from "../llm/retry.js";
 import { headeredFile, type HeaderedFile } from "./header.js";
@@ -136,9 +135,9 @@ export async function buildHeaderedFiles(
 /**
  * Sequential multi-batch review of a large PR.
  *
- * Each batch reviews its files in isolation with a running summary from
- * previous batches as context. The final batch produces the overall verdict.
- * All inline comments are accumulated and posted together.
+ * Each batch reviews its files in isolation. All inline comments are
+ * accumulated, filtered, and posted together; the PR-wide summary and verdict
+ * come from one synthesis call over the final findings (synthesize.ts).
  */
 export async function reviewBatched(
   pr: PullRequest,
@@ -170,7 +169,13 @@ export async function reviewBatched(
 
   const allComments: ReviewResult["comments"] = [];
   const allFilesSummary: ReviewResult["filesSummary"] = [];
-  let finalResult: ReviewResult | null = null;
+  // Each batch's own (batch-local) summary, handed to the synthesis call.
+  const batchNotes: BatchNote[] = [];
+  // Files whose diff the model actually reviewed. Batches skipped by the
+  // maxBatches cap, the token budget, or the blocker early-stop never get here.
+  const reviewedPaths = new Set<string>();
+  // Files left unreviewed, with the reason, for the honest note in the summary.
+  const unreviewed: { files: string[]; reason: string }[] = [];
 
   // ── Token budget ─────────────────────────────────────────────────
   const tokenBudget = config.limits.tokenBudgetPerPR;
@@ -187,23 +192,26 @@ export async function reviewBatched(
   // highest-signal batches by weight and note unreviewed files honestly.
   // When config.limits.maxBatches is 0, there is no limit.
   const maxBatches = config.limits.maxBatches;
-  let unreviewedFiles: string[] = [];
   let effectiveBatches = batches;
   if (maxBatches > 0 && batches.length > maxBatches) {
     const sortedBatches = [...batches].sort((a, b) => b.weight - a.weight);
     effectiveBatches = sortedBatches.slice(0, maxBatches);
     const skipped = sortedBatches.slice(maxBatches);
-    unreviewedFiles = skipped.flatMap((b) => b.files.map((f) => f.filename));
+    const skippedFiles = skipped.flatMap((b) => b.files.map((f) => f.filename));
+    unreviewed.push({ files: skippedFiles, reason: "batch limit reached" });
     log.warn(
       {
         totalBatches: batches.length,
         kept: maxBatches,
         skipped: batches.length - maxBatches,
-        unreviewedFiles: unreviewedFiles.length,
+        unreviewedFiles: skippedFiles.length,
       },
       "maxBatches limit reached — selecting highest-signal batches",
     );
   }
+
+  const filesOf = (from: number) =>
+    effectiveBatches.slice(from).flatMap((b) => b.files.map((f) => f.filename));
 
   for (let i = 0; i < effectiveBatches.length; i++) {
     const batch = effectiveBatches[i]!;
@@ -220,21 +228,7 @@ export async function reviewBatched(
         },
         "Token budget exceeded — stopping batch review",
       );
-      if (!finalResult) {
-        finalResult = {
-          prSummary: "",
-          summary: `Token budget of ${tokenBudget} exceeded after ${i} batch(es). ${effectiveBatches.length - i} batch(es) not reviewed.`,
-          action: "COMMENT",
-          filesSummary: allFilesSummary,
-          comments: allComments,
-        };
-      }
-      // Note skipped files
-      for (let j = i; j < effectiveBatches.length; j++) {
-        unreviewedFiles.push(
-          ...effectiveBatches[j]!.files.map((f) => f.filename),
-        );
-      }
+      unreviewed.push({ files: filesOf(i), reason: "token budget exhausted" });
       break;
     }
 
@@ -293,6 +287,12 @@ export async function reviewBatched(
 
     const parsed = parseReviewResult(completion.text, {
       structured: provider.supportsStructuredOutput,
+    });
+    for (const f of batch.files) reviewedPaths.add(f.filename);
+    batchNotes.push({
+      batch: i + 1,
+      files: batch.files.map((f) => f.filename),
+      summary: parsed.summary,
     });
 
     // Token budget tracking
@@ -357,18 +357,7 @@ export async function reviewBatched(
     allComments.push(...anchored.kept);
     allFilesSummary.push(...parsed.filesSummary);
 
-    if (isLast) {
-      finalResult = parsed;
-
-      // If the final batch's action is COMMENT but we have blockers from
-      // earlier batches, upgrade to REQUEST_CHANGES
-      if (
-        parsed.action === "COMMENT" &&
-        allComments.some((c) => c.severity === "blocker")
-      ) {
-        finalResult = { ...parsed, action: "REQUEST_CHANGES" };
-      }
-    } else if (allComments.some((c) => c.severity === "blocker")) {
+    if (!isLast && allComments.some((c) => c.severity === "blocker")) {
       // Early stop: blocker found, skip remaining batches
       log.info(
         {
@@ -377,54 +366,22 @@ export async function reviewBatched(
         },
         "Blocker found — skipping remaining batches",
       );
-      finalResult = {
-        prSummary:
-          parsed.prSummary ||
-          `(Partial review — stopped after batch ${i + 1} due to blockers)`,
-        summary: `Blockers found in batch ${i + 1}. Remaining ${effectiveBatches.length - i - 1} batch(es) skipped.`,
-        action: "REQUEST_CHANGES",
-        filesSummary: allFilesSummary,
-        comments: allComments,
-      };
+      unreviewed.push({
+        files: filesOf(i + 1),
+        reason: "stopped early after a blocker",
+      });
       break;
     }
   }
 
-  if (!finalResult) {
-    // Should not happen — at least one batch always runs
-    finalResult = {
-      prSummary: "",
-      summary: "No batches reviewed.",
-      action: "COMMENT",
-      filesSummary: [],
-      comments: [],
-    };
-  }
-
-  // Cap the model-written summaries before the unreviewed-files note is
-  // appended below — that note is ours and must not be trimmed away.
-  const trimmed = filterResultSummaries(finalResult);
-  if (trimmed.length > 0) log.warn(`Hard filters: ${trimmed.join("; ")}`);
-
-  // Assemble final result with all accumulated data
+  // Assemble the result from what the batches produced. Summary, prSummary and
+  // verdict come from the synthesis call below, once the findings are final.
   const result: ReviewResult = {
-    ...finalResult,
+    prSummary: "",
+    summary: "",
+    action: "COMMENT",
     filesSummary: deduplicateFilesSummary(allFilesSummary),
     comments: deduplicateComments(allComments),
-    // Append unreviewed files note when MAX_BATCHES exceeded
-    summary:
-      unreviewedFiles.length > 0
-        ? finalResult.summary +
-          `\n\n⚠️ **${unreviewedFiles.length} file(s) were NOT reviewed** ` +
-          `(batch limit reached). The following were excluded:\n` +
-          unreviewedFiles
-            .slice(0, 20)
-            .map((f) => `- \`${f}\``)
-            .join("\n") +
-          (unreviewedFiles.length > 20
-            ? `\n- ... and ${unreviewedFiles.length - 20} more`
-            : "")
-        : finalResult.summary,
   };
 
   // ── Hard output filters (non-LLM) ───────────────────────────────────────
@@ -441,6 +398,13 @@ export async function reviewBatched(
     log.warn(
       { paths: fabricatedPaths },
       "Batch: dropped filesSummary rows for paths not in the PR",
+    );
+  }
+  const undescribed = completeFilesSummary(result, pr.files, reviewedPaths);
+  if (undescribed.length > 0) {
+    log.info(
+      { paths: undescribed },
+      "Batch: filesSummary missing rows for reviewed files - filled from diff stats",
     );
   }
 
@@ -462,9 +426,49 @@ export async function reviewBatched(
   }
   result.comments = budgeted.kept;
 
-  // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
-  // Mutates result.action in place — the same object reference flows to
-  // buildReviewCommentBody and postReview below.
+  // ── Synthesis: one PR-wide verdict from the final findings ──────────────
+  // Runs regardless of the token budget: it carries no diff, and a review
+  // without a summary is worse than a few K tokens over budget.
+  const unreviewedFiles = unreviewed.flatMap((u) => u.files);
+  const synthesis = await synthesizeBatchVerdict(
+    {
+      title: pr.title,
+      body: pr.body,
+      round,
+      discussion,
+      totalFiles: pr.changedFiles.length,
+      filesSummary: result.filesSummary,
+      unreviewedFiles,
+      findings: result.comments,
+      batchNotes,
+    },
+    config,
+    provider,
+    log,
+  );
+  Object.assign(result, synthesis);
+
+  // Cap and sanity-check the model-written summaries before the
+  // unreviewed-files note is appended below — that note is ours.
+  const trimmed = filterResultSummaries(result);
+  if (trimmed.length > 0) log.warn(`Hard filters: ${trimmed.join("; ")}`);
+  const replaced = filterSummarySelfCorrection(result);
+  if (replaced.length > 0) log.warn(`Hard filters: ${replaced.join("; ")}`);
+
+  if (unreviewedFiles.length > 0) {
+    result.summary +=
+      `\n\n⚠️ **${unreviewedFiles.length} file(s) were NOT reviewed** ` +
+      `(${unreviewed.map((u) => u.reason).join("; ")}):\n` +
+      unreviewedFiles
+        .slice(0, 20)
+        .map((f) => `- \`${f}\``)
+        .join("\n") +
+      (unreviewedFiles.length > 20
+        ? `\n- ... and ${unreviewedFiles.length - 20} more`
+        : "");
+  }
+
+  // Verdict consistency — synthesis already clamps, this is the shared gate.
   const verdictReason = filterReviewVerdict(result);
   if (verdictReason) {
     log.warn(`Verdict adjusted: ${verdictReason}`);
@@ -504,21 +508,12 @@ export async function reviewBatched(
   }
 
   if (!dryRun) {
-    // Collect all visible file paths across all batches
-    const allVisiblePaths = new Set<string>();
-    for (const batch of batches) {
-      const batchDiff = assembleBatchDiff(batch.files);
-      for (const p of batchFilePaths(batchDiff)) {
-        allVisiblePaths.add(p);
-      }
-    }
-
     // Post the review event FIRST (summary lives in its body), then delete the
     // transient placeholder. Same ordering as the single-batch engine path:
     // if postReview fails the placeholder survives for the failSafe to edit
     // into an error; on success there is one canonical summary, no duplicate.
     await deps.connector.postReview(pr, result, config, {
-      visibleFilePaths: allVisiblePaths,
+      visibleFilePaths: reviewedPaths,
     });
     if (startingCommentId !== null) {
       try {

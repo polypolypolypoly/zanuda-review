@@ -26,12 +26,14 @@ import type { SCMConnector, RepoRef } from "../platform/types.js";
 import { createProvider, type LLMProvider } from "../llm/index.js";
 import { logger } from "../logger.js";
 import {
+  completeFilesSummary,
   filterAnchorableComments,
   filterCommentBudget,
   filterFilesSummary,
   filterResultSummaries,
   filterReviewComments,
   filterReviewVerdict,
+  filterSummarySelfCorrection,
   formatFilterSummary,
 } from "./filters.js";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt.js";
@@ -440,6 +442,17 @@ export async function reviewPullRequest(
         "Dropped filesSummary rows for paths not in the PR",
       );
     }
+    const undescribed = completeFilesSummary(
+      result,
+      pr.files,
+      includedPaths(promptDiff),
+    );
+    if (undescribed.length > 0) {
+      log.info(
+        { paths: undescribed },
+        "filesSummary missing rows for reviewed files - filled from diff stats",
+      );
+    }
 
     // ── Anchor validation (non-LLM) ─────────────────────────────────────────
     // The model generates line numbers from the diff text it was shown. We have
@@ -482,6 +495,11 @@ export async function reviewPullRequest(
       );
     }
     result.comments = budgeted.kept;
+
+    // A summary that argues with itself is replaced by a code-built one
+    // from the final comment set (hence after every comment filter).
+    const replaced = filterSummarySelfCorrection(result);
+    if (replaced.length > 0) log.warn(`Hard filters: ${replaced.join("; ")}`);
 
     // Verdict consistency: REQUEST_CHANGES needs a blocker, APPROVE forbids one.
     // Mutates result.action in place — the same object reference flows to

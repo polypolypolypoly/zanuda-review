@@ -862,7 +862,7 @@ describe("buildReviewCommentBody", () => {
   it("formats APPROVE with correct icon and recommendation label", () => {
     const text = buildReviewCommentBody(makeResult("APPROVE", "Ship it."), 1);
     assert.ok(text.includes("✅"));
-    assert.ok(text.includes("recommend merging"));
+    assert.ok(text.includes("Recommend merging"));
     assert.ok(text.includes("Ship it."));
   });
 
@@ -872,12 +872,12 @@ describe("buildReviewCommentBody", () => {
       2,
     );
     assert.ok(text.includes("🛑"));
-    assert.ok(text.includes("address issues"));
+    assert.ok(text.includes("Address issues"));
   });
 
   it("includes checked files scope", () => {
     const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 5);
-    assert.ok(text.includes("Checked 1 of 5 files"));
+    assert.ok(text.includes("checked 1 of 5 files"));
   });
 
   it("includes inline comment count when non-zero", () => {
@@ -967,11 +967,55 @@ describe("buildReviewCommentBody", () => {
     assert.ok(!text.includes("(round "));
   });
 
-  it("round 2 still renders Observations section even without prSummary", () => {
+  it("round 2 still renders the verdict and summary even without prSummary", () => {
     const text = buildReviewCommentBody(makeResult("COMMENT", "All good."), 1, {
       round: 2,
     });
     assert.ok(text.includes("**Observations**"));
     assert.ok(text.includes("All good."));
+  });
+
+  // ── Layout: status → verdict → collapsed context ────────────────────────────
+
+  it("orders status, verdict, then context with everything else collapsed", () => {
+    const result = {
+      ...makeResult("COMMENT", "One race in the cache."),
+      prSummary: "Adds a cache.",
+    };
+    const text = buildReviewCommentBody(result, 1);
+    const statusIdx = text.indexOf("Review complete");
+    const verdictIdx = text.indexOf("💬 **Observations**");
+    const summaryIdx = text.indexOf("One race in the cache.");
+    const detailsIdx = text.indexOf("<details>");
+    assert.ok(statusIdx === text.indexOf("<sub>") + "<sub>".length);
+    assert.ok(statusIdx < verdictIdx, "status before verdict");
+    assert.ok(verdictIdx < summaryIdx, "verdict label before assessment");
+    assert.ok(summaryIdx < detailsIdx, "assessment before context");
+    // Both context sections sit inside the toggle.
+    const closeIdx = text.indexOf("</details>");
+    for (const marker of ["What this PR does", "Changed files (1)"]) {
+      const idx = text.indexOf(marker);
+      assert.ok(idx > detailsIdx && idx < closeIdx, `${marker} inside toggle`);
+    }
+  });
+
+  it("says 'no inline comments' when there are none", () => {
+    const text = buildReviewCommentBody(makeResult("APPROVE", "ok"), 1);
+    assert.ok(text.includes("no inline comments"));
+  });
+
+  it("omits the toggle when there is no context to show", () => {
+    const result = { ...makeResult("COMMENT", "ok"), filesSummary: [] };
+    assert.ok(!buildReviewCommentBody(result, 1).includes("<details>"));
+  });
+
+  it("escapes pipes and newlines so a description cannot break the table", () => {
+    const result = {
+      ...makeResult("APPROVE", "ok"),
+      filesSummary: [{ path: "a.ts", description: "x | y\n| z | w |" }],
+    };
+    const text = buildReviewCommentBody(result, 1);
+    const row = text.split("\n").find((l) => l.startsWith("| a.ts"));
+    assert.equal(row, "| a.ts | x \\| y \\| z \\| w \\| |");
   });
 });
