@@ -18,17 +18,24 @@ import { logger } from "../logger.js";
  * The configured maxTokens acts as a hard ceiling. If `providerMaxOutput`
  * is provided (from LLMProvider.maxOutputTokens), it acts as an additional
  * ceiling — prevents 400s from providers with small output windows (Ollama).
+ *
+ * The floor is deliberately generous: a cap costs nothing when the model
+ * stays under it, but a cap that is too tight makes Anthropic's structured
+ * output mode return an EMPTY body instead of a truncated one (it never emits
+ * invalid JSON), which surfaces downstream as "Unexpected end of JSON input".
+ * A multi-file batch with real findings (up to maxCommentsPerReview ×
+ * maxCommentChars) easily exceeds 1500 tokens — the old floor wedged such PRs.
  */
 export function adaptiveMaxTokens(
   fileCount: number,
   configuredMax: number,
   providerMaxOutput?: number,
 ): number {
-  const estimated = fileCount * 240 + 400;
+  const estimated = fileCount * 400 + 800;
   const ceiling = providerMaxOutput
     ? Math.min(configuredMax, providerMaxOutput)
     : configuredMax;
-  return Math.min(ceiling, Math.max(1500, estimated));
+  return Math.min(ceiling, Math.max(4000, estimated));
 }
 
 /**
